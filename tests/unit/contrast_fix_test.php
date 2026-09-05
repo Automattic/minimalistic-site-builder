@@ -662,3 +662,15 @@ test('a gallery caption is the gallery tail, not a child image caption', functio
     assert_contains('gallery caption', $res['findings'][0]['detail']);
     assert_contains('wp:gallery {"linkTo":"none","className":"caption-text-base"}', $res['markup']);
 });
+
+test('a details summary is checked even though its answer paragraphs carry text (frm W3b)', function () {
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:details --><details class="wp-block-details">'
+        . '<summary>How long does it take?</summary>'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p>About a week.</p><!-- /wp:paragraph -->'
+        . '</details><!-- /wp:details --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('<!-- wp:details {"textColor":"base"} -->', $res['markup'], 'summary repair lands on the details block');
+});

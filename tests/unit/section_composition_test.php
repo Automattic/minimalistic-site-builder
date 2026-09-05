@@ -549,3 +549,32 @@ test('the bento-grid archetype checks two unequal card rows and one highlight (f
         !str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'bento'),
     );
 });
+
+test('the faq-split archetype requires an accordion of three or more details blocks (frm W3b)', function () {
+    assert_true(in_array('faq-split', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('faq-split');
+    assert_eq('section-compositions/faq-split.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_true(!in_array('image', $meta['backgrounds'], true), 'an accordion never sits on an image band');
+
+    $item = static fn (string $q): string => '<!-- wp:details --><details class="wp-block-details"><summary>' . $q . '</summary>'
+        . '<!-- wp:paragraph --><p>Answer.</p><!-- /wp:paragraph --></details><!-- /wp:details -->';
+    $band = static fn (string $items): string => '<!-- wp:group {"className":"section-composition--faq-split","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--faq-split">'
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column"><!-- wp:heading --><h2 class="wp-block-heading">Questions</h2><!-- /wp:heading --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column"><!-- wp:group {"className":"faq-list"} --><div class="wp-block-group faq-list">'
+        . $items . '</div><!-- /wp:group --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+
+    $good = $band($item('One?') . $item('Two?') . $item('Three?'));
+    assert_eq([], SectionComposition::markupWarnings($good, 'faq-split', 'page-home--faq'));
+
+    $thin = $band($item('One?') . $item('Two?'));
+    $joined = implode("\n", SectionComposition::markupWarnings($thin, 'faq-split', 'page-home--faq'));
+    assert_contains('faq accordion items', $joined);
+    assert_contains('"details_block_count":2', $joined);
+
+    $plain = str_replace('section-composition--faq-split', 'section-composition--asymmetric-split', $thin);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'faq'));
+});

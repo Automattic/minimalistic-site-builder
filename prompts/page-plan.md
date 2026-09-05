@@ -36,7 +36,7 @@ Return a single JSON object with this exact shape:
       "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
-      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid",
+      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid, faq-split",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
       "item_pattern": null,
@@ -69,6 +69,7 @@ Layout archetypes (pick the one that best serves each section's content):
 - offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the DESIGN DIRECTION's rhythm is `offset` or `gallery`. Under every other rhythm, pick a level row (equal-card-grid, asymmetric-split, or list-with-thumbnails) instead of offsetting sibling tops.
 - equal-card-grid — the classic equal-height card row
 - list-with-thumbnails — stacked rows, each a small image beside text
+- faq-split — a two-region split: the leading region holds the heading, one lead line and at most one action; the trailing region is a native accordion of three to seven questions, each a collapsible item with its answer. For FAQ, "questions", objections and policy sections. Never plan the questions as paragraphs or a list.
 - bento-grid — two card rows of unequal count (2 cards then 3, or 3 then 2) with exactly ONE card inverted as the highlight; for a set of four to six capabilities, features, proof points or awards that the brief wants scanned as tiles. Never for a flat set of equals (that is equal-card-grid) and never for long copy.
 
 Section structure and types:

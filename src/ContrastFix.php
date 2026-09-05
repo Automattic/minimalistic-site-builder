@@ -246,6 +246,24 @@ final class ContrastFix
                 'link'      => $linkCtx,
                 'hover'     => $hoverCtx,
             ];
+        } elseif ($name === 'details'
+            && preg_match('/<summary\b[^>]*>(.*?)<\/summary>/is', $this->doc->innerHtml($i), $summary)
+            && self::visibleText($summary[1]) !== '') {
+            // The accordion's question lives in the block's own <summary>;
+            // its answer paragraphs speak for themselves as children.
+            $this->texts[] = [
+                'index'     => $i,
+                'name'      => $name,
+                'fg'        => $textCtx,
+                'bg'        => $bgColors,
+                'bgLabel'   => $bgLabel,
+                'provider'  => $bgProvider,
+                'threshold' => $this->normalText,
+                'hasText'   => true,
+                'hasAnchor' => stripos($summary[1], '<a ') !== false,
+                'link'      => $linkCtx,
+                'hover'     => $hoverCtx,
+            ];
         } elseif (in_array($name, ['quote', 'pullquote'], true)
             && preg_match('/<cite\b[^>]*>(.*?)<\/cite>/is', $this->doc->innerHtml($i), $cite)
             && self::visibleText($cite[1]) !== '') {
