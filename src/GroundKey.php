@@ -21,6 +21,16 @@ final class GroundKey
     private const CLEARANCE = 0.02;
 
     /**
+     * Where a moved page ground lands (frm PR-4h). Crossing the boundary by
+     * the clearance alone put a "white page" brief on #949596: a mid grey
+     * that classifies as light and reads as neither. A page ground that has
+     * to move lands where pages live: near-white or near-black, in the
+     * authored hue.
+     */
+    public const PAGE_LIGHT_LUMINANCE = 0.82;
+    public const PAGE_DARK_LUMINANCE = 0.03;
+
+    /**
      * The ground a brief states in so many words, or null when it is silent
      * (frm PR-4g). A bounded phrase list, not a category matcher: these are
      * the client's own instructions about the page ground, and a seed or a
@@ -80,9 +90,7 @@ final class GroundKey
             return self::toHex($rgb);
         }
 
-        $target = $key === 'dark'
-            ? self::DARK_THRESHOLD - self::CLEARANCE
-            : self::DARK_THRESHOLD + self::CLEARANCE;
+        $target = $key === 'dark' ? self::PAGE_DARK_LUMINANCE : self::PAGE_LIGHT_LUMINANCE;
         $extreme = $key === 'dark' ? [0, 0, 0] : [255, 255, 255];
         $lo = 0.0;
         $hi = 1.0;
