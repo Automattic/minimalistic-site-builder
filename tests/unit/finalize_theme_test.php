@@ -737,3 +737,30 @@ test('finalize-theme tunes the overlay to a dark page base', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships the heading-emphasis kit and prunes it for none (frm W5a)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'heading_emphasis' => 'two-tone']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('.wp-block-heading .emph', $project->readText('theme/assets/emphasis/emphasis.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-emphasis', get_theme_file_uri('assets/emphasis/emphasis.css'), "
+            . "array('forno-vero-style'), \$ver);",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/emphasis/emphasis.css'));", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'heading_emphasis' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/emphasis/emphasis.css'), 'stale emphasis kit pruned');
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-emphasis'), 'stale emphasis enqueue pruned');
+    assert_contains("add_editor_style('style.css');", $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
