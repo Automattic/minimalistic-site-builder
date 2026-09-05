@@ -96,7 +96,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-3e: `feature-row-hairlines`, `stat-ledger`, `statement-lines` (hairline structure family).
 - PR-3f: `sticky-split-tabs` (reuse `sticky-side`).
 - PR-3g: `zigzag-steps` (depends on W6 numerals).
-- PR-3h: `project-grid-2x2` + `logo-strip`.
+- PR-3h: `project-grid-2x2` (cover tiles, name + meta line over the image; needs images).
+- PR-3h2: `logo-strip` as a row of text wordmarks in muted ink; never generated logo images, because a painted wordmark is the text-in-image defect (BIGR-768) by construction.
 - PR-3i: `newsletter-columns` footer composition; verify `sunken-wordmark` renders like the references.
 
 ### W4 — Surface, shape, depth
@@ -252,6 +253,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 47 | #494 | W3i | Add the newsletter-columns footer composition (frm) | merged | gist be85d75369233a1ae9a2d1afb373756a: zova-like12-3i with the footer pinned, invitation row + three link columns + credit; mobile 390 | (see git) |
 | 48 | #495 | W2 (PR-2g) | Let a hero the brief states outrank the stable recipe pick (frm) | merged | direction reruns: zova-like12-2g panel-stage (was marquee-name), spector-like8-2g cinematic-safe-zone (was foreground-split); no full build | (see git) |
 | 49 | #496 | W1 (PR-1h) | Let a header the brief states outrank the register pool (frm) | merged | gist c6575475fd76dab8140220132ec4680b: cohesion-like12-1h sections rerun, floating-pill under a brutalist seed (was spread-nav), pill over the marquee hero | (see git) |
+| 50 | #497 | W7 (PR-7b) | Frame ui-mockup pictures as product windows (frm) | merged | gist 38535821577b2f1c68ccca1d618d15b7: zova-like13 with images through the SOCKS tunnel (5/5 OK, QA 4/4 clean); before = first kit (portrait framed, 4 tilts), after = portrait exempt + one tilt; desktop + 390 | c3b2429d |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -307,6 +309,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 50: PR-2g on `frm/stated-hero`: `HeroComposition::statedInBrief` phrase list + `selectHeroRecipe` reads original_prompt then prompt and commits the stated recipe inside the caller constraints (repair recorded when the pick changes; HERO_RECIPE still first). Direction reruns on zova and spector copies land on the briefed heroes. Merged as #495.
 - 2026-09-05 turn 51: PR-2g #495 merged. PR-1h on `frm/stated-header`: `AboveFoldContract::statedInBrief`/`statedHeaderFor` phrase list, a `stated_header` in the site context that wins between the operator override and the register pool when the opening can carry it; both sections call sites pass it. cohesion-like12-1h rerun drew the pill. Merged as #496.
 - 2026-09-05 turn 52: PR-1h #496 merged. Backlog state: every row is merged, parked, or waiting on the image proxy (W3h project grid + logo strip, W2c metadata-corners, W2d portrait-backdrop, W7b ui-mockup frame, W7c floating objects). W3f parked below. The loop now polls the proxy on a long cadence and resumes the image rows when it answers.
+- 2026-09-05 turn 53: image proxy back: public-api.wordpress.com is unreachable from this network directly, but the SOCKS tunnel on 127.0.0.1:8080 reaches it; image commands now run with `https_proxy=socks5h://127.0.0.1:8080` and `no_proxy=api.anthropic.com` (the transparent redsocks route in ~/.config/proxya8c/transparent-up.sh needs sudo, left to the maintainer). W7b #497 merged: screen kit for `ui-mockup` (window frame on the image role hooks, one `screen-frame--tilt` per page by a document-order rule, portraits exempt via images.json, every ui-mockup picture goes through vision QA with a placeholder-bars-are-shapes rule). Evidence zova-like13: the first kit framed the testimonial portrait and tilted four screens; fixed in the same PR. zova fidelity 3 -> 3.5 on that build. PR-3h split: the logo strip becomes PR-3h2 as text wordmarks. Next: PR-3h project-grid-2x2 on spector-like.
 
 ## 10. Parked / rejected
 
