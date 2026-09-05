@@ -49,6 +49,118 @@ final class SectionComposition
         'logo-strip',
     ];
 
+    /**
+     * Bounded phrases a brief uses to ask for one highlighted card in a row
+     * (frm PR-3s): "three service cards with one highlighted in violet".
+     * Bento and pricing rows carry the highlight by construction; an
+     * equal-card-grid gets it only when the brief says so.
+     *
+     * @var list<string>
+     */
+    private const STATED_HIGHLIGHT_PHRASES = [
+        'one highlighted', 'one card highlighted', 'one highlighted card', 'highlighted card', 'highlight card',
+        'one inverted card', 'one card inverted', 'one featured card', 'one card featured', 'one accent card',
+    ];
+
+    /** Words that name a pricing row, whose highlight the pricing-tiers archetype already carries. */
+    private const PRICING_WORDS = '/\\b(?:pricing|prices?|plans?|tiers?|subscriptions?)\\b/u';
+
+    /**
+     * The clause of a brief that asks for one highlighted card, or null: the
+     * comma-separated item that holds the phrase ("three service cards with
+     * one highlighted in violet"). A clause about a pricing row is skipped:
+     * pricing-tiers inverts its recommended plan by construction.
+     */
+    public static function statedHighlight(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (preg_split('/[,.;:]/u', $text) ?: [] as $clause) {
+            $clause = trim($clause);
+            if ($clause === '' || preg_match(self::PRICING_WORDS, $clause) === 1) {
+                continue;
+            }
+            foreach (self::STATED_HIGHLIGHT_PHRASES as $phrase) {
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $clause) === 1) {
+                    return $clause;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The stated highlight clause from a build's meta, the user's own words
+     * first and the refined brief second, or null.
+     *
+     * @param array<string,mixed> $meta
+     */
+    public static function statedHighlightFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $clause = self::statedHighlight($text);
+            if ($clause !== null) {
+                return $clause;
+            }
+        }
+        return null;
+    }
+
+    /** Words of the clause that never name a section: counts, colours and the device itself. */
+    private const HIGHLIGHT_STOPWORDS = [
+        'one', 'two', 'three', 'four', 'five', 'six', 'with', 'and', 'the', 'card', 'cards', 'highlighted',
+        'highlight', 'highlights', 'inverted', 'featured', 'accent', 'violet', 'purple', 'blue', 'green', 'red',
+        'orange', 'yellow', 'pink', 'black', 'white', 'dark', 'light', 'row', 'grid', 'large', 'small', 'each',
+    ];
+
+    /**
+     * Whether a stated highlight clause is about THIS section: the clause and
+     * the section's slug, title or type share a word stem of four letters or
+     * more ("service cards" reaches the services row, not the work grid).
+     *
+     * @param array<string,mixed> $section
+     */
+    public static function highlightAppliesTo(?string $clause, array $section): bool
+    {
+        if ($clause === null || trim($clause) === '') {
+            return false;
+        }
+        $stems = [];
+        foreach (preg_split('/[^\\p{L}]+/u', mb_strtolower($clause, 'UTF-8')) ?: [] as $word) {
+            if (mb_strlen($word, 'UTF-8') >= 4 && !in_array($word, self::HIGHLIGHT_STOPWORDS, true)) {
+                $stems[] = mb_substr($word, 0, 4, 'UTF-8');
+            }
+        }
+        if ($stems === []) {
+            return false;
+        }
+        $haystack = mb_strtolower(implode(' ', array_map(
+            static fn (string $key): string => (string) ($section[$key] ?? ''),
+            ['slug', 'title', 'type', 'purpose'],
+        )), 'UTF-8');
+        foreach (preg_split('/[^\\p{L}]+/u', $haystack) ?: [] as $word) {
+            if (mb_strlen($word, 'UTF-8') >= 4 && in_array(mb_substr($word, 0, 4, 'UTF-8'), $stems, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The authoring instruction for a stated highlight on an equal-card-grid, or ''. */
+    public static function highlightDirective(string $archetype, bool $statedHighlight): string
+    {
+        if ($archetype !== 'equal-card-grid' || !$statedHighlight) {
+            return '';
+        }
+        return '- Highlight (the brief asks for one highlighted card): exactly ONE card group adds'
+            . ' `"className":"' . self::BENTO_HIGHLIGHT_CLASS . '"` to its card marker classes and paints its'
+            . ' surface with `"backgroundColor":"accent"` and `"textColor":"base"`; every other card keeps the'
+            . ' band surface. Never two highlights, never none.';
+    }
+
     /** The wordmark counts a logo-strip row may carry (frm PR-3h2). */
     public const LOGO_STRIP_COUNTS = [4, 5, 6, 7, 8];
 
@@ -121,7 +233,7 @@ final class SectionComposition
      *
      * @var list<string>
      */
-    public const RECIPE_VARS = ['pin_directive'];
+    public const RECIPE_VARS = ['pin_directive', 'highlight_directive'];
 
     /**
      * How many more images one region may hold than its sibling before the row
@@ -546,9 +658,12 @@ final class SectionComposition
      *
      * @return array<string,string>
      */
-    public static function recipeVars(string $archetype, ?string $itemPattern): array
+    public static function recipeVars(string $archetype, ?string $itemPattern, bool $statedHighlight = false): array
     {
-        return ['pin_directive' => self::pinDirective($archetype, $itemPattern)];
+        return [
+            'pin_directive' => self::pinDirective($archetype, $itemPattern),
+            'highlight_directive' => self::highlightDirective($archetype, $statedHighlight),
+        ];
     }
 
     /**
@@ -722,6 +837,7 @@ TEXT;
         string $archetype,
         string $part,
         ?string $itemPattern = null,
+        bool $statedHighlight = false,
     ): array {
         self::assertKnown($archetype);
         $meta = self::metadata($archetype);
@@ -1080,6 +1196,24 @@ TEXT;
                     ['archetype' => $archetype, 'headings_per_tile' => 1],
                     ['headings_per_tile' => $tiles],
                     'safe parseable section was retained; every tile names its project with exactly one heading',
+                );
+            }
+        }
+
+        if ($archetype === 'equal-card-grid' && $statedHighlight) {
+            $highlights = 0;
+            foreach ($document->indices() as $index) {
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stated highlight',
+                    ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_cards' => $highlights],
+                    'safe parseable section was retained; the brief asks for exactly one highlighted card in the row',
                 );
             }
         }

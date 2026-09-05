@@ -101,7 +101,14 @@ final class SectionUnit extends AbstractPageSectionUnit
             // and never reads a word about it.
             'composition_recipe' => $this->renderer->render(
                 SectionComposition::recipeTemplate($archetype),
-                SectionComposition::recipeVars($archetype, $itemPattern),
+                SectionComposition::recipeVars(
+                    $archetype,
+                    $itemPattern,
+                    SectionComposition::highlightAppliesTo(
+                        is_string($input['stated_highlight'] ?? null) ? $input['stated_highlight'] : null,
+                        $section,
+                    ),
+                ),
             ),
         ]);
 
@@ -250,6 +257,10 @@ final class SectionUnit extends AbstractPageSectionUnit
                     $archetype,
                     $this->key($input),
                     $itemPattern,
+                    SectionComposition::highlightAppliesTo(
+                        is_string($input['stated_highlight'] ?? null) ? $input['stated_highlight'] : null,
+                        is_array($input['section'] ?? null) ? $input['section'] : [],
+                    ),
                 ),
             );
         }
