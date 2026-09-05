@@ -730,16 +730,20 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $project->readText('siteSpec.json'),
             DesignDirectionStep::readFor($project),
         );
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
         // A footer the brief states in so many words outranks the hash pick
         // (frm PR-3r), the way stated ground, hero and header already do.
-        $statedFooter = FooterComposition::statedArchetypeFor(
-            $project->exists('meta.json') ? $project->readJson('meta.json') : [],
-        );
+        $statedFooter = FooterComposition::statedArchetypeFor($meta);
         if ($statedFooter !== null && $statedFooter !== $footerArchetype) {
             $warnings[] = "file='pages.json'; path=\"footer_archetype\"; authored=\"{$footerArchetype}\" (stable pick); "
                 . "delivered=\"{$statedFooter}\"; disposition=the brief names its footer, so the stable pick yields to it";
             $footerArchetype = $statedFooter;
         }
+        // A cover band right after the hero opens the page on two stages
+        // (frm PR-3t): zova-like16 planned a full-bleed-cover as the first
+        // section after a panel-stage hero. The slot keeps a level row unless
+        // the brief asks for a cover band in so many words.
+        $out = self::withCoverOffTheSlotAfterHero($out, self::statedCoverBandFor($meta), $warnings);
         $out = self::withClosingBandOffFooterSurface(
             $out,
             FooterComposition::surface($footerArchetype),
@@ -751,6 +755,134 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'pages' => $out,
             'footer_archetype' => $footerArchetype,
         ]);
+    }
+
+    /**
+     * Bounded phrases a brief uses to ask for a cover band below the hero
+     * (frm PR-3t), read as whole words inside one clause. A clause about the
+     * hero itself is skipped: "a dark hero with a full-bleed portrait" states
+     * the hero, not a second stage below it.
+     *
+     * @var list<string>
+     */
+    private const STATED_COVER_BAND_PHRASES = [
+        'full-bleed cover', 'full bleed cover', 'cover band', 'cover section', 'full-bleed band',
+        'full-bleed photo band', 'full-bleed image band', 'full-bleed photo section', 'full-bleed image section',
+        'edge-to-edge photo band', 'edge-to-edge image band', 'photo band', 'image band',
+    ];
+
+    /** Archetypes that plan no image; a demoted cover was image-led, so its slot keeps a media-capable row. */
+    private const NO_IMAGE_ARCHETYPES = ['statement-lines', 'feature-row-hairlines', 'stat-ledger', 'faq-split'];
+
+    /** Whether a brief asks for a cover band below the hero in so many words. */
+    public static function statedCoverBand(string $brief): bool
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (preg_split('/[,.;:]/u', $text) ?: [] as $clause) {
+            if (preg_match('/(?<![\p{L}-])hero(?![\p{L}-])/u', $clause) === 1) {
+                continue;
+            }
+            foreach (self::STATED_COVER_BAND_PHRASES as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $clause) === 1) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The stated cover band from a build's meta, the user's own words first
+     * and the refined brief second.
+     *
+     * @param array<string,mixed> $meta
+     */
+    public static function statedCoverBandFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedCoverBand($text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Keep a cover band off the front page's slot right after the hero (frm
+     * PR-3t). The hero is the page's one stage; a full-bleed-cover directly
+     * below it opens the page on two stages. The slot takes the first level
+     * row clear of both neighbours that can still carry the section's media,
+     * and its 'image' surface, which normalize() forced for the cover, goes
+     * back to 'base'. A brief that asks for a cover band keeps it. Interior
+     * pages already refuse a cover in their opening slot. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withCoverOffTheSlotAfterHero(
+        array $pages,
+        bool $statedCoverBand,
+        array &$warnings = [],
+    ): array {
+        if ($statedCoverBand) {
+            return $pages;
+        }
+        foreach ($pages as $index => $page) {
+            if (empty($page['front'])) {
+                continue;
+            }
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            if (count($keys) < 2 || !is_array($sections[$keys[1]])) {
+                continue;
+            }
+            $slotKey = $keys[1];
+            $slot = $sections[$slotKey];
+            if (trim((string) ($slot['layout_archetype'] ?? '')) !== 'full-bleed-cover') {
+                continue;
+            }
+            $archetypes = array_map(
+                static fn ($section): string => is_array($section) ? trim((string) ($section['layout_archetype'] ?? '')) : '',
+                array_values($sections),
+            );
+            $replacement = self::pickArchetype($archetypes, 1, false, 'full-bleed-cover', ...self::NO_IMAGE_ARCHETYPES);
+            if ($replacement === 'full-bleed-cover') {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$slotKey]['layout_archetype'] = $replacement;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, 1) . '.layout_archetype',
+                'full-bleed-cover',
+                $replacement,
+                'a cover band right after the hero opens the page on two stages; the brief names no cover band, '
+                    . 'so the slot keeps a level row',
+            );
+            $correction = 'this section is now a "' . $replacement . '"';
+            if (($slot['background'] ?? null) === 'image') {
+                $sections[$slotKey]['background'] = 'base';
+                $correction .= ' on the "base" surface';
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($slug, 1) . '.background',
+                    'image',
+                    'base',
+                    'the cover this surface was forced for is gone; an image-led band would still have read as a '
+                        . 'second stage below the hero',
+                );
+            }
+            $sections[$slotKey]['handoff'] = self::withSeamCorrection(
+                $slot['handoff'] ?? '',
+                $correction . ', not a cover band, so the hero above stays the page\'s one stage; this supersedes '
+                    . 'any archetype or background named earlier in this line',
+            );
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
     }
 
     /**
