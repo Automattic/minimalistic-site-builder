@@ -295,6 +295,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 65 | #512 | W7 (PR-7e) | Rename a floating object authored as .jpg to the .png the key-out needs (frm) | merged | gist 5e5c0d00215ea1336de6812eea845b7c: cohesion-like15 hero before (four white JPG plates) / after (the rows regenerated through the .png path as cutouts); cohort-4 mobile sheet | 134f5ff8 |
 | 66 | #513 | W4 (PR-4k) | Bound the color-field footer panel to the contrast surface (frm) | merged | gist 54279aa71440a41d628e7c29a6ecb3bc: dreammotion-like14 footer before (yellow primary slab) / after (contrast panel, base ink; the helper applied to the built footer part) | 2b7e48d9 |
 | 67 | #514 | W7 (PR-7f) | Inspect every hero-part picture with the vision check (frm) | merged | gate replay on the cohort-4 image rows: one more picture per site (cohesion's avatar plate, zova's hero dashboard, the three hero covers), the .png objects stay out; no build | 49463bd4 |
+| 68 | #515 | W3 (PR-3r) | Let a footer the brief states outrank the hash pick (frm) | merged | reader replay on the cohort-4 briefs (cohesion and spector -> sunken-wordmark, zova -> newsletter-columns, two silent); page-plan rerun on a cohesion copy persisted sunken-wordmark with the yield note; no build | 0156a9aa |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -370,6 +371,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 70: PR-7e #512 merged (the hero boundary renames object sources to .png). Next: PR-4k on branch frm/color-field-panel: the color-field footer panel is bounded to contrast (the fragment offered primary or accent; dreammotion-like14 closed on a yellow slab). PR-7f drafted (QA inspects every hero-part image).
 - 2026-09-05 turn 71: PR-4k #513 merged (the color-field panel is bounded to contrast). Next: PR-7f on branch frm/hero-part-qa: the vision QA inspects every image whose sources include a hero part, whatever its filename (cohesion-like15's avatar plate shipped as a painted letter block). PR-3r (stated footer) and PR-9a (section retry) drafted in the scratchpad.
 - 2026-09-05 turn 72: PR-7f #514 merged. Next: PR-3r on branch frm/stated-footer: FooterComposition::statedInBrief reads a footer the brief names ('huge clipped wordmark' -> sunken-wordmark, '4-col footer' -> newsletter-columns, 'footer band with a photo' -> cover-coda ...) and the page plan lets it outrank the hash pick with a recorded note. PR-9a (section retry) drafted.
+- 2026-09-05 turn 73: PR-3r #515 merged. Next: PR-9a on branch frm/section-retry: a plain page section whose first response is unusable gets one fresh sample with the parse failure quoted into the prompt (so the markup cache never replays the same answer) before the drop; chrome, heroes and openings keep their reviewed fallbacks. Blocks path only; the HTML-first path keeps the single attempt.
 
 ## 10. Parked / rejected
 
