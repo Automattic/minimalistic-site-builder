@@ -19,7 +19,7 @@ function section_label_part(array $badges, string $after = ''): string
 }
 
 test('the section-badge kit paints the marked paragraph as a pill with a dot (frm W6a)', function () {
-    assert_eq(['none', 'section-badge'], SectionLabel::ALL);
+    assert_eq(['none', 'section-badge', 'side-label'], SectionLabel::ALL);
     assert_eq(null, SectionLabel::kitCss('none'));
     assert_eq(null, SectionLabel::kitCss(null));
     $css = (string) SectionLabel::kitCss(' Section-Badge ');
@@ -115,4 +115,77 @@ test('the direction normalizes, persists, formats and reads section_label (frm W
         $project->writeJson('designDirection.json', ['description' => 'x', 'section_label' => 'section-badge']);
         assert_eq('section-badge', DesignDirectionStep::sectionLabelFor($project));
     });
+});
+
+function side_label_split(string $labelText = 'Process', bool $leading = true): string
+{
+    $label = '<!-- wp:paragraph {"className":"side-label","fontSize":"caption"} -->' . "\n"
+        . '<p class="side-label has-caption-font-size">' . $labelText . '</p>' . "\n"
+        . '<!-- /wp:paragraph -->' . "\n";
+    $content = '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">How the studio works</h2><!-- /wp:heading -->' . "\n"
+        . '<!-- wp:paragraph --><p>Three moves, one room.</p><!-- /wp:paragraph -->' . "\n";
+    $first = $leading ? $label : $content;
+    $second = $leading ? $content : $label;
+    return '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n" . '<div class="wp-block-group">' . "\n"
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . "\n"
+        . '<!-- wp:column {"width":"25%"} --><div class="wp-block-column" style="flex-basis:25%">' . "\n" . $first . '</div><!-- /wp:column -->' . "\n"
+        . '<!-- wp:column {"width":"75%"} --><div class="wp-block-column" style="flex-basis:75%">' . "\n" . $second . '</div><!-- /wp:column -->' . "\n"
+        . '</div><!-- /wp:columns -->' . "\n"
+        . '</div>' . "\n" . '<!-- /wp:group -->';
+}
+
+test('the side-label kit paints a quiet uppercase caption that stays in view in its column (frm W6b)', function () {
+    $css = (string) SectionLabel::kitCss('side-label');
+    assert_contains('p.side-label {', $css);
+    assert_contains('text-transform: uppercase', $css);
+    assert_contains('letter-spacing: 0.08em', $css);
+    assert_contains('p.side-label::before', $css);
+    assert_contains('var(--wp--preset--color--accent, currentColor)', $css, 'only the dot takes the accent');
+    assert_contains('.wp-block-column:has(> p.side-label)', $css);
+    assert_contains('position: sticky', $css);
+    assert_true(!str_contains($css, 'p.section-badge'), 'the side-label kit does not paint the badge');
+    assert_contains('leading column', SectionLabel::meaning('side-label'));
+});
+
+test('the delivery boundary keeps one committed side label in the leading column and removes every other form (frm W6b)', function () {
+    $split = side_label_split();
+    $kept = SectionLabel::normalize($split, 'side-label', 'page-home--process');
+    assert_eq($split, $kept['markup']);
+    assert_eq([], $kept['warnings']);
+
+    // The label above the heading (not in the leading column) is an eyebrow even when the device is committed.
+    $above = section_label_part([]);
+    $above = str_replace(
+        '<!-- wp:heading {"level":2} -->',
+        '<!-- wp:paragraph {"className":"side-label","fontSize":"caption"} --><p class="side-label has-caption-font-size">Process</p><!-- /wp:paragraph -->' . "\n" . '<!-- wp:heading {"level":2} -->',
+        $above,
+    );
+    $stripped = SectionLabel::normalize($above, 'side-label', 'page-home--process');
+    assert_true(!str_contains($stripped['markup'], 'side-label'), 'a side label above a heading is removed');
+    assert_eq(1, count($stripped['warnings']));
+    assert_contains('leading column of a split', $stripped['warnings'][0]);
+
+    // The label in the trailing column is not the device either.
+    $trailing = SectionLabel::normalize(side_label_split('Process', false), 'side-label', 'page-home--process');
+    assert_true(!str_contains($trailing['markup'], 'side-label'));
+
+    // A page opening never carries one; an uncommitted direction removes it; the other device is not a substitute.
+    assert_true(!str_contains(SectionLabel::normalize($split, 'side-label', 'page-home--hero', true)['markup'], 'side-label'));
+    assert_true(!str_contains(SectionLabel::normalize($split, 'none', 'page-home--process')['markup'], 'side-label'));
+    $crossed = SectionLabel::normalize($split, 'section-badge', 'page-home--process');
+    assert_true(!str_contains($crossed['markup'], 'side-label'), 'a badge commitment does not admit a side label');
+    assert_contains('committed section-badge, not side-label', $crossed['warnings'][0]);
+    $badgeUnderSide = SectionLabel::normalize(section_label_part(['Use cases']), 'side-label', 'page-home--features');
+    assert_true(!str_contains($badgeUnderSide['markup'], 'section-badge'), 'a side-label commitment does not admit a badge');
+
+    // Only the first proven side label survives.
+    $two = str_replace(
+        '<p class="side-label has-caption-font-size">Process</p>' . "\n" . '<!-- /wp:paragraph -->',
+        '<p class="side-label has-caption-font-size">Process</p>' . "\n" . '<!-- /wp:paragraph -->' . "\n"
+            . '<!-- wp:paragraph {"className":"side-label","fontSize":"caption"} --><p class="side-label has-caption-font-size">Again</p><!-- /wp:paragraph -->',
+        $split,
+    );
+    $capped = SectionLabel::normalize($two, 'side-label', 'page-home--process');
+    assert_eq(1, substr_count($capped['markup'], 'class="side-label'));
+    assert_contains('>Process<', $capped['markup']);
 });
