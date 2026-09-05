@@ -28,9 +28,11 @@ never an eyebrow.
 - Copy budget: one level-1 heading, at most ONE supporting paragraph, at most
   one planned button. No caption or credit line, no rules.
 - Identity: the one root group carries exactly `.hero-composition--metadata-corners`.
-- Media: exactly one landscape cover image with its subject toward the
-  trailing edge, so the center stays quiet for the copy; never a second
-  image.
+- Media: exactly one landscape cover image. Its subject is a person, head
+  and shoulders or half figure, filling the trailing half of the frame at
+  large scale and lit hard, so the center and the leading half stay quiet
+  for the copy. Never a small figure at the far edge of a wide empty room:
+  the portrait is the picture, not a detail in it. Never a second image.
   Set an explicit `textColor` that reads over the image and the planned
   protection.
 - Blocks: use only group, cover, heading, paragraph, and an optional planned

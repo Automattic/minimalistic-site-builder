@@ -714,3 +714,12 @@ test('primary-action presence uses the same wp:button boundary as reconciliation
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore the work</a></div><!-- /wp:button -->';
     assert_true(GeneratedMarkup::containsPrimaryAction($button, $action));
 });
+
+
+test('the metadata-corners fragment asks for a large portrait filling the trailing half, not a small figure at the edge (frm PR-7h)', function () {
+    $fragment = (string) file_get_contents(repo_path('prompts/hero-compositions/metadata-corners.md'));
+    assert_contains('filling the trailing half of the frame at', $fragment);
+    assert_contains('Never a small figure at the far edge of a wide empty room', $fragment);
+    assert_contains('the leading half stay quiet', $fragment, 'the copy side keeps its quiet');
+    assert_true(!str_contains($fragment, 'subject toward the trailing edge'), 'the old wording that shrank the figure is gone');
+});
