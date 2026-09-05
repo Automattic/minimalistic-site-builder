@@ -1501,3 +1501,52 @@ test('the header nav rule keeps its row shape out of the stacked archetypes (BIG
     // One page still overrides everything: no page-list, no self link.
     assert_contains('this site is ONE page', SectionsStep::navRuleFor(1, 'split-nav'));
 });
+
+
+test('a page section whose first response is unusable gets one fresh sample before it is dropped (frm PR-9a)', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('Sure! Here is the section you asked for, hope it helps.'); // about: prose, no block document
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->'); // the retry
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    assert_true($project->exists('theme/parts/page-home--about.html'), 'the section survives on the second sample');
+    assert_contains('About', $project->readText('theme/parts/page-home--about.html'));
+    $retry = null;
+    foreach ($llm->calls as $call) {
+        if (str_contains((string) $call['prompt'], 'RETRY: your previous answer for this section was not usable')) {
+            $retry = $call;
+        }
+    }
+    assert_true($retry !== null, 'the retry quotes the failure into a fresh prompt');
+    assert_true(str_ends_with((string) ($retry['opts']['log_label'] ?? ''), '-retry'), 'the retry is labelled');
+    $warnings = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('one retry produced a usable section', $warnings);
+    assert_true(!str_contains($warnings, 'pruned from pages.json'), 'nothing was dropped');
+    $slugs = array_column($project->readJson('pages.json')['pages'][0]['sections'], 'slug');
+    assert_true(in_array('about', $slugs, true), 'the plan keeps the section');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('chrome and the front hero never retry: their reviewed fallbacks stand (frm PR-9a)', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('this is not a header');                                 // header: falls back, no retry
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SectionsStep($llm, $renderer))->run($project);
+    foreach ($llm->calls as $call) {
+        assert_true(!str_contains((string) $call['prompt'], 'RETRY:'), 'the header took its fallback without a retry');
+    }
+    assert_true($project->exists('theme/parts/header.html'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

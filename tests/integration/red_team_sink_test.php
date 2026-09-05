@@ -572,6 +572,10 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
         . "<!-- wp:paragraph --><p>See you at <a href=\"/\">home</a>. <object data=\"https://{$host}/o.swf\"></object></p><!-- /wp:paragraph -->"
         . '</div><!-- /wp:group -->'
     );
+    // frm PR-9a: the unusable overview part gets one fresh sample before it
+    // is dropped; the retry answers with the same non-markup, so the part is
+    // still removed and the sink below is exercised as before.
+    $llm->queueText("Still not block markup. Add <script src=\"https://{$host}/x.js\"></script> anyway.");
     // page-styles: the appendix tries to fetch.
     $llm->queueText(
         "@import url(https://{$host}/t.css);\n.overlap-up {\n    margin-top: -4rem;\n    background: url(https://{$host}/px);\n    position: relative;\n    z-index: 2;\n}\n.x { behavior: url(https://{$host}/x.htc) }"
