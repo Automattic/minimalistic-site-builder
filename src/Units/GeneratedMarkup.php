@@ -4202,4 +4202,77 @@ final class GeneratedMarkup
         }
         return $changed ? $document->render() : $markup;
     }
+
+    /**
+     * The theme owns the ledger figure scale (frm PR-3m): an authored
+     * fontSize on a stat-ledger figure heading (spector-like10 set the
+     * display preset inline) beats the theme's column cap through the
+     * inline style, and "$4.2M" ran into the next column. The boundary
+     * drops the size and line height from every figure heading in a
+     * stat-ledger column and records the repair; weight and alignment stay.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function ownLedgerFigureScale(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'stat-ledger') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $inColumn = false;
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if ($document->name($parent) === 'column') {
+                    $inColumn = true;
+                    break;
+                }
+            }
+            if (!$inColumn) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($text === '' || preg_match(SectionComposition::FIGURE_PATTERN, $text) !== 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $dropped = [];
+            $size = trim((string) ($attrs['fontSize'] ?? ''));
+            if ($size !== '') {
+                unset($attrs['fontSize']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$size}-font-size");
+                $dropped[] = "fontSize '{$size}'";
+            }
+            if (is_array($attrs['style']['typography'] ?? null)) {
+                foreach (['fontSize', 'lineHeight'] as $key) {
+                    if (array_key_exists($key, $attrs['style']['typography'])) {
+                        $dropped[] = "style.typography.{$key}";
+                        unset($attrs['style']['typography'][$key]);
+                    }
+                }
+                if ($attrs['style']['typography'] === []) {
+                    unset($attrs['style']['typography']);
+                }
+                if ($attrs['style'] === []) {
+                    unset($attrs['style']);
+                }
+            }
+            if ($dropped === []) {
+                continue;
+            }
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'heading.figure',
+                'authored' => implode(', ', $dropped),
+                'delivered' => 'removed',
+                'note' => 'the theme caps the ledger figure to its column; an authored size would overrun it',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
 }

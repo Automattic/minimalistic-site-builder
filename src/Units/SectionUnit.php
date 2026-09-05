@@ -213,6 +213,9 @@ final class SectionUnit extends AbstractPageSectionUnit
             is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
             $repairs,
         );
+        // The theme caps a ledger figure to its column; an authored size
+        // on the figure heading would overrun it (frm PR-3m).
+        $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);
