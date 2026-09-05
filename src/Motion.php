@@ -31,8 +31,11 @@ final class Motion
     public const SCROLL_CLASSES = [
         'reveal', 'reveal-up', 'reveal-fade', 'reveal-scale',
         'reveal-blur', 'reveal-wipe', 'reveal-wipe-up', 'reveal-aperture', 'reveal-zoom',
-        'stagger-children', 'hero-entrance',
+        'stagger-children', 'hero-entrance', 'word-reveal',
     ];
+
+    /** Hero-only entrances: the first section, once per page each. */
+    public const HERO_CLASSES = ['hero-entrance', 'word-reveal'];
 
     /** Ambient classes: signature effects, budgeted to ONE per page. */
     public const AMBIENT_CLASSES = ['ken-burns', 'gradient-shift', 'ambient-drift'];
@@ -84,7 +87,7 @@ final class Motion
             return true;
         }
         return preg_match(
-            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
+            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
             $token
         ) === 1;
     }
@@ -98,7 +101,7 @@ final class Motion
      */
     public static function noteClasses(): array
     {
-        return array_values(array_diff(self::kitClasses(), ['hero-entrance']));
+        return array_values(array_diff(self::kitClasses(), self::HERO_CLASSES));
     }
 
     /**

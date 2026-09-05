@@ -37,4 +37,6 @@
     --motion-hover-scale: 1.02;
     --motion-hover-brightness: 0.96;
     --motion-hover-shadow-opacity: 0.1;
+    --motion-word-keyframe: motion-kit-word;
+    --motion-word-stagger: 70ms;
 }

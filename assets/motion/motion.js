@@ -8,7 +8,70 @@
 (function () {
     var root = document.documentElement;
     var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .reveal-blur, '
-        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *';
+        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *, .word-reveal';
+    var WORD_CLASS = 'word-reveal__word';
+    var WORD_INLINE = /^(?:A|ABBR|B|EM|I|SPAN|STRONG|SUB|SUP|U|MARK|SMALL)$/;
+
+    // Wrap each word of a `.word-reveal` heading in an indexed span so the
+    // kit can stagger them. Inline emphasis (a `.emph` span, <em>, <a>) is
+    // walked into, not flattened; any other child element makes the heading
+    // unsplittable and it stays whole and visible. Runs before targets are
+    // registered so the first paint already hides the words.
+    function splitWords() {
+        var headings = document.querySelectorAll('.word-reveal:not(.word-reveal--split)');
+        Array.prototype.forEach.call(headings, function (heading) {
+            var index = 0;
+            var splittable = true;
+            var walk = function (node) {
+                var children = Array.prototype.slice.call(node.childNodes);
+                children.forEach(function (child) {
+                    if (child.nodeType === 3) {
+                        var parts = child.nodeValue.split(/(\s+)/);
+                        if (parts.length === 1 && !/\S/.test(parts[0])) {
+                            return;
+                        }
+                        var fragment = document.createDocumentFragment();
+                        parts.forEach(function (part) {
+                            if (part === '') {
+                                return;
+                            }
+                            if (!/\S/.test(part)) {
+                                fragment.appendChild(document.createTextNode(part));
+                                return;
+                            }
+                            var span = document.createElement('span');
+                            span.className = WORD_CLASS;
+                            span.style.setProperty('--word-index', String(index));
+                            span.textContent = part;
+                            index += 1;
+                            fragment.appendChild(span);
+                        });
+                        node.replaceChild(fragment, child);
+                    } else if (child.nodeType === 1) {
+                        if (child.tagName === 'BR') {
+                            return;
+                        }
+                        if (!WORD_INLINE.test(child.tagName)) {
+                            splittable = false;
+                            return;
+                        }
+                        walk(child);
+                    }
+                });
+            };
+            var original = heading.innerHTML;
+            try {
+                walk(heading);
+                if (!splittable || index === 0) {
+                    heading.innerHTML = original;
+                    return;
+                }
+                heading.classList.add('word-reveal--split');
+            } catch (error) {
+                heading.innerHTML = original;
+            }
+        });
+    }
 
     // This callback is replaced after setup so keyboard focus can also
     // unobserve a pending target. Before DOMContentLoaded, the default still
@@ -41,6 +104,7 @@
     function reveal() {
         var targets;
         try {
+            splitWords();
             targets = Array.prototype.slice.call(document.querySelectorAll(ENTRANCE_SELECTOR));
             targets.forEach(function (target) {
                 target.classList.add('motion-target');

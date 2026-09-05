@@ -198,6 +198,7 @@ async function settleMotion(page, timeout) {
       '.reveal-aperture',
       '.reveal-zoom',
       '.stagger-children > *',
+      '.word-reveal',
     ].join(',');
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const targets = Array.from(document.querySelectorAll(selector));
