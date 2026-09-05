@@ -2488,3 +2488,18 @@ test('the direction persists the seed register as a bounded token and re-reads i
         assert_eq('', DesignDirectionStep::registerFor($project));
     });
 });
+
+test('the direction prompt tells the model to honor a brief that names cards, pills or a product landing (frm PR-4e)', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction.md'));
+    assert_contains("**Honor the brief's surface vocabulary before any category reflex.**", $prompt);
+    foreach (['`item_pattern` `"card"`', '`card_style` `"flush"` or `"framed"`', '`shape` `"soft"` or `"round"`', '`depth` `"ring"` or `"soft"`'] as $needle) {
+        assert_contains($needle, $prompt);
+    }
+    $rule = substr($prompt, strpos($prompt, "**Honor the brief's surface vocabulary"), 1400);
+    assert_contains('never `"borderless"`', $rule);
+    assert_contains('never `"sharp"`', $rule);
+    assert_true(
+        strpos($prompt, "**Honor the brief's surface vocabulary") < strpos($prompt, '- `card_style`:'),
+        'the rule precedes the field catalog it governs',
+    );
+});
