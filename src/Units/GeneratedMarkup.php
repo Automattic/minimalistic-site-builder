@@ -4101,7 +4101,7 @@ final class GeneratedMarkup
                 continue;
             }
             $text = trim(html_entity_decode(strip_tags($shell[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-            if (preg_match('/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:%|\+|x|×|[kKmMbB])?$/u', $text) !== 1
+            if (preg_match(SectionComposition::FIGURE_PATTERN, $text) !== 1
                 || mb_strlen($text, 'UTF-8') > 14) {
                 continue;
             }
