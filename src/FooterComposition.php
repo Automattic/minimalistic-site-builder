@@ -25,6 +25,7 @@ final class FooterComposition
         'mosaic-tiles',
         'color-field',
         'repeat-rail',
+        'newsletter-columns',
     ];
 
     /** @var array<string,string> */
@@ -43,6 +44,7 @@ final class FooterComposition
         'mosaic-tiles' => 'footer-compositions/mosaic-tiles.md',
         'color-field' => 'footer-compositions/color-field.md',
         'repeat-rail' => 'footer-compositions/repeat-rail.md',
+        'newsletter-columns' => 'footer-compositions/newsletter-columns.md',
     ];
 
     /** @var array<string,string> */
@@ -61,6 +63,9 @@ final class FooterComposition
         'mosaic-tiles' => 'base',
         'color-field' => 'base',
         'repeat-rail' => 'base',
+        // frm W3i: the product-site footer of the reference corpus (Zova,
+        // Dreammotion): an invitation row over three link columns, dark.
+        'newsletter-columns' => 'contrast',
     ];
 
     /** @var list<string> */
