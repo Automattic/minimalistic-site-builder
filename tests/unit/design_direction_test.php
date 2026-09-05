@@ -2503,3 +2503,15 @@ test('the direction prompt tells the model to honor a brief that names cards, pi
         'the rule precedes the field catalog it governs',
     );
 });
+
+test('both direction prompts tell the model that a ground named in the brief is decided (frm PR-4f)', function () {
+    $seeds = (string) file_get_contents(repo_path('prompts/design-direction-seeds.md'));
+    assert_contains('that word is the ground for ALL three seeds', $seeds);
+    assert_contains('never answer "white page" with a dark seed', $seeds);
+    $direction = (string) file_get_contents(repo_path('prompts/design-direction.md'));
+    assert_contains('The scene decides only when the brief is silent.', $direction);
+    assert_true(
+        strpos($direction, 'The scene decides only when the brief is silent.') < strpos($direction, 'Light and dark are never category defaults.'),
+        'the stated-ground rule precedes the anti-reflex rule it qualifies',
+    );
+});

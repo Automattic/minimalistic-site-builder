@@ -27,6 +27,8 @@ The seed also committed two traditions and a color budget. They are binding in t
 
 Before you choose a ground, write one sentence to yourself naming the physical scene: WHO uses this site, WHERE, and under WHAT ambient light. Different scenes force different answers. Let that sentence decide light or dark, and keep the scene itself out of the shipped `description` — it is a working note, not site copy.
 
+The scene decides only when the brief is silent. A USER BRIEF that names its ground — "white page", "light", "cream", or "dark", "black", "near-black" — has already decided `ground_key`, and neither the scene sentence nor the mood may overturn it; the seed you were handed commits the same side, so keep it.
+
 Light and dark are never category defaults. "Restaurants are dark", "blogs are light", "portfolios are cream" are the associations this instruction exists to break. A ground you can justify from the scene is a decision; a ground that matches what the category usually ships is a reflex.
 
 ## Design Grounding
