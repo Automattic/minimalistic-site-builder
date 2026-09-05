@@ -1042,6 +1042,35 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Logo strip (the logo-strip archetype, frm PR-3h2): names as
+           wordmarks in the heading face at caption scale, muted, spread on
+           one line; on phones the row wraps to two or three per line. */
+        .section-composition--logo-strip .wp-block-group.logo-strip {
+            column-gap: var(--wp--preset--spacing--lg, 3rem);
+            row-gap: var(--wp--preset--spacing--sm, 0.75rem);
+            align-items: center;
+        }
+        .section-composition--logo-strip .wp-block-group.logo-strip > p {
+            margin: 0;
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            font-size: var(--wp--preset--font-size--lead, 1.125rem);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            line-height: 1;
+            white-space: nowrap;
+            opacity: 0.55;
+        }
+        .section-composition--logo-strip > p {
+            text-align: center;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+            opacity: 0.7;
+        }
+        @media (max-width: 781px) {
+            .section-composition--logo-strip .wp-block-group.logo-strip {
+                justify-content: center;
+                column-gap: var(--wp--preset--spacing--md, 1.5rem);
+            }
+        }
         /* Project grid (the project-grid-2x2 archetype, frm W3h): every tile
            is one cover at the same landscape proportion, rounded from the
            committed media radius, its name and meta line pinned to the
