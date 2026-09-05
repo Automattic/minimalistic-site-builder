@@ -20,6 +20,41 @@ final class GroundKey
     /** Small clearance keeps 8-bit rounding from landing on the wrong side. */
     private const CLEARANCE = 0.02;
 
+    /**
+     * The ground a brief states in so many words, or null when it is silent
+     * (frm PR-4g). A bounded phrase list, not a category matcher: these are
+     * the client's own instructions about the page ground, and a seed or a
+     * scene sentence never outranks them. Checked in order, dark phrases
+     * first, so "white text on a dark ground" reads as dark.
+     *
+     * @var array<string,list<string>>
+     */
+    private const STATED_PHRASES = [
+        'dark' => [
+            'dark ground', 'dark page', 'dark background', 'dark site', 'dark landing', 'dark mode',
+            'black ground', 'black page', 'black background', 'near-black', 'near black',
+            'midnight ground', 'charcoal ground', 'on a dark', 'on black',
+        ],
+        'light' => [
+            'white page', 'white ground', 'white background', 'light page', 'light ground',
+            'light background', 'pale page', 'pale ground', 'cream page', 'cream ground',
+            'off-white page', 'on white', 'on a white', 'on a light',
+        ],
+    ];
+
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_PHRASES as $key => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (str_contains($text, $phrase)) {
+                    return $key;
+                }
+            }
+        }
+        return null;
+    }
+
     public static function classify(string $hex): ?string
     {
         $rgb = ContrastMath::hexToRgb($hex);

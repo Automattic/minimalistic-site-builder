@@ -2515,3 +2515,12 @@ test('both direction prompts tell the model that a ground named in the brief is 
         'the stated-ground rule precedes the anti-reflex rule it qualifies',
     );
 });
+
+test('a ground the brief states in so many words is read as a bounded phrase (frm PR-4g)', function () {
+    assert_eq('light', GroundKey::statedInBrief('Create a clean SaaS landing page. White page with a pale blue gradient panel hero.'));
+    assert_eq('dark', GroundKey::statedInBrief('Create a dark landing page for an AI studio. Near-black ground, serif headings.'));
+    assert_eq('dark', GroundKey::statedInBrief('white text on a dark ground'), 'dark phrases win when both appear');
+    assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant in Tbilisi Old Town.'), 'a silent brief decides nothing');
+    assert_eq(null, GroundKey::statedInBrief('a lighthearted, darkly funny comedy club'), 'adjectives are not a ground');
+    assert_eq('light', GroundKey::statedInBrief("Light\n  page, please"));
+});

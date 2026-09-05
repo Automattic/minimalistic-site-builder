@@ -226,6 +226,16 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister,
             'color_economy' => $seedColorEconomy,
         ] = $this->chooseSeed($prompt, $spec, $warnings);
+        // A ground the brief states in so many words outranks the seed's
+        // (frm PR-4g): the prompt rule alone held on one rerun in two.
+        $statedGround = GroundKey::statedInBrief($prompt);
+        $groundRepair = null;
+        if ($statedGround !== null && $seedGround !== $statedGround) {
+            $groundRepair = 'designDirection.json: field ground_key seed committed '
+                . self::describe($seedGround === '' ? null : $seedGround) . ' delivered '
+                . self::describe($statedGround) . '; disposition the brief names its ground, so the seed yields to it';
+            $seedGround = $statedGround;
+        }
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -301,7 +311,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = [];
+        $repairs = $groundRepair === null ? [] : [$groundRepair];
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
