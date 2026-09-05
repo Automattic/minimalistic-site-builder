@@ -254,7 +254,7 @@ final class HeroComposition
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
                 'text_anchor' => 'center-start',
                 'headline_line_target' => ['desktop' => [2, 3], 'mobile' => [2, 5]],
-                'focal_region' => 'end', 'text_safe_region' => 'center',
+                'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'quiet',
                 'mobile_transformation' => 'retain-media-overlay',
                 'media_aspect' => 'landscape', 'media_weight' => 'dominant',
