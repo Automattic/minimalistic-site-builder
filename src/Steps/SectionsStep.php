@@ -231,7 +231,27 @@ final class SectionsStep implements Step
                         ? 'the batch returned no result'
                         : "the generation batch failed: {$batchFailure}");
                 }
-                $result = $job['unit']->finish($parts[$key], $job['input']);
+                try {
+                    $result = $job['unit']->finish($parts[$key], $job['input']);
+                } catch (\RuntimeException $first) {
+                    // frm PR-9a: a plain page section gets one fresh sample
+                    // before it is dropped. Two sections in one cohort came
+                    // back as something other than a block document; the
+                    // retry quotes the parse failure so the cache never
+                    // replays the same answer. Chrome, heroes and openings
+                    // keep their reviewed fallbacks and never retry.
+                    if (!self::retriesOnUnusableMarkup($key, $job)) {
+                        throw $first;
+                    }
+                    $retryText = $this->retrySection($key, $requests[$key] ?? null, $first->getMessage());
+                    if ($retryText === null) {
+                        throw $first;
+                    }
+                    $result = $job['unit']->finish($retryText, $job['input']);
+                    $warnings[] = "file='theme/{$job['file']}'; block='part root'; authored="
+                        . Warnings::value($first->getMessage())
+                        . '; delivered=second sample; disposition=the first response was unusable, one retry produced a usable section';
+                }
                 if (($job['opening'] ?? false) === true) {
                     self::assertOpeningRoot($result->markup, $key);
                 }
@@ -720,6 +740,47 @@ final class SectionsStep implements Step
      * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
      * @return array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}>
      */
+    /** Only a plain page section retries: chrome, heroes and openings have reviewed fallbacks. */
+    private static function retriesOnUnusableMarkup(string $key, array $job): bool
+    {
+        return $key !== 'header'
+            && $key !== 'footer'
+            && ($job['front_hero'] ?? false) !== true
+            && ($job['opening'] ?? false) !== true;
+    }
+
+    /**
+     * One fresh sample of a section whose first response was unusable (frm
+     * PR-9a). The failure is quoted into the prompt so the request differs
+     * from the cached one; a transport error or an empty answer returns null
+     * and the caller drops the section as before.
+     *
+     * @param array<string,mixed>|null $request
+     */
+    private function retrySection(string $key, ?array $request, string $failure): ?string
+    {
+        if ($request === null || !is_string($request['prompt'] ?? null)) {
+            return null;
+        }
+        $retry = $request;
+        $retry['prompt'] .= "\n\nRETRY: your previous answer for this section was not usable ("
+            . str_replace(["\r", "\n"], ' ', $failure)
+            . '). Answer again with ONLY the section\'s block markup: one top-level group, every block comment closed, no prose before or after it.';
+        $retry['log_label'] = (string) ($retry['log_label'] ?? $key) . '-retry';
+        try {
+            $texts = $this->llm->completeBatch([$key => $retry])->texts;
+        } catch (\RuntimeException $e) {
+            Narrator::write("    (part '{$key}': retry failed — {$e->getMessage()})\n");
+            return null;
+        }
+        $text = $texts[$key] ?? null;
+        if (!is_string($text) || trim($text) === '') {
+            return null;
+        }
+        Narrator::write("    (part '{$key}': first response unusable; retried once)\n");
+        return $text;
+    }
+
     private static function requestsFor(array $jobs): array
     {
         $requests = [];
