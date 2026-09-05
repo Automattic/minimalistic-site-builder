@@ -180,7 +180,7 @@ final class FontShortlist
      * -0.04em tracking; generated sites in the same traditions defaulted to
      * 700-800, which reads as a brochure.
      */
-    public const PRODUCT_REGISTERS = ['modernist', 'technical', 'pop'];
+    public const PRODUCT_REGISTERS = ['modernist', 'technical', 'pop', 'playful', 'utilitarian'];
     public const PRODUCT_TYPE_REGISTERS = ['grotesque', 'geometric'];
 
     public static function productWeightSentence(string $typeRegister, string $register): string
