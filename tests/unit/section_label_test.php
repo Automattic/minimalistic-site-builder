@@ -165,6 +165,17 @@ test('the delivery boundary keeps one committed side label in the leading column
     assert_eq(1, count($stripped['warnings']));
     assert_contains('leading column of a split', $stripped['warnings'][0]);
 
+    // A label sharing the leading column with the heading stack is an eyebrow with extra steps.
+    $shared = str_replace(
+        '<!-- /wp:paragraph -->' . "\n" . '</div><!-- /wp:column -->',
+        '<!-- /wp:paragraph -->' . "\n" . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Shared</h2><!-- /wp:heading -->' . "\n" . '</div><!-- /wp:column -->',
+        $split,
+    );
+    assert_true(str_contains($shared, '>Shared<'), 'fixture holds the heading beside the label');
+    $sharedOut = SectionLabel::normalize($shared, 'side-label', 'page-home--process');
+    assert_true(!str_contains($sharedOut['markup'], 'side-label'), 'a label beside the heading stack in its column is removed');
+    assert_contains('alone in the leading column', $sharedOut['warnings'][0]);
+
     // The label in the trailing column is not the device either.
     $trailing = SectionLabel::normalize(side_label_split('Process', false), 'side-label', 'page-home--process');
     assert_true(!str_contains($trailing['markup'], 'side-label'));
@@ -178,14 +189,20 @@ test('the delivery boundary keeps one committed side label in the leading column
     $badgeUnderSide = SectionLabel::normalize(section_label_part(['Use cases']), 'side-label', 'page-home--features');
     assert_true(!str_contains($badgeUnderSide['markup'], 'section-badge'), 'a side-label commitment does not admit a badge');
 
-    // Only the first proven side label survives.
-    $two = str_replace(
+    // Only the first proven side label survives when a section holds two splits.
+    preg_match('/<!-- wp:columns.*<!-- \/wp:columns -->/s', side_label_split('Again'), $second);
+    $two = str_replace('</div><!-- /wp:columns -->', '</div><!-- /wp:columns -->' . "\n" . $second[0], $split);
+    $capped = SectionLabel::normalize($two, 'side-label', 'page-home--process');
+    assert_eq(1, substr_count($capped['markup'], 'class="side-label'));
+    assert_contains('>Process<', $capped['markup']);
+    assert_contains('at most one side label', $capped['warnings'][0]);
+
+    // Two labels in one column are neither alone: both go.
+    $stacked = str_replace(
         '<p class="side-label has-caption-font-size">Process</p>' . "\n" . '<!-- /wp:paragraph -->',
         '<p class="side-label has-caption-font-size">Process</p>' . "\n" . '<!-- /wp:paragraph -->' . "\n"
             . '<!-- wp:paragraph {"className":"side-label","fontSize":"caption"} --><p class="side-label has-caption-font-size">Again</p><!-- /wp:paragraph -->',
         $split,
     );
-    $capped = SectionLabel::normalize($two, 'side-label', 'page-home--process');
-    assert_eq(1, substr_count($capped['markup'], 'class="side-label'));
-    assert_contains('>Process<', $capped['markup']);
+    assert_eq(0, substr_count(SectionLabel::normalize($stacked, 'side-label', 'page-home--process')['markup'], 'class="side-label'));
 });

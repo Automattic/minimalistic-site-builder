@@ -200,7 +200,7 @@ final class SectionLabel
                     ? 'a page opening never carries a side label'
                     : 'a page opening never carries a section badge'];
             } elseif ($badge['device'] === 'side-label' && !$badge['split']) {
-                $remove[] = $badge + ['why' => 'a side label lives in the leading column of a split; above a heading it is an eyebrow'];
+                $remove[] = $badge + ['why' => 'a side label lives alone in the leading column of a split; above a heading or beside one in the same column it is an eyebrow'];
             } elseif ($kept > 0) {
                 $remove[] = $badge + ['why' => $badge['device'] === 'side-label'
                     ? 'a section carries at most one side label; only the first was kept'
@@ -230,14 +230,18 @@ final class SectionLabel
     }
 
     /**
-     * True when the paragraph is a direct child of the FIRST column of a
+     * True when the paragraph is the ONLY child of the FIRST column of a
      * wp:columns row with at least two columns: the split the side-label
-     * device is defined by (frm W6b).
+     * device is defined by (frm W6b). A label sharing its column with the
+     * heading stack is an eyebrow with extra steps.
      */
     private static function inLeadingColumn(BlockMarkup $document, int $index): bool
     {
         $column = $document->parent($index);
         if ($column === null || $document->name($column) !== 'column') {
+            return false;
+        }
+        if (count($document->children($column)) !== 1) {
             return false;
         }
         $row = $document->parent($column);
