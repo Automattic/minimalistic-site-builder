@@ -506,6 +506,7 @@ final class SectionsStep implements Step
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
                 'register' => DesignDirectionStep::registerFor($project),
+                'stated_header' => AboveFoldContract::statedHeaderFor($project),
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
@@ -1073,6 +1074,7 @@ final class SectionsStep implements Step
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
                 'register' => DesignDirectionStep::registerFor($project),
+                'stated_header' => AboveFoldContract::statedHeaderFor($project),
                 // The one text wp:site-tagline will render at runtime — the
                 // contract exposes it so neither above-fold author discovers
                 // it by surprise on the live site (BIGR-773).

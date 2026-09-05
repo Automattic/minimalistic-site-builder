@@ -203,6 +203,13 @@ final class AboveFoldContract
 
         $degradations = [];
         $forced = trim((string) ($forcedHeaderArchetype ?? ''));
+        // A header the brief states in so many words (frm PR-1h) sits
+        // between the operator override and the register pool: it wins
+        // when the opening can carry it, and never throws.
+        $stated = trim((string) ($siteContext['stated_header'] ?? ''));
+        if (!in_array($stated, self::HEADER_ARCHETYPES, true)) {
+            $stated = '';
+        }
         if ($forced !== '' && !in_array($forced, self::HEADER_ARCHETYPES, true)) {
             throw new \InvalidArgumentException(
                 "unknown header archetype '{$forced}' (use one of: "
@@ -234,6 +241,11 @@ final class AboveFoldContract
                 $archetype,
                 'generated page/direction facts made the requested header relation unsafe; delivered the reviewed stacked relation',
             );
+        } elseif ($stated !== '' && self::forcedHeaderCompatible($stated, $overlaySupported, count($pages), $imageLed)) {
+            $archetype = $stated;
+            $mode = $stated === 'minimal-overlay' || ($stated === 'floating-pill' && $overlaySupported)
+                ? self::MODE_OVERLAY
+                : self::MODE_STACKED;
         } else {
             $archetype = self::stablePick($pool, [
                 $siteContext['stable_id'] ?? '',
@@ -1226,5 +1238,50 @@ final class AboveFoldContract
     private static function value(mixed $value): string
     {
         return $value === null ? 'null' : self::encode($value);
+    }
+
+    /**
+     * The header the brief states in so many words, or null when it is
+     * silent (frm PR-1h): a bounded phrase list, first match in list order.
+     *
+     * @var array<string,list<string>>
+     */
+    private const STATED_HEADER_PHRASES = [
+        'floating-pill' => ['floating pill navigation', 'pill navigation', 'pill nav', 'floating pill nav', 'navigation pill', 'floating nav pill'],
+        'spread-nav' => ['edge-to-edge spread navigation', 'spread navigation', 'spread nav', 'edge-to-edge navigation', 'edge-to-edge nav', 'nav items spread'],
+        'bar-center-cta' => ['centered navigation', 'nav centered', 'navigation centered', 'centred navigation'],
+        'minimal-overlay' => ['transparent header over the hero', 'header over the hero', 'overlay header'],
+    ];
+
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_HEADER_PHRASES as $archetype => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $archetype;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The stated header for a project's brief: the user's own words first, the refined brief second. */
+    public static function statedHeaderFor(Project $project): ?string
+    {
+        if (!$project->exists('meta.json')) {
+            return null;
+        }
+        $meta = $project->readJson('meta.json');
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $stated = self::statedInBrief($text);
+                if ($stated !== null) {
+                    return $stated;
+                }
+            }
+        }
+        return null;
     }
 }
