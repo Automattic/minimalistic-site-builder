@@ -1183,11 +1183,19 @@ TEXT;
                     static fn (int $child): bool => $document->name($child) === 'column',
                 ));
             }
+            // A tile is a cover inside a column (frm PR-3x): dreammotion-like17
+            // wrapped the whole band in one cover for its planned image
+            // surface, and that band cover counted as a fifth tile.
             $tiles = [];
             foreach ($document->indices() as $index) {
-                if ($document->name($index) === 'cover') {
-                    $tiles[] = self::countHeadings($document, $index);
+                if ($document->name($index) !== 'cover') {
+                    continue;
                 }
+                $parent = $document->parent($index);
+                if ($parent === null || $document->name($parent) !== 'column') {
+                    continue;
+                }
+                $tiles[] = self::countHeadings($document, $index);
             }
             $rowCount = count($rows);
             $twoWide = count(array_filter($rows, static fn (int $n): bool => $n === 2));

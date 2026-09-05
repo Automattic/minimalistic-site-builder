@@ -955,3 +955,23 @@ test('a highlighted card the brief states reaches an equal-card-grid as one comm
     assert_contains('"highlighted_cards":2', implode("\n", SectionComposition::markupWarnings($two, 'equal-card-grid', 'page-home--services', 'card', true)));
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($none, 'equal-card-grid', 'page-home--services', 'card')), 'stated highlight'), 'no stated highlight, no check');
 });
+
+
+test('a project grid wrapped in the band\'s own cover counts only the column tiles (frm PR-3x)', function () {
+    $tile = static fn (string $title): string => '<!-- wp:column {"width":"50%"} --><div class="wp-block-column"><!-- wp:cover {"url":"/x.jpg","dimRatio":50,"className":"project-tile"} --><div class="wp-block-cover project-tile"><img class="wp-block-cover__image-background" src="/x.jpg" alt=""/><div class="wp-block-cover__inner-container"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $tiles): string => '<!-- wp:columns --><div class="wp-block-columns">' . $tiles . '</div><!-- /wp:columns -->';
+    $grid = $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four'));
+    $wrapped = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">'
+        . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70,"align":"full"} --><div class="wp-block-cover alignfull"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Gallery</h2><!-- /wp:heading -->' . $grid
+        . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $joined = implode("\n", SectionComposition::markupWarnings($wrapped, 'project-grid-2x2', 'page-home--gallery'));
+    assert_true(!str_contains($joined, 'project grid tiles'), 'the band cover is not a tile');
+
+    $five = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">'
+        . $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four')) . $row($tile('Five'))
+        . '</div><!-- /wp:group -->';
+    $joined = implode("\n", SectionComposition::markupWarnings($five, 'project-grid-2x2', 'page-home--gallery'));
+    assert_contains('project grid tiles', $joined, 'five column tiles still fail');
+    assert_contains('"tiles":5', $joined);
+});
