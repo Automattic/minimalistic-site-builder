@@ -471,6 +471,60 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     }
 }
 
+/*
+ * Spread bar (frm W1d). Wordmark at the start; the navigation takes the
+ * rest of the row and its items spread across it with space between, edge
+ * to edge, the way Spector's bar reads. No CTA. Under the hamburger
+ * breakpoint the row is the plain wordmark-and-menu-button pair.
+ */
+.site-header-shell .header-archetype--spread-nav .header-spread {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--wp--preset--spacing--lg, 3rem);
+}
+
+/* A row authored align:full escapes the root's gutter and the wordmark
+ * touches the viewport (spector-like7); edge to edge means the page's
+ * gutter, not the glass. */
+.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {
+    padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem);
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-title,
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-logo {
+    justify-self: start;
+    white-space: nowrap;
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation {
+    justify-self: stretch;
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation .wp-block-navigation__container {
+    inline-size: 100%;
+    justify-content: space-between;
+}
+
+/* The active item on a spread bar is the same ink tint as the pill's. */
+.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
+    border-radius: 999px;
+    padding: 0.35em 0.75em;
+    margin: -0.35em -0.75em;
+}
+
+@media (max-width: 782px) {
+    .site-header-shell .header-archetype--spread-nav .header-spread {
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation {
+        justify-self: end;
+    }
+}
+
 /* Glass blurs behind the pill, not behind the transparent rail. The
  * pseudo-element pattern is the same as the root's: never an ancestor of
  * the navigation, so a fixed responsive menu keeps the viewport as its

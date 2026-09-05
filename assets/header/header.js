@@ -123,7 +123,7 @@
         if (typeof window.IntersectionObserver !== 'function' || typeof document.querySelectorAll !== 'function') {
             return;
         }
-        var scope = document.querySelector('.header-archetype--floating-pill, .header-archetype--bar-center-cta');
+        var scope = document.querySelector('.header-archetype--floating-pill, .header-archetype--bar-center-cta, .header-archetype--spread-nav');
         if (!scope) {
             return;
         }

@@ -92,7 +92,7 @@ final class HeaderBehavior
         // persistence is the archetype's whole point, so it asks for sticky
         // regardless of site depth (the palette safety check can still
         // downgrade it to static, in which case the pill simply rests).
-        if (in_array((string) $forcedArchetype, ['floating-pill', 'bar-center-cta'], true)) {
+        if (in_array((string) $forcedArchetype, ['floating-pill', 'bar-center-cta', 'spread-nav'], true)) {
             return self::STICKY_SOFT;
         }
         if (count($pages) > 1) {
