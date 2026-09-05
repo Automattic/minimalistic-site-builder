@@ -484,6 +484,13 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     column-gap: var(--wp--preset--spacing--lg, 3rem);
 }
 
+/* A row authored align:full escapes the root's gutter and the wordmark
+ * touches the viewport (spector-like7); edge to edge means the page's
+ * gutter, not the glass. */
+.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {
+    padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem);
+}
+
 .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-title,
 .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-logo {
     justify-self: start;

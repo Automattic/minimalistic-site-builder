@@ -368,6 +368,8 @@ test('header CSS spreads the navigation across the spread bar and the driver mar
     $list = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation .wp-block-navigation__container {');
     assert_contains('justify-content: space-between', $list);
     assert_contains('inline-size: 100%', $list);
+    $full = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {');
+    assert_contains('padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem)', $full, 'a full row keeps the page gutter');
     assert_contains('.header-archetype--spread-nav', (string) file_get_contents(repo_path('assets/header/header.js')));
     assert_eq(\Automattic\SiteBuild\HeaderBehavior::STICKY_SOFT, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
 });
