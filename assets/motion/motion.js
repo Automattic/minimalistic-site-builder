@@ -8,7 +8,7 @@
 (function () {
     var root = document.documentElement;
     var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .reveal-blur, '
-        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *';
+        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *, .count-up';
     var WORD_CLASS = 'word-reveal__word';
     var WORD_INLINE = /^(?:A|ABBR|B|EM|I|SPAN|STRONG|SUB|SUP|U|MARK|SMALL)$/;
 
@@ -240,8 +240,64 @@
             });
         }
 
+        // Count a figure up from zero when its block enters (frm W8b). The
+        // authored text stays the source of truth: prefix, thousands
+        // separators, decimals and suffix are preserved, only the digits
+        // move. Static paths (reduced motion, motion-skip, no JS) never call
+        // this, so the final figure is what they show.
+        function startCountUp(target) {
+            if (!target.classList.contains('count-up') || target.getAttribute('data-count-started') === 'true') {
+                return;
+            }
+            target.setAttribute('data-count-started', 'true');
+            var original = (target.textContent || '').trim();
+            var match = /^([^0-9]*)([0-9][0-9,.\u00a0 ]*[0-9]|[0-9])(.*)$/.exec(original);
+            if (!match) {
+                return;
+            }
+            var prefix = match[1];
+            var digits = match[2];
+            var suffix = match[3];
+            var separator = /,/.test(digits) ? ',' : '';
+            var decimalMatch = /\.([0-9]+)$/.exec(digits);
+            var decimals = decimalMatch ? decimalMatch[1].length : 0;
+            var finalValue = parseFloat(digits.replace(/[,\u00a0 ]/g, ''));
+            if (isNaN(finalValue)) {
+                return;
+            }
+            var durationText = getComputedStyle(root).getPropertyValue('--motion-count-duration');
+            var duration = parseFloat(durationText) || 1400;
+            if (/s\s*$/.test(durationText) && !/ms\s*$/.test(durationText)) {
+                duration = duration * 1000;
+            }
+            var format = function (value) {
+                var fixed = value.toFixed(decimals);
+                if (separator !== '') {
+                    var parts = fixed.split('.');
+                    parts[0] = parts[0].replace(/\B(?=([0-9]{3})+(?![0-9]))/g, separator);
+                    fixed = parts.join('.');
+                }
+                return prefix + fixed + suffix;
+            };
+            var start = null;
+            var step = function (now) {
+                if (start === null) {
+                    start = now;
+                }
+                var progress = Math.min(1, (now - start) / duration);
+                var eased = 1 - Math.pow(1 - progress, 3);
+                target.textContent = progress >= 1 ? original : format(finalValue * eased);
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            target.textContent = format(0);
+            window.requestAnimationFrame(step);
+        }
+
         function show(target) {
             target.classList.add('is-visible');
+            startCountUp(target);
             if (observer) {
                 try {
                     observer.unobserve(target);

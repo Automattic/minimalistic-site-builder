@@ -189,6 +189,13 @@ final class SectionUnit extends AbstractPageSectionUnit
         // A marquee painted in copy (the same phrase three times in one
         // block) collapses to the phrase and the kit class (frm W8c).
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        // A figure-only block counts up when the profile runs entrances (frm W8b).
+        $markup = GeneratedMarkup::markFigures(
+            $markup,
+            $this->key($input),
+            is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
+            $repairs,
+        );
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

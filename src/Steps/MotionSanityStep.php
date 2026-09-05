@@ -522,7 +522,15 @@ final class MotionSanityStep implements Step
         if ($token === 'stagger-children' && count($doc->children($i)) < 2) {
             return 'stagger-children needs a container with at least two children';
         }
-        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
+        // A count-up figure (frm W8b) is an entrance for observation only: a
+        // stat row counts every figure, so it spends no section budget, and
+        // it needs text to count.
+        $isCountUp = $token === 'count-up';
+        if ($isCountUp && !in_array($doc->name($i), ['heading', 'paragraph'], true)) {
+            return 'count-up runs on a heading or paragraph that starts with a figure';
+        }
+        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true)
+            && !in_array($token, Motion::UNBUDGETED_ENTRANCES, true);
         // The marquee (frm W8c) is a band, not image motion: it keeps its own
         // one-per-page slot so a hero ken-burns does not silence the brief's
         // marquee, and it runs on a paragraph only.

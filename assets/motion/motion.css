@@ -72,6 +72,7 @@
     --motion-word-keyframe: motion-kit-word;
     --motion-word-stagger: 70ms;
     --motion-marquee-duration: 30s;
+    --motion-count-duration: 1400ms;
 }
 
 @media screen and (prefers-reduced-motion: no-preference) {
@@ -465,6 +466,14 @@
         to {
             transform: translateY(calc(var(--motion-ambient-distance) * -0.5));
         }
+    }
+
+    /* Count-up (frm W8b): a figure counts from zero when its block enters.
+       The element is never hidden at rest (the final figure is the no-JS and
+       reduced-motion state); tabular digits keep the line from jittering
+       while the number moves. The driver reads --motion-count-duration. */
+    .count-up {
+        font-variant-numeric: tabular-nums;
     }
 
     /* Marquee (frm W8c): the ONE lateral exception in the kit. motion.js

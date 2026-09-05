@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
@@ -4066,6 +4067,72 @@ final class GeneratedMarkup
                 'delivered' => $phrase,
                 'note' => "collapsed a phrase repeated in copy to one {$name}"
                     . ($name === 'paragraph' ? ' and handed it to the marquee kit class' : ''),
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    /**
+     * Mark a figure-only heading or paragraph ("120+", "98%", "$4.2M",
+     * "1,200") with the count-up entrance (frm W8b). The model rarely
+     * reaches for the class on its own; the figure IS the block's point, so
+     * the build commits it when the motion profile runs entrances. A block
+     * that already carries a kit motion class keeps it (one class per
+     * block); a sentence with a number in it is not a figure.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function markFigures(string $markup, string $part, string $motionProfile, array &$repairs = []): string
+    {
+        if (!in_array('count-up', Motion::allowedClasses($motionProfile), true)) {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['paragraph', 'heading'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<(p|h[1-6])\b[^>]*>)(.*)(<\/\2>\s*)$/su', $own, $shell) !== 1) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($shell[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match('/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:%|\+|x|×|[kKmMbB])?$/u', $text) !== 1
+                || mb_strlen($text, 'UTF-8') > 14) {
+                continue;
+            }
+            // A bare year is a date, not a count.
+            if (preg_match('/^(?:18|19|20|21)\d{2}$/', $text) === 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $hasKitMotion = false;
+            foreach ($tokens as $token) {
+                if (in_array($token, Motion::kitClasses(), true) && !in_array($token, Motion::HOVER_CLASSES, true)) {
+                    $hasKitMotion = true;
+                }
+            }
+            if ($hasKitMotion) {
+                continue;
+            }
+            $tokens[] = 'count-up';
+            $attrs['className'] = implode(' ', $tokens);
+            $document->setAttrs($index, $attrs);
+            $open = $shell[1];
+            $open = preg_match('/\sclass="/', $open) === 1
+                ? preg_replace('/\sclass="/', ' class="count-up ', $open, 1)
+                : preg_replace('/^(\s*<' . $shell[2] . ')/', '$1 class="count-up"', $open, 1);
+            $document->spliceOwnHtml($index, 0, strlen($own), $open . $shell[3] . $shell[4]);
+            $repairs[] = [
+                'part' => $part,
+                'block' => $name,
+                'authored' => $text,
+                'delivered' => $text,
+                'note' => 'a figure-only block takes the count-up entrance',
             ];
             $changed = true;
         }
