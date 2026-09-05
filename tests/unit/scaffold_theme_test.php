@@ -668,3 +668,15 @@ test('scaffold-theme sets statement lines at section-title scale with hairlines 
     assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 8vw)', $css, 'phones scale the line with the viewport');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme keys the project-grid tile rules on covers inside columns, never on a section band (frm PR-3q)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_grid_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Lumina');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    exec('rm -rf ' . escapeshellarg($tmp));
+    assert_contains('.section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover {', $css);
+    assert_contains('.section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover:hover .wp-block-cover__image-background {', $css);
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover {'), 'a section-level image band is a cover too and must keep its height');
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover__image-background {'), 'the band backdrop keeps its own scale');
+});
