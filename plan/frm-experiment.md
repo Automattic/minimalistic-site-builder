@@ -221,6 +221,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 27 | #474 | W8 (PR-8h) | Never count a year or prose: the sanity step checks count-up text (frm) | merged | pure-pass replay on zova-like11 proof row: 98% counts, 2024 and prose stay still; no build | (see git) |
 | 28 | #475 | W1c | Mark the in-view section on the pill and centered-bar navigation (frm) | merged | gist cbbfda1d7f2a05a8416894fab9562b8a: cohesion-like10-1c Playwright probe, the matching item carries is-current-section + aria-current=location after each scroll; kit-only, no LLM build | (see git) |
 | 29 | #476 | W1 (PR-1g) | Make the pill and centered bar inherit the proven header ink (frm) | merged | gist 025ef66bfd7d8b77c75ab75ddb51f936: cohesion-like10-1c scrolled pill, nav ink secondary 1.81:1 -> contrast 5.89:1 after the pure fixer replay on the delivered header | (see git) |
+| 30 | #477 | W3e (feature-row-hairlines) | Add the feature-row-hairlines section archetype (frm) | merged | gist e3a981980106e0a7e56ec95ba47ed93d: zova-like12 planned it unforced (marker lost to the rule-class stripper, fixed), zova-like12-3e rerun: four hairline columns, mobile 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -254,6 +255,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 28: W3e #473 merged. PR-8h built on `frm/count-up-years`: the sanity step applies FIGURE_PATTERN to a model-authored count-up (prose and bare years dropped with a note); the pattern admits a multiplier plus sign (50M+). Evidence: pure replay on zova-like11's proof row. Merged as #474.
 - 2026-09-05 turn 29: PR-8h #474 merged. W1c built on `frm/active-nav-pill`: header.js observes the sections a pill or centered-bar nav links to (#id) and marks the in-view item (is-current-section, aria-current=location); the kit paints a 12% ink tint chip. The header kit is copied at scaffold time, so the copy's theme got the new files by hand before the probe. Observation: cohesion-like10's scrolled pill paints the accent (orange) with the dark nav ink at low contrast; filed PR-1g to verify against HeaderBehavior's proof. Merged as #475.
 - 2026-09-05 turn 30: W1c #475 merged. PR-1g built on `frm/pill-nav-ink`: `HeaderNav::inheritProvenInk` drops authored token and inline text colours from the navigation, its links and the site title inside floating-pill and bar-center-cta headers so they inherit the proven foreground; other archetypes unchanged. Evidence: pure replay on the delivered header of the W1c copy, computed nav colour before/after. Merged as #476.
+- 2026-09-05 turn 31: PR-1g #476 merged. W3e feature-row-hairlines built on `frm/feature-row-hairlines`: archetype, fragment, page-plan text, checks (row shape, heading-led columns, no card shells), shared hairline CSS. Finding: `stripRuleClassTokens` removed the root marker because the archetype name contains "hairlines"; `section-composition--*` markers are now exempt. Merged as #477.
 
 ## 10. Parked / rejected
 
