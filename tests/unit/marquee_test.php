@@ -82,3 +82,17 @@ test('the kit owns the marquee scale and the boundary drops an authored size or 
     $plain = '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">Plain</p><!-- /wp:paragraph -->';
     assert_eq($plain, \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($plain, 'x', $repairs), 'nothing authored, nothing changed');
 });
+
+
+test('a marquee wraps whole under reduced motion or without the script, never an ellipsis (frm PR-8i)', function () {
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    $reduced = substr($css, (int) strpos($css, '@media screen and (prefers-reduced-motion: reduce)'));
+    $reduced = substr($reduced, 0, (int) strpos($reduced, "}\n}") + 3);
+    assert_contains('.marquee {', $reduced, 'the reduced-motion block addresses the marquee');
+    assert_contains('white-space: normal;', $reduced, 'the line wraps');
+    assert_contains('text-overflow: clip;', $reduced, 'no ellipsis');
+    assert_contains('text-wrap: balance;', $reduced);
+    assert_contains('html:not(.motion-js) .marquee {', $css, 'no script, no loop: the line wraps too');
+    $js = (string) file_get_contents(repo_path('assets/motion/motion.js'));
+    assert_contains("matchMedia('(prefers-reduced-motion: reduce)')", $js, 'the script never builds a track under reduced motion');
+});
