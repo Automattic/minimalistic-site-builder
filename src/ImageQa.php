@@ -38,6 +38,15 @@ final class ImageQa
         if (preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1) {
             return true;
         }
+        // Every picture that lives in a hero part is the face of the site,
+        // whatever its filename (frm PR-7f): cohesion-like15's avatar plate
+        // shipped as a painted letter block because only hero-named files
+        // and full-frame slots were inspected.
+        foreach ((array) ($spec['sources'] ?? []) as $source) {
+            if (is_string($source) && preg_match('~(?:^|/)page-[^/]*--hero\.html$~i', $source) === 1) {
+                return true;
+            }
+        }
         $pageContext = (string) ($spec['pageContext'] ?? '');
         if (ImageCrop::fullFrameSlot(
             GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),

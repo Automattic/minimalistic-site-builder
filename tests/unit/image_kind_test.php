@@ -182,3 +182,18 @@ test('a transparent 3d-object request asks for a floating, shadowless object (fr
     assert_contains('plain seamless backdrop', ImageKind::promptClause('3d-object'));
     assert_eq(ImageKind::promptClause('ui-mockup'), ImageKind::promptClause('ui-mockup', true), 'other kinds ignore the flag');
 });
+
+
+test('every picture in a hero part goes through the vision check, whatever its filename (frm PR-7f)', function () {
+    $plate = ['filename' => 'alexis-portrait-plate.jpg', 'aspectRatio' => 'portrait', 'pageContext' => 'small contained portrait plate centred above a display headline', 'sources' => ['parts/page-home--hero.html']];
+    assert_true(\Automattic\SiteBuild\ImageQa::applies($plate), 'the avatar plate lives in the hero part');
+    $card = $plate;
+    $card['sources'] = ['parts/page-home--services.html'];
+    assert_true(!\Automattic\SiteBuild\ImageQa::applies($card), 'the same picture in a section is not inspected');
+    $twoParts = $plate;
+    $twoParts['sources'] = ['parts/page-home--services.html', 'parts/page-about--hero.html'];
+    assert_true(\Automattic\SiteBuild\ImageQa::applies($twoParts), 'any hero part among the sources counts');
+    $png = $plate;
+    $png['filename'] = 'object.png';
+    assert_true(!\Automattic\SiteBuild\ImageQa::applies($png), 'a transparent asset never is');
+});
