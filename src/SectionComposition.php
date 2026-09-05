@@ -930,13 +930,13 @@ TEXT;
                     $document->children($index),
                     static fn (int $child): bool => $document->name($child) === 'column',
                 ));
+                // The copy side is the column that holds the step's heading,
+                // at any depth: the card contract wraps copy in a group.
                 $copySide = null;
                 foreach ($columns as $position => $column) {
-                    foreach ($document->children($column) as $child) {
-                        if ($document->name($child) === 'heading') {
-                            $copySide = $position;
-                            break 2;
-                        }
+                    if (self::holdsHeading($document, $column)) {
+                        $copySide = $position;
+                        break;
                     }
                 }
                 $rows[] = ['columns' => count($columns), 'copy' => $copySide];
@@ -1188,5 +1188,16 @@ TEXT;
             return false;
         }
         return in_array(SectionLabel::SIDE_CLASS, self::classTokens($document, $leading[0]), true);
+    }
+
+    /** True when a heading block sits anywhere inside the block (frm W3g). */
+    private static function holdsHeading(BlockMarkup $document, int $index): bool
+    {
+        foreach ($document->children($index) as $child) {
+            if ($document->name($child) === 'heading' || self::holdsHeading($document, $child)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

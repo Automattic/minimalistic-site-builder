@@ -807,4 +807,12 @@ test('the zigzag-steps archetype checks three to five two-column rows whose copy
 
     $plain = str_replace('section-composition--zigzag-steps', 'section-composition--asymmetric-split', $sameSide);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'zigzag'));
+
+    // The card contract wraps the copy in a group: the heading is read at any depth.
+    $wrapped = static fn (string $t): string => '<!-- wp:column {"width":"55%"} --><div class="wp-block-column"><!-- wp:group {"className":"card-style--flush"} --><div class="wp-block-group card-style--flush"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading --></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $empty = '<!-- wp:column {"width":"45%"} --><div class="wp-block-column"></div><!-- /wp:column -->';
+    $deep = $band('<!-- wp:columns --><div class="wp-block-columns">' . $wrapped('A') . $empty . '</div><!-- /wp:columns -->'
+        . '<!-- wp:columns --><div class="wp-block-columns">' . $empty . $wrapped('B') . '</div><!-- /wp:columns -->'
+        . '<!-- wp:columns --><div class="wp-block-columns">' . $wrapped('C') . $empty . '</div><!-- /wp:columns -->');
+    assert_eq([], SectionComposition::markupWarnings($deep, 'zigzag-steps', 'page-home--process'), 'a wrapped heading still names the copy side');
 });
