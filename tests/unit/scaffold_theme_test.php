@@ -584,3 +584,21 @@ test('scaffold-theme rounds the panel-stage hero panel from the shape scale (frm
     assert_contains('.hero-composition--panel-stage .hero-composition__stage img', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme paints the marquee-name hero name behind a centered stack (frm W2b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_marquee_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Ana Popescu');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.hero-composition--marquee-name .hero-composition__marquee {', $css);
+    $block = substr($css, strpos($css, '.hero-composition--marquee-name .hero-composition__marquee {'));
+    $block = substr($block, 0, strpos($block, '}'));
+    assert_contains('position: absolute', $block);
+    assert_contains('justify-content: center', $block, 'flex centering clips an over-wide name on both sides');
+    assert_contains('font-size: clamp(6rem, 24vw, 22rem)', $block);
+    assert_contains('opacity: 0.07', $block);
+    assert_contains('pointer-events: none', $block);
+    assert_contains('.hero-composition--marquee-name .hero-composition__media img {', $css);
+    assert_contains('border-radius: var(--shape-radius-card, 0)', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
