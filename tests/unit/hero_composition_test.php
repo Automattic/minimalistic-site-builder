@@ -594,3 +594,28 @@ test('a marquee-name hero on a 3d-object site may float two to four png objects 
     $inside = $hero($media . str_replace('</div><!-- /wp:group -->', $objects($object('a.png') . $object('b.png')) . '</div><!-- /wp:group -->', $copy) . $marquee);
     assert_contains('recipe floating objects', implode("\n", HeroComposition::markupWarnings($inside, 'marquee-name', 'page-home--hero', $blueprint)), 'objects inside the copy region');
 });
+
+
+test('the hero boundary renames a floating object authored as .jpg to the .png the key-out needs (frm PR-7e)', function () {
+    $object = static fn (string $file): string => '<!-- wp:image {"sizeSlug":"large"} --><figure class="wp-block-image"><img src="theme:./assets/' . $file . '" alt="AI_IMAGE: one matte clay sphere alone | floating hero object | 3d-render | square"/></figure><!-- /wp:image -->';
+    $objects = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition__objects","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__objects" aria-hidden="true">' . $inner . '</div><!-- /wp:group -->';
+    $media = '<!-- wp:group {"className":"hero-composition__media","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__media"><!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/avatar.jpg" alt="AI_IMAGE: a portrait | avatar plate | photorealistic | portrait"/></figure><!-- /wp:image --></div><!-- /wp:group -->';
+    $hero = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition--marquee-name","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition--marquee-name">' . $inner . '</div><!-- /wp:group -->';
+
+    $markup = $hero($media . $objects($object('clay-object-sphere.jpg') . $object('clay-object-torus.png') . $object('clay-object-cube.JPEG')));
+    $repairs = [];
+    $out = HeroComposition::keyObjectFilenames($markup, 'page-home--hero', $repairs);
+    assert_contains('src="theme:./assets/clay-object-sphere.png"', $out);
+    assert_contains('src="theme:./assets/clay-object-cube.png"', $out);
+    assert_contains('src="theme:./assets/clay-object-torus.png"', $out, 'an object already .png is untouched');
+    assert_contains('src="theme:./assets/avatar.jpg"', $out, 'the avatar plate keeps its opaque source');
+    assert_eq(2, count($repairs));
+    assert_eq('clay-object-sphere.jpg', $repairs[0]['authored']);
+    assert_eq('clay-object-sphere.png', $repairs[0]['delivered']);
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($out, 'marquee-name', 'page-home--hero', ['media_aspect' => 'portrait'])), 'recipe floating objects'), 'the renamed group passes the objects check');
+
+    $repairs = [];
+    $clean = $hero($media . $objects($object('a.png') . $object('b.png')));
+    assert_eq($clean, HeroComposition::keyObjectFilenames($clean, 'x', $repairs));
+    assert_eq([], $repairs);
+});
