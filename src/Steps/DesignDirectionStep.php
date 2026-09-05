@@ -9,6 +9,7 @@ use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\HeadingEmphasis;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\CtaStyle;
@@ -427,6 +428,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
+            'image_kind'       => ImageKind::DEFAULT,
             'image_treatment'  => ImageTreatment::DEFAULT,
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
@@ -905,6 +907,14 @@ final class DesignDirectionStep implements Step
         );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
+        $imageKind = BoundedChoice::normalize(
+            $raw['image_kind'] ?? null,
+            ImageKind::ALL,
+            ImageKind::DEFAULT,
+            'image_kind',
+            $warnings,
+            'unsupported imagery kind replaced by photo',
+        );
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -987,6 +997,8 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            // What the pictures are (frm W7a); the grade says how they are lit.
+            'image_kind'       => $imageKind,
             'image_treatment'  => $imageTreatment,
             'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -1698,6 +1710,13 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
         }
 
+        $imageKind = ImageKind::explicit($direction['image_kind'] ?? null);
+        if ($imageKind !== null && $imageKind !== ImageKind::DEFAULT) {
+            $facts[] = "- **Image kind**: {$imageKind} — " . ImageKind::meaning($imageKind)
+                . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
+                . '`; the build appends the kind\'s render instruction to every image request.';
+        }
+
         $sectionLabel = SectionLabel::explicit($direction['section_label'] ?? null);
         if ($sectionLabel !== null && $sectionLabel !== 'none') {
             $facts[] = "- **Section label**: {$sectionLabel} — " . SectionLabel::meaning($sectionLabel)
@@ -2104,6 +2123,15 @@ final class DesignDirectionStep implements Step
      * The committed page surface, or `none` when no direction was persisted
      * or the field is absent.
      */
+    /** The committed imagery kind, or `photo`. */
+    public static function imageKindFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return ImageKind::DEFAULT;
+        }
+        return ImageKind::explicit($project->readJson(self::FILE)['image_kind'] ?? null) ?? ImageKind::DEFAULT;
+    }
+
     /** The committed section label device, or `none`. */
     public static function sectionLabelFor(Project $project): string
     {

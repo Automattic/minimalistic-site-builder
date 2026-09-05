@@ -210,6 +210,16 @@ final class GenerateImagesStep implements Step
         }
 
         $specs = $project->readJson('images.json');
+        // The committed imagery kind rides on every row (frm W7a) so the
+        // generation spec and the request log carry it without threading
+        // one more parameter through every repair path.
+        $imageKind = DesignDirectionStep::imageKindFor($project);
+        foreach ($specs as &$row) {
+            if (is_array($row)) {
+                $row['image_kind'] = $imageKind;
+            }
+        }
+        unset($row);
         if ($specs === []) {
             $this->markComplete($project);
             return;
@@ -558,6 +568,7 @@ final class GenerateImagesStep implements Step
                 $imageGrade,
                 $mime === 'image/png',
                 imageCrop: $imageCrop,
+                imageKind: (string) ($spec['image_kind'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
@@ -656,7 +667,8 @@ final class GenerateImagesStep implements Step
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => $imageGrade,
-        ] + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
+        ] + (($spec['image_kind'] ?? '') !== '' ? ['image_kind' => (string) $spec['image_kind']] : [])
+          + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
           + self::deliveredSubjectLog($spec, $imageGrade, $subject);
     }
 

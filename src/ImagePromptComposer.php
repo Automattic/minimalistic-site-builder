@@ -117,6 +117,7 @@ final class ImagePromptComposer
         bool $transparent = false,
         ?PromptRenderer $renderer = null,
         string $imageCrop = '',
+        string $imageKind = '',
     ): string {
         $renderer ??= new PromptRenderer(Package::promptsDir());
 
@@ -140,6 +141,13 @@ final class ImagePromptComposer
         $gradeClause = ($imageGrade !== '' && !$transparent)
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
+        // The committed imagery kind (frm W7a) is a render instruction like
+        // the grade and rides with it; unlike the grade it also applies to a
+        // transparent asset, whose whole point may be an isolated 3D object.
+        $kindClause = ImageKind::promptClause($imageKind);
+        if ($kindClause !== '') {
+            $gradeClause = trim($gradeClause . ' ' . $kindClause);
+        }
 
         // Like the grade, this is a render instruction: it sits before the
         // guidance so end-trimming under token pressure never sheds it. The model
