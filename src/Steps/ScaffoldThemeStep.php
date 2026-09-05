@@ -608,6 +608,60 @@ final class ScaffoldThemeStep implements Step
             height: auto;
             object-fit: cover;
         }
+        /* marquee-name (frm W2b): the site name runs giant and clipped
+           behind a centered stack. The name is one aria-hidden paragraph the
+           model marks; it is painted here at display scale in the heading
+           face, at low opacity in the surface's own foreground, centered by
+           flex so an over-wide name clips evenly on both sides, and taken
+           out of the flow so the copy above it keeps its rhythm. */
+        .hero-composition--marquee-name {
+            position: relative;
+            overflow: hidden;
+        }
+        .hero-composition--marquee-name .hero-composition__marquee {
+            position: absolute;
+            inset-inline: 0;
+            top: 0;
+            display: flex;
+            justify-content: center;
+            margin: 0;
+            padding: 0;
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            font-size: clamp(6rem, 24vw, 22rem);
+            font-weight: 800;
+            line-height: 0.9;
+            letter-spacing: -0.045em;
+            white-space: nowrap;
+            color: currentColor;
+            opacity: 0.07;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .hero-composition--marquee-name .hero-composition__media,
+        .hero-composition--marquee-name .hero-composition__copy {
+            position: relative;
+            z-index: 1;
+        }
+        .hero-composition--marquee-name .hero-composition__media img {
+            display: block;
+            width: clamp(7rem, 16vw, 13rem);
+            aspect-ratio: 1;
+            height: auto;
+            margin-inline: auto;
+            object-fit: cover;
+            border-radius: var(--shape-radius-card, 0);
+            box-shadow: 0 18px 40px rgb(0 0 0 / 0.12);
+            transform: rotate(-3deg);
+        }
+        .hero-composition--marquee-name.hero-media--portrait .hero-composition__media img {
+            aspect-ratio: 4 / 5;
+        }
+        @media (max-width: 600px) {
+            .hero-composition--marquee-name .hero-composition__marquee {
+                font-size: 30vw;
+            }
+        }
         @media (max-width: 600px) {
             .hero-composition--panel-stage .hero-composition__panel {
                 padding-inline: 1.25rem !important;

@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(4, count(HeroComposition::RECIPES));
+    assert_eq(5, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -401,4 +401,46 @@ test('panel-stage is a two-image foreground recipe that stays out of one-image c
     assert_eq('panel-stage', $blueprint['recipe']);
     assert_eq('foreground-image', $blueprint['media_mode']);
     assert_eq('asymmetric-split', HeroComposition::planProjection($blueprint)['layout_archetype']);
+});
+
+test('marquee-name is a one-image centered recipe whose objective check wants the marked name paragraph (frm W2b)', function () {
+    assert_true(in_array('marquee-name', HeroComposition::RECIPES, true));
+    $meta = HeroComposition::metadata('marquee-name');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    assert_eq(['stacked'], $meta['header_modes'], 'the header sits above the stage');
+    assert_eq(['base', 'tinted'], $meta['backgrounds']);
+    assert_eq('centered-stack', $meta['layout_archetype']);
+    assert_eq(1, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(in_array('marquee-name', HeroComposition::compatible(['max_hero_images' => 1]), true), 'a one-image cap keeps it');
+    assert_true(!in_array('marquee-name', HeroComposition::compatible(['allowed_hero_media_modes' => ['cover-image']]), true));
+    $blueprint = \Automattic\SiteBuild\HeroBlueprint::defaultFor('marquee-name');
+    assert_eq('marquee-name', $blueprint['recipe']);
+    assert_eq('stack-media-first', $blueprint['mobile_transformation']);
+    assert_eq('centered-stack', HeroComposition::planProjection($blueprint)['layout_archetype']);
+
+    $sound = '<!-- wp:group {"className":"hero-composition--marquee-name","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--marquee-name">'
+        . '<!-- wp:group {"className":"hero-composition__media","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__media">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/avatar.jpg" alt="AI_IMAGE: Portrait of the designer | avatar slot | photorealistic | square"/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"textAlign":"center"} --><h1 class="has-text-align-center">Designing calm products</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">UX in Bucharest.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee" aria-hidden="true">Ana Popescu</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($sound, 'marquee-name', 'page-home--hero'));
+
+    $missing = str_replace('<!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee" aria-hidden="true">Ana Popescu</p><!-- /wp:paragraph -->', '', $sound);
+    $warnings = HeroComposition::markupWarnings($missing, 'marquee-name', 'page-home--hero');
+    assert_eq(1, count(array_filter($warnings, fn (string $w): bool => str_contains($w, 'recipe marquee name'))), 'a missing name paragraph is the objective failure');
+
+    $inside = str_replace(
+        ['<!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee" aria-hidden="true">Ana Popescu</p><!-- /wp:paragraph -->', '</p><!-- /wp:paragraph --></div><!-- /wp:group -->'],
+        ['', '</p><!-- /wp:paragraph --><!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee">Ana Popescu</p><!-- /wp:paragraph --></div><!-- /wp:group -->'],
+        $sound,
+    );
+    $warnings = HeroComposition::markupWarnings($inside, 'marquee-name', 'page-home--hero');
+    assert_eq(1, count(array_filter($warnings, fn (string $w): bool => str_contains($w, 'recipe marquee name'))), 'the name inside the copy region is the same failure');
 });

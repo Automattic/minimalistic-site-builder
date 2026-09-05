@@ -18,7 +18,11 @@ final class HeroComposition
         'foreground-split',
         'layered-poster',
         'panel-stage',
+        'marquee-name',
     ];
+
+    /** The one decorative element of marquee-name: the site name at display scale behind the copy (frm W2b). */
+    public const MARQUEE_CLASS = 'hero-composition__marquee';
 
     /**
      * The shape of the media slot, and how much of the composition it takes.
@@ -177,6 +181,42 @@ final class HeroComposition
                 'height_profile' => 'standard', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-copy-first',
                 'media_aspect' => 'landscape', 'media_weight' => 'balanced',
+            ],
+        ],
+        // frm W2b: the playful-portfolio opener of the reference corpus
+        // (Cohesion). The site name runs giant and clipped behind a centered
+        // stack: one small avatar plate, the headline, at most one line and
+        // one action. The name is decorative (aria-hidden paragraph the kit
+        // paints at low opacity), never a heading, and it sits last in the
+        // root so the H1 stays the hero's first text line. The header stays
+        // stacked above the stage.
+        'marquee-name' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 1,
+            'max_images' => 1,
+            'backgrounds' => ['base', 'tinted'],
+            'default_background' => 'base',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-media-first'],
+            'layout_archetype' => 'centered-stack',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--marquee-name',
+            'prompt' => 'hero-compositions/marquee-name.md',
+            'headline_registers' => ['display', 'poster'],
+            'height_profiles' => ['standard', 'immersive'],
+            'media_aspects' => ['square', 'portrait'],
+            'media_weights' => ['balanced'],
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                'text_anchor' => 'center',
+                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 4]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-media-first',
+                'media_aspect' => 'square', 'media_weight' => 'balanced',
             ],
         ],
         'layered-poster' => [
@@ -584,6 +624,32 @@ final class HeroComposition
                 ['wp_cover_count' => $covers],
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
+        }
+        // frm W2b: the marquee name is the recipe's whole point. Exactly one
+        // marked paragraph, outside the copy region (the H1 stays the first
+        // text line and the copy budget stays honest), with text in it.
+        if ($recipe === 'marquee-name') {
+            $marquees = [];
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index) ?? [];
+                $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(self::MARQUEE_CLASS, $classes, true)) {
+                    $marquees[] = $index;
+                }
+            }
+            $sound = count($marquees) === 1
+                && $document->name($marquees[0]) === 'paragraph'
+                && !self::hasAncestorClass($document, $marquees[0], 'hero-composition__copy')
+                && trim(strip_tags($document->innerHtml($marquees[0]))) !== '';
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe marquee name',
+                    ['required_class' => self::MARQUEE_CLASS, 'count' => 1, 'block' => 'paragraph', 'outside' => 'hero-composition__copy'],
+                    ['matching_blocks' => count($marquees)],
+                    'safe parseable hero was retained; restore the one marked, non-empty name paragraph outside the copy region',
+                );
+            }
         }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
