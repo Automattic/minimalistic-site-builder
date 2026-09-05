@@ -322,11 +322,16 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             '/\.hero-composition--cinematic-safe-zone\.hero-mobile--stack-media-first\s+'
                 . '\.wp-block-cover__inner-container\s+'
                 . ':is\(h1, h2, h3, h4, h5, h6, p, cite\):not\(\.wp-block-button__link\)\s*\{\s*'
-                . 'color:\s*var\(--wp--preset--color--base\)\s*!important;\s*\}/',
+                . 'color:\s*var\(--wp--preset--color--contrast\)\s*!important;\s*\}/',
             $css
         ),
         'the transformed solid panel owns descendant copy color as one scoped rule'
     );
+    // The panel is the page ground, not a contrast slab (frm PR-2i).
+    $phone = substr($css, (int) strpos($css, '.hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first .wp-block-cover {'));
+    $phone = substr($phone, 0, (int) strpos($phone, '.hero-composition--marquee-name .hero-composition__objects'));
+    assert_eq(2, substr_count($phone, 'background: var(--wp--preset--color--base);'), 'the cover field and the inner panel take the page ground');
+    assert_true(!str_contains($phone, 'background: var(--wp--preset--color--contrast);'), 'no contrast slab on a phone');
 
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);

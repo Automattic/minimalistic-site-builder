@@ -104,6 +104,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-8i (cohort-3): the marquee kit ellipsizes its text under reduced motion (spector-like11 "Identity · Editorial · Wa…"); the rule says everything must be fully visible when motion is off. Fix: under `prefers-reduced-motion` the marquee wraps or scales to fit instead of `text-overflow: ellipsis`.
 - PR-2h (cohort-3): a stated light page with no stated hero still draws a full-bleed dark cover (luzia-like10 cinematic-safe-zone). Fix: when GroundKey::statedInBrief says light and HeroComposition::statedInBrief is null, the compatible pool drops the cover recipes, so the site opens on the page ground (portrait-backdrop, marquee-name, panel-stage, foreground-split).
 - PR-2i (cohort-3): the cinematic stack-media-first phone transform paints the copy on a `contrast` panel with `base` text; on a dark site that is a light panel on a dark page (dreammotion-like13 at 390). Fix: the panel takes the page ground (`base`) with `contrast` text, and the image field above keeps the photo.
+- PR-2j (cohort-3, found on the PR-2i evidence): the cinematic stack-media-first phone transform reserves `min(62vw, 28rem)` for the photo above the copy, but the field renders empty on dreammotion-like13 and luzia-like10 at 390 (before and after PR-2i alike). Suspects: the cover image carries `ken-burns`/reveal classes that the harness holds at opacity 0, or the absolute image loses its box under the padding transform. Fix: probe the computed style at 390, then keep the image visible in the field (static under reduced motion).
 - PR-5f (cohort-3): a brief that says "bold black type" (cohesion) still gets a serif display face from the playful shelf. Fix: a stated weight or "sans" word in the brief pins the sans shelf in FontShortlist, the way stated ground and hero already outrank the stable pick.
 - PR-3h2: `logo-strip` as a row of text wordmarks in muted ink; never generated logo images, because a painted wordmark is the text-in-image defect (BIGR-768) by construction.
 - PR-3i: `newsletter-columns` footer composition; verify `sunken-wordmark` renders like the references.
@@ -277,6 +278,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 58 | #505 | W3 (PR-3q) | Keep a section image band whole under a project grid (frm) | merged | gist df28683825f210b791ffbf6e31420242: dreammotion-like13 gallery band before/after (CSS mirrored), bottom row whole; cohort-3 mobile sheet | f53c8591 |
 | 59 | #506 | W3 (PR-3p) | Own a project tile's overlay and ink on every ground (frm) | merged | gist 1e4abdc94e72b6c4cf0a08739bdef689: dreammotion-like13 both grids before/after (helper mirrored into the seeded page), luzia-like10 light site unchanged in read | f2cbb3d5 |
 | 60 | #507 | W8 (PR-8i) | Wrap the marquee whole under reduced motion (frm) | merged | gist 126b587259ea911f756fd7f2ee407c1b: spector-like11 marquee before (ellipsis) / after (three balanced lines), 390 five lines; kit mirrored | 763c7500 |
+| 61 | #508 | W2 (PR-2h) | Open a stated light page on its ground when the brief names no hero (frm) | merged | selector replay on luzia-like10's own seed: cinematic-safe-zone -> marquee-name with the yield note; direction rerun on a copy kept an already-grounded pick; no build | 2bb1685e |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -344,6 +346,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 62: PR-3q #505 merged (tile rules scoped to covers inside columns). Next: PR-3p on branch frm/tile-ink: the build owns a project tile's overlay and ink (black at 50%, white text) on every ground; the fragment stops naming palette slugs for the tile.
 - 2026-09-05 turn 63: PR-3p #506 merged (black overlay at 50% + white text on every project tile; the band keeps its surface). Next: PR-8i on branch frm/marquee-wrap: under reduced motion or without the script the marquee wraps as a balanced centered statement instead of clipping to an ellipsis.
 - 2026-09-05 turn 64: PR-8i #507 merged (the marquee wraps whole under reduced motion and without the script). Next: PR-2h on branch frm/light-ground-hero: a stated light page with no stated hero drops the cover recipes from the pool inside the caller's constraints, so the site opens on its ground.
+- 2026-09-05 turn 65: PR-2h #508 merged (a cover stable pick yields to the foreground pool on a stated light page with no stated hero; an already-grounded pick keeps its seat). Next: PR-2i on branch frm/phone-panel-ground: the cinematic phone panel takes the page ground (base) with contrast ink instead of a contrast slab.
 
 ## 10. Parked / rejected
 

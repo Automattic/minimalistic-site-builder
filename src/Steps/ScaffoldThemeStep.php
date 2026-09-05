@@ -877,11 +877,13 @@ final class ScaffoldThemeStep implements Step
                reparent its nested copy. Turn only the assigned cinematic
                mobile variant into a visual media-then-copy sequence: the
                cover image/protection layer occupies the upper field and the
-               inner container becomes the solid readable lower field. */
+               inner container becomes the solid readable lower field. The
+               field is the page ground (frm PR-2i): a contrast panel was a
+               light slab on a dark site (dreammotion-like13 at 390). */
             .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first .wp-block-cover {
                 min-height: 0 !important;
                 padding: min(62vw, 28rem) 0 0;
-                background: var(--wp--preset--color--contrast);
+                background: var(--wp--preset--color--base);
             }
             .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
                 .wp-block-cover__image-background,
@@ -896,19 +898,20 @@ final class ScaffoldThemeStep implements Step
                 width: 100%;
                 box-sizing: border-box;
                 padding: var(--wp--preset--spacing--lg) var(--wp--preset--spacing--md);
-                background: var(--wp--preset--color--contrast);
-                color: var(--wp--preset--color--base);
+                background: var(--wp--preset--color--base);
+                color: var(--wp--preset--color--contrast);
             }
             /* The transform above swaps the copy's surface from dimmed image
-               to solid contrast, so it must own the copy color too: authored
-               inline/preset colors were picked for the overlay surface and can
-               land light-on-light on this panel (invisible H1, BIGR-788).
-               base-on-contrast is the palette's maximum-contrast pair. Buttons
-               and links keep their own chrome. */
+               to the solid page ground, so it must own the copy color too:
+               authored inline/preset colors were picked for the overlay
+               surface and can land light-on-light on this panel (invisible
+               H1, BIGR-788). contrast-on-base is the palette's maximum-
+               contrast pair on every ground. Buttons and links keep their
+               own chrome. */
             .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
                 .wp-block-cover__inner-container
                 :is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link) {
-                color: var(--wp--preset--color--base) !important;
+                color: var(--wp--preset--color--contrast) !important;
             }
             .hero-composition--marquee-name .hero-composition__objects > figure {
                 width: clamp(3rem, 16vw, 4.5rem);
