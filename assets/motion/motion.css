@@ -476,6 +476,36 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* Sticky stack (frm W8d): the direct children of a marked container
+       pin under the header one after another as the page scrolls, each a
+       little lower than the last, so the cards pile up (Cohesion's stack).
+       Pure CSS, vertical only; the container is a plain column so every
+       card has room to travel. Inert under reduced motion (this block). */
+    .sticky-stack {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--wp--preset--spacing--md, 1.5rem);
+    }
+    .sticky-stack > * {
+        position: sticky;
+        top: calc(var(--header-safe-top, 5rem) + var(--stack-offset, 0rem));
+        /* A card pins only while its container still has room below it; a
+           short stack scrolls away before anything piles. Each card claims
+           most of a viewport so the pile is visible as the reader scrolls. */
+        min-block-size: 60vh;
+        box-sizing: border-box;
+    }
+    .sticky-stack > :nth-child(1) { --stack-offset: 0rem; }
+    .sticky-stack > :nth-child(2) { --stack-offset: 1rem; }
+    .sticky-stack > :nth-child(3) { --stack-offset: 2rem; }
+    .sticky-stack > :nth-child(4) { --stack-offset: 3rem; }
+    .sticky-stack > :nth-child(5) { --stack-offset: 4rem; }
+    .sticky-stack > :nth-child(6) { --stack-offset: 5rem; }
+    /* A pinned card must own its surface, or the one beneath shows through. */
+    .sticky-stack > *:not(.has-background) {
+        background-color: var(--wp--preset--color--base, #fff);
+    }
+
     /* Marquee (frm W8c): the ONE lateral exception in the kit. motion.js
        rebuilds the marked paragraph as a track of two identical groups of
        repeated items, so a translate of half the track loops without a
