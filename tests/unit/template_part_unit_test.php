@@ -615,6 +615,7 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
         'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
         'color-field' => 'One massive inset panel of a single strong palette color',
         'repeat-rail' => 'The identity as printed tape',
+        'newsletter-columns' => 'an INVITATION ROW over',
     ];
 
     assert_eq(FooterComposition::ARCHETYPES, array_keys($markers));

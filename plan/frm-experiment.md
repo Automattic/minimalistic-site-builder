@@ -240,6 +240,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 43 | #490 | W3g | Add the zigzag-steps section archetype (frm) | merged | gist 56e763a8a0b8843019b0dc816dd2838b: luzia-like8 planned zigzag-steps unforced, five numbered steps alternating in the rounded band, media empty (proxy); mobile 390 | (see git) |
 | 44 | #491 | W3 (PR-3k) | Keep the plate shape in an emptied zigzag media column (frm) | merged | gist b60601726acb5c8c2c7b841bbfeb2cf7: luzia-like8-3k replay, tinted plates opposite each step where the failed images were dropped | (see git) |
 | 45 | #492 | W5c | Stack display lines under the uppercase treatments (frm) | merged | gist d5054962392e23fdb3d2d226b77bcd3e: spector-like7-5c finalize replay, three-line caps H1 at line-height 0.92 with balanced breaks | (see git) |
+| 46 | #493 | W3e (statement-lines) | Add the statement-lines section archetype (frm) | merged | gist 029fc3967b71be56ce07ab32bff2a7a4: spector-like8 planned it unforced, five caps statements with hairlines inside a side-label split; mobile 390 (phone cap added after the crop) | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -289,6 +290,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 44: PR-8g #489 merged. W3g built on `frm/zigzag-steps`: archetype (3-5 two-column rows, alternating copy side, step-plate fallback), checks, CSS (centered rows, plate, copy-first on phones), page-plan text. luzia-like8 planned it unforced with chips; the alternation check first missed headings wrapped in card groups (fixed: heading at any depth). Follow-up: insert an empty step-plate when the media image is dropped. Merged as #490.
 - 2026-09-05 turn 45: W3g #490 merged. PR-3k on `frm/zigzag-plate`: theme CSS gives a zigzag media column with no element child the plate's height, radius and a 6% ink tint (`:not(:has(*))`, whitespace-safe). Replayed on a luzia-like8 copy. Merged as #491.
 - 2026-09-05 turn 46: PR-3k #491 merged. W5c built on `frm/display-lines`: a treatment overlay kit for caps-tight/caps-tracked (hero H1 and display headings at line-height 0.92 + text-wrap balance), finalize ship/prune, scaffold balance for every hero heading; the theme model's heading lineHeight stays untouched elsewhere. Merged as #492.
+- 2026-09-05 turn 47: W5c #492 merged. W3e statement-lines built on `frm/statement-lines`: one marked group of 3-6 heading lines, hairlines and section-title scale from the theme, page-plan text; spector-like8 planned it unforced with no warnings. The 390 crop showed four-line statements, so the line now scales with the viewport on phones (8vw cap). W3e is complete. Merged as #493.
 
 ## 10. Parked / rejected
 
