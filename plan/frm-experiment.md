@@ -226,6 +226,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 31 | #478 | W4 (PR-4h) | Land a moved page ground near white or near black (frm) | merged | gist f6633d8975318c275286af74d76a9322: move('#0D0F12','light') #949596 -> #F1F1F2; zova-like12-4h (noir seed forced, rebuilt) page pixel (246,241,232) vs (148,149,150) | (see git) |
 | 32 | #479 | W4c | Add the band_geometry direction token with a rounded band kit (frm) | merged | gist fa76f46f85132e45d43899fb54268d06: luzia-like6 committed rounded unforced; process band inset (margin 27px, radius 24px), mobile 390 | (see git) |
 | 33 | #480 | W4 (PR-4i) | Read the stated ground from the user's own words first (frm) | merged | gist 6aa3dec6b0fd464aeb515c2dcfb58e61: luzia-like6-4i dark seed forced, original prompt read, light page (239,231,220) vs (11,15,20) | (see git) |
+| 34 | #481 | W6c | Add the step-numeral device for process sections (frm) | merged | gist d1fb1c457a38cf16d80438e3dc78aa5f: luzia-like7 committed chip unforced, four chips in the rounded band (chips also counted, fixed); luzia-like7-6c rerun: five plain chips, mobile 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -263,6 +264,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 32: W3e feature-row #477 merged. P0 from that build: zova-like12 shipped a grey page (#949596) for a white-page brief because GroundKey::move crossed the luminance split by the clearance only. PR-4h on `frm/ground-move-light`: a moved ground lands at luminance 0.88 (light) or 0.03 (dark) in the authored hue. Evidence: pure replay plus a noir-seed rerun of zova-like12 rebuilt from theme-json. Merged as #478.
 - 2026-09-05 turn 33: PR-4h #478 merged. W4c built on `frm/rounded-band`: `BandGeometry` (square|rounded) direction token, band overlay kit (inset + panel radius on top-level contrast/band sections, hero and covers spared), finalize ship/prune, prompt text. luzia-like6 committed it unforced. Finding: luzia landed on a dark ground for a "Light page" brief because the stated-ground ration reads the refined prompt (meta.prompt), which dropped the phrase; filed PR-4i (read meta.original_prompt too). Merged as #479.
 - 2026-09-05 turn 34: W4c #479 merged. PR-4i on `frm/stated-ground-source`: `DesignDirectionStep::statedGroundFor` reads meta.original_prompt before the refined prompt; the refine prompt keeps a stated ground word for word. Evidence: luzia-like6 copy with the dark seed forced, rebuilt from theme-json, light page. Merged as #480.
+- 2026-09-05 turn 35: PR-4i #480 merged. W6c built on `frm/step-numeral`: `StepNumeral` (none|chip|ghost) direction token, numeral overlay kit, section prompt rule, boundary guard (committed + process section + first in a step item + digits only, renumbered 1..n), count-up marker and sanity step skip ordinals. luzia-like7 committed chip unforced; the chips also carried count-up (fixed, rerun as luzia-like7-6c). Trunk merge rechecked clean at 7fa2c663. Merged as #481.
 
 ## 10. Parked / rejected
 
