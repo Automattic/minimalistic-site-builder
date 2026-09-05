@@ -41,7 +41,14 @@ final class SectionComposition
         'faq-split',
         'cta-panel',
         'pricing-tiers',
+        'stat-ledger',
     ];
+
+    /** The figure counts a stat-ledger row may carry (frm W3e). */
+    public const STAT_LEDGER_COUNTS = [3, 4];
+
+    /** A figure-only text: what a stat-ledger column leads with (mirrors GeneratedMarkup::markFigures). */
+    public const FIGURE_PATTERN = '/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:%|\+|x|×|[kKmMbB]|\p{L}{1,2})?$/u';
 
     /** The tier counts a pricing-tiers row may carry: two plans or three (frm W3c). */
     public const PRICING_TIER_COUNTS = [2, 3];
@@ -317,6 +324,24 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--pricing-tiers',
             'prompt' => 'section-compositions/pricing-tiers.md',
+        ],
+        // frm W3e: the reference corpus' proof-by-numbers row. One row of
+        // three or four columns, each a figure heading over one short label,
+        // hairlines between the columns drawn by the theme. The row shape,
+        // the figure-led columns and the absence of media are checked in
+        // markupWarnings(); the count-up entrance lands at the section
+        // boundary when the motion profile runs entrances.
+        'stat-ledger' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--stat-ledger',
+            'prompt' => 'section-compositions/stat-ledger.md',
         ],
     ];
 
@@ -743,6 +768,52 @@ TEXT;
                     ['archetype' => $archetype, 'buttons' => $tierCount, 'minimum_lists' => $tierCount],
                     ['buttons' => $buttons, 'lists' => $lists],
                     'safe parseable section was retained; every tier carries one feature list and one action',
+                );
+            }
+        }
+
+        if ($archetype === 'stat-ledger') {
+            $rows = [];
+            $figureColumns = 0;
+            $columnsTotal = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+                $rows[] = count($columns);
+                foreach ($columns as $column) {
+                    $columnsTotal++;
+                    $first = $document->children($column)[0] ?? null;
+                    if ($first === null || $document->name($first) !== 'heading') {
+                        continue;
+                    }
+                    $text = trim(html_entity_decode(strip_tags($document->innerHtml($first)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    if (preg_match(self::FIGURE_PATTERN, $text) === 1) {
+                        $figureColumns++;
+                    }
+                }
+            }
+            $count = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($count, self::STAT_LEDGER_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stat ledger row',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'figures' => self::STAT_LEDGER_COUNTS],
+                    ['column_rows' => count($rows), 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a stat ledger is one row of three or four figure columns',
+                );
+            }
+            if ($columnsTotal > 0 && $figureColumns < $columnsTotal) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stat ledger figures',
+                    ['archetype' => $archetype, 'figure_led_columns' => $columnsTotal],
+                    ['figure_led_columns' => $figureColumns],
+                    'safe parseable section was retained; every column leads with a heading that is only a figure',
                 );
             }
         }

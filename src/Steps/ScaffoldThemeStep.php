@@ -832,6 +832,33 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Stat ledger (the stat-ledger archetype, frm W3e): figure headings
+           at display scale in the heading face over caption labels, with
+           hairlines between the columns; on phones the row stacks and the
+           hairline turns horizontal. Authored separators are not needed. */
+        .section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            /* Capped by the viewport so a four-column figure never runs out
+               of its column (spector-like6: "4 YEARS" clipped at 1366). */
+            font-size: min(var(--wp--preset--font-size--display), 7vw);
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: -0.03em;
+            margin-block-end: 0.35em;
+        }
+        .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {
+            border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+            padding-inline-start: var(--wp--preset--spacing--md, 1.5rem);
+        }
+        @media (max-width: 781px) {
+            .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {
+                border-inline-start: 0;
+                border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+                padding-inline-start: 0;
+                padding-block-start: var(--wp--preset--spacing--md, 1.5rem);
+            }
+        }
+
         /* Closing invitation panel (the cta-panel archetype): a contained
            card on the page ground, rounded from the committed shape scale
            and clipped so a background image or gradient follows the corner. */

@@ -620,7 +620,7 @@ test('the pricing-tiers archetype checks one row of two or three tiers, one high
     assert_eq(true, $meta['requires_row']);
     assert_eq(0, $meta['max_images'], 'pricing carries no image');
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'cta-panel, pricing-tiers"'), 'the page plan enum lists it');
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'cta-panel, pricing-tiers'), 'the page plan enum lists it');
 
     $tier = static fn (string $extra = '', bool $list = true, bool $button = true): string => '<!-- wp:column {"width":"33.33%","verticalAlignment":"stretch"} --><div class="wp-block-column">'
         . '<!-- wp:group {"className":"card-style--flush card-flush' . $extra . '"} --><div class="wp-block-group card-style--flush card-flush' . $extra . '">'
@@ -667,4 +667,49 @@ test('the pricing-tiers archetype checks one row of two or three tiers, one high
     // Other archetypes never see the pricing checks.
     $plain = str_replace('section-composition--pricing-tiers', 'section-composition--equal-card-grid', $four);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'pricing'));
+});
+
+test('the stat-ledger archetype checks one row of three or four figure-led columns and no media (frm W3e)', function () {
+    assert_true(in_array('stat-ledger', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('stat-ledger');
+    assert_eq('section-compositions/stat-ledger.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'pricing-tiers, stat-ledger"'), 'the page plan enum lists it');
+
+    $column = static fn (string $figure, string $label = 'projects shipped'): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $figure . '</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">' . $label . '</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--stat-ledger","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--stat-ledger">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">By the numbers</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $four = $band($row($column('120+') . $column('98%') . $column('$4.2M') . $column('1,200')));
+    assert_eq([], SectionComposition::markupWarnings($four, 'stat-ledger', 'page-home--metrics'));
+    $three = $band($row($column('12 km') . $column('40') . $column('3x')));
+    assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
+    $unitWord = $band($row($column('4 years') . $column('40') . $column('3x')));
+    assert_contains('stat ledger figures', implode("\n", SectionComposition::markupWarnings($unitWord, 'stat-ledger', 'page-home--metrics')), 'a unit word belongs in the label');
+    assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
+
+    $two = $band($row($column('120+') . $column('98%')));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('stat ledger row', $joined);
+    assert_contains('"columns_per_row":[2]', $joined);
+
+    $sentence = $band($row($column('120+') . $column('98%') . $column('Over 4 million raised')));
+    $joined = implode("\n", SectionComposition::markupWarnings($sentence, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('stat ledger figures', $joined);
+    assert_contains('"figure_led_columns":2', $joined);
+
+    $withImage = str_replace('<h3 class="wp-block-heading">120+</h3><!-- /wp:heading -->', '<h3 class="wp-block-heading">120+</h3><!-- /wp:heading --><!-- wp:image --><figure class="wp-block-image"><img src="x.jpg" alt=""/></figure><!-- /wp:image -->', $four);
+    $joined = implode("\n", SectionComposition::markupWarnings($withImage, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('archetype media count', $joined);
+
+    $plain = str_replace('section-composition--stat-ledger', 'section-composition--equal-card-grid', $two);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'stat ledger'));
 });
