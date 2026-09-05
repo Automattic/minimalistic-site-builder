@@ -663,10 +663,12 @@ final class DesignDirectionStep implements Step
             }
         }
         if ($stated !== null && in_array($stated, $pool, true)) {
-            $statedNote = 'designDirection.json: hero recipe stable pick '
-                . self::describe(HeroComposition::select($stableIdentifier, $conceptSeed, $constraints))
-                . ' delivered ' . self::describe($stated)
-                . '; disposition the brief names its hero, so the stable pick yields to it';
+            $stablePick = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            if ($stablePick !== $stated) {
+                $statedNote = 'designDirection.json: hero recipe stable pick ' . self::describe($stablePick)
+                    . ' delivered ' . self::describe($stated)
+                    . '; disposition the brief names its hero, so the stable pick yields to it';
+            }
             return $stated;
         }
 
