@@ -884,3 +884,39 @@ test('the project-grid-2x2 archetype checks rows of two cover tiles, each naming
     $plain = str_replace('section-composition--project-grid-2x2', 'section-composition--equal-card-grid', $three);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'project grid'));
 });
+
+
+test('the logo-strip archetype checks one marked row of four to eight one-line names and no images (frm PR-3h2)', function () {
+    assert_true(in_array('logo-strip', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('logo-strip');
+    assert_eq('section-compositions/logo-strip.md', $meta['prompt']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'project-grid-2x2, logo-strip'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), '- logo-strip — '));
+    assert_eq([4, 5, 6, 7, 8], SectionComposition::LOGO_STRIP_COUNTS);
+
+    $name = static fn (string $t): string => '<!-- wp:paragraph --><p>' . $t . '</p><!-- /wp:paragraph -->';
+    $row = static fn (string $inner): string => '<!-- wp:group {"className":"logo-strip","align":"wide","layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"}} --><div class="wp-block-group alignwide logo-strip">' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--logo-strip","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--logo-strip"><!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">Trusted by teams at</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($name('Northline') . $name('Atlas Harbor') . $name('Vellum Press') . $name('Observatory') . $name('Kite Labs')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'logo-strip', 'page-home--partners'));
+
+    $three = $band($row($name('A') . $name('B') . $name('C')));
+    $joined = implode("\n", SectionComposition::markupWarnings($three, 'logo-strip', 'page-home--partners'));
+    assert_contains('logo strip names', $joined);
+    assert_contains('"names":3', $joined);
+
+    $long = $band($row($name('A') . $name('B') . $name('C') . $name('The Very Long Studio Name')));
+    assert_contains('logo strip names', implode("\n", SectionComposition::markupWarnings($long, 'logo-strip', 'page-home--partners')), 'a four-word name is not a wordmark');
+
+    $picture = $band($row($name('A') . $name('B') . $name('C') . '<!-- wp:image --><figure class="wp-block-image"><img src="logo.png" alt="AI_IMAGE: a logo | strip | flat | square"/></figure><!-- /wp:image -->'));
+    assert_contains('logo strip names', implode("\n", SectionComposition::markupWarnings($picture, 'logo-strip', 'page-home--partners')), 'a logo image is the text-in-image defect');
+
+    $unmarked = $band(str_replace('logo-strip', 'brand-row', $row($name('A') . $name('B') . $name('C') . $name('D'))));
+    assert_contains('"rows":0', implode("\n", SectionComposition::markupWarnings($unmarked, 'logo-strip', 'page-home--partners')));
+
+    $plain = str_replace('section-composition--logo-strip', 'section-composition--centered-stack', $three);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'logo strip'));
+});

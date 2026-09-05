@@ -46,7 +46,14 @@ final class SectionComposition
         'zigzag-steps',
         'statement-lines',
         'project-grid-2x2',
+        'logo-strip',
     ];
+
+    /** The wordmark counts a logo-strip row may carry (frm PR-3h2). */
+    public const LOGO_STRIP_COUNTS = [4, 5, 6, 7, 8];
+
+    /** The row group the logo-strip fragment marks (frm PR-3h2). */
+    public const LOGO_STRIP_CLASS = 'logo-strip';
 
     /** The tile counts a project-grid-2x2 may carry (frm W3h). */
     public const PROJECT_TILE_COUNTS = [2, 4];
@@ -430,6 +437,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--project-grid-2x2',
             'prompt' => 'section-compositions/project-grid-2x2.md',
+        ],
+        // frm PR-3h2: the partner strip under DreamMotion's hero and Zova's
+        // "trusted by" row, as text: one flex row of four to eight client or
+        // partner names set in the heading face at caption scale in muted
+        // ink. Never generated logo images: a painted wordmark is the
+        // text-in-image defect by construction (BIGR-768).
+        'logo-strip' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--logo-strip',
+            'prompt' => 'section-compositions/logo-strip.md',
         ],
     ];
 
@@ -1056,6 +1080,38 @@ TEXT;
                     ['archetype' => $archetype, 'headings_per_tile' => 1],
                     ['headings_per_tile' => $tiles],
                     'safe parseable section was retained; every tile names its project with exactly one heading',
+                );
+            }
+        }
+
+        if ($archetype === 'logo-strip') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if (!in_array(self::LOGO_STRIP_CLASS, self::classTokens($document, $index), true)) {
+                    continue;
+                }
+                $names = [];
+                foreach ($document->children($index) as $child) {
+                    $text = trim(html_entity_decode(strip_tags($document->innerHtml($child)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    $words = preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $names[] = $document->name($child) === 'paragraph'
+                        && $text !== ''
+                        && count($words) <= 3
+                        && preg_match('~<img\b~i', $document->innerHtml($child)) !== 1;
+                }
+                $rows[] = $names;
+            }
+            $sound = count($rows) === 1
+                && in_array(count($rows[0]), self::LOGO_STRIP_COUNTS, true)
+                && !in_array(false, $rows[0], true)
+                && $imageCount === 0;
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'logo strip names',
+                    ['archetype' => $archetype, 'row_class' => self::LOGO_STRIP_CLASS, 'rows' => 1, 'names' => self::LOGO_STRIP_COUNTS, 'name' => 'one paragraph of at most three words', 'images' => 0],
+                    ['rows' => count($rows), 'names' => $rows === [] ? 0 : count($rows[0]), 'images' => $imageCount],
+                    'safe parseable section was retained; a logo strip is one marked row of four to eight one-line names and no images',
                 );
             }
         }
