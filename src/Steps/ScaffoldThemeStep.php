@@ -1010,11 +1010,12 @@ final class ScaffoldThemeStep implements Step
         }
         .section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {
             font-family: var(--wp--preset--font-family--heading, inherit);
-            /* Capped by the viewport AND by the column: 26cqi keeps a
-               five-glyph figure ("$4.2M", "1,200") inside a four-up column
-               at every width; the viewport cap still bounds three-up rows
-               (spector-like6: "4 YEARS" clipped at 1366). */
-            font-size: min(var(--wp--preset--font-size--display), 7vw, 26cqi);
+            /* Capped by the column: 26cqi keeps a five-glyph figure
+               ("$4.2M", "1,200") inside a four-up column at every width and
+               lets a stacked phone column run large again (the old 7vw cap
+               shrank phone figures to 27px). The three-up "4 YEARS" clip
+               from spector-like6 is bounded by the same unit. */
+            font-size: min(var(--wp--preset--font-size--display), 26cqi);
             font-weight: 600;
             line-height: 1;
             letter-spacing: -0.03em;
