@@ -2956,3 +2956,13 @@ test('bar-center-cta asks for persistent chrome regardless of site depth (frm W1
         HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'bar-center-cta'),
     );
 });
+
+test('the pill and the centered bar keep their action against the hero; other chromes drop the duplicate (frm PR-1f)', function () {
+    assert_true(HeaderHeroStep::keepsHeaderAction('floating-pill'));
+    assert_true(HeaderHeroStep::keepsHeaderAction('bar-center-cta'));
+    foreach (['standard-row', 'branded-lockup', 'minimal-overlay', 'spread-nav', 'centered-masthead', ''] as $archetype) {
+        assert_true(!HeaderHeroStep::keepsHeaderAction($archetype), $archetype);
+    }
+    $src = (string) file_get_contents(repo_path('src/Steps/HeaderHeroStep.php'));
+    assert_contains('self::keepsHeaderAction($archetype),', $src, 'the run-time dedupe call passes the flag');
+});
