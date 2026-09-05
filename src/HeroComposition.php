@@ -19,7 +19,14 @@ final class HeroComposition
         'layered-poster',
         'panel-stage',
         'marquee-name',
+        'metadata-corners',
     ];
+
+    /** The corner facts of metadata-corners: one flex group of two or three short paragraphs (frm W2c). */
+    public const META_CLASS = 'hero-composition__meta';
+
+    /** The fact counts the corner group may hold (frm W2c). */
+    public const META_FACT_COUNTS = [2, 3];
 
     /** The one decorative element of marquee-name: the site name at display scale behind the copy (frm W2b). */
     public const MARQUEE_CLASS = 'hero-composition__marquee';
@@ -217,6 +224,40 @@ final class HeroComposition
                 'height_profile' => 'standard', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
                 'media_aspect' => 'square', 'media_weight' => 'balanced',
+            ],
+        ],
+        // frm W2c: Spector's opener. One full-bleed portrait cover, the copy
+        // pinned to the lower leading corner as a stack of short lines, and
+        // two or three small facts the build lifts to the top corners. The
+        // facts sit LAST in the cover so the H1 stays the first text line and
+        // the copy budget reads only the copy group.
+        'metadata-corners' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['cover-image'],
+            'min_images' => 1,
+            'max_images' => 1,
+            'backgrounds' => ['image', 'contrast'],
+            'default_background' => 'image',
+            'fallback_background' => 'contrast',
+            'header_modes' => ['stacked', 'overlay'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['retain-media-overlay'],
+            'layout_archetype' => 'full-bleed-cover',
+            'fallback_family' => 'cover',
+            'root_hook' => '.hero-composition--metadata-corners',
+            'prompt' => 'hero-compositions/metadata-corners.md',
+            'headline_registers' => ['display', 'poster'],
+            'height_profiles' => ['immersive'],
+            'media_aspects' => ['landscape'],
+            'media_weights' => ['dominant'],
+            'defaults' => [
+                'media_mode' => 'cover-image', 'headline_register' => 'poster',
+                'text_anchor' => 'bottom-start',
+                'headline_line_target' => ['desktop' => [2, 3], 'mobile' => [2, 5]],
+                'focal_region' => 'end', 'text_safe_region' => 'start',
+                'height_profile' => 'immersive', 'cta_treatment' => 'quiet',
+                'mobile_transformation' => 'retain-media-overlay',
+                'media_aspect' => 'landscape', 'media_weight' => 'dominant',
             ],
         ],
         'layered-poster' => [
@@ -651,6 +692,52 @@ final class HeroComposition
                 );
             }
         }
+        // frm W2c: the corner facts are the recipe's device. Exactly one
+        // marked flex group, outside and after the copy region, holding two
+        // or three non-empty paragraphs and nothing else.
+        if ($recipe === 'metadata-corners') {
+            $metas = [];
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index) ?? [];
+                $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(self::META_CLASS, $classes, true)) {
+                    $metas[] = $index;
+                }
+            }
+            $facts = [];
+            $sound = count($metas) === 1
+                && $document->name($metas[0]) === 'group'
+                && !self::hasAncestorClass($document, $metas[0], 'hero-composition__copy');
+            if ($sound) {
+                $copyEnd = null;
+                foreach ($document->indices() as $index) {
+                    $attrs = $document->attrs($index) ?? [];
+                    $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    if (in_array('hero-composition__copy', $classes, true)) {
+                        $copyEnd = $document->endOffset($index);
+                        break;
+                    }
+                }
+                $metaStart = $document->openingOffset($metas[0]);
+                $sound = $copyEnd !== null && $metaStart !== null && $metaStart >= $copyEnd;
+                foreach ($document->children($metas[0]) as $child) {
+                    $facts[] = $document->name($child) === 'paragraph'
+                        && trim(strip_tags($document->innerHtml($child))) !== '';
+                }
+                $sound = $sound
+                    && in_array(count($facts), self::META_FACT_COUNTS, true)
+                    && !in_array(false, $facts, true);
+            }
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe corner facts',
+                    ['required_class' => self::META_CLASS, 'count' => 1, 'block' => 'group', 'after' => 'hero-composition__copy', 'facts' => self::META_FACT_COUNTS],
+                    ['matching_blocks' => count($metas), 'facts' => count($facts)],
+                    'safe parseable hero was retained; restore the one marked fact group of two or three short paragraphs after the copy region',
+                );
+            }
+        }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
         // bodies read as clutter even inside the old standard budget).
@@ -872,6 +959,10 @@ final class HeroComposition
             'marquee of my name', 'marquee of the name', 'name behind the hero', 'giant name behind',
             'giant marquee', 'wordmark behind the hero', 'name marquee',
         ],
+        'metadata-corners' => [
+            'metadata in the corners', 'metadata corners', 'corner metadata', 'facts in the corners',
+            'details in the corners', 'corner facts',
+        ],
         'panel-stage' => [
             'gradient panel hero', 'panel hero', 'rounded panel hero', 'hero panel',
             'gradient hero panel', 'dashboard mockup', 'product mockup below',
@@ -879,7 +970,7 @@ final class HeroComposition
         'cinematic-safe-zone' => [
             'full-bleed photo', 'full-bleed portrait', 'full-bleed image', 'cinematic photo',
             'cinematic hero', 'full-bleed hero', 'hero photo', 'portrait hero',
-            'full-bleed high-contrast portrait', 'high-contrast portrait', 'metadata in the corners',
+            'full-bleed high-contrast portrait', 'high-contrast portrait',
             'photo hero', 'cinematic dusk photo', 'full-bleed cover',
         ],
         'foreground-split' => [

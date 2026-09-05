@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(5, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -467,7 +467,7 @@ test('the marquee paragraph is bound to the site name at the boundary (frm PR-2f
 test('a hero the brief states in so many words outranks the stable pick inside the caller constraints (frm PR-2g)', function () {
     assert_eq('marquee-name', HeroComposition::statedInBrief('A playful portfolio with one giant marquee of my name behind the hero.'));
     assert_eq('panel-stage', HeroComposition::statedInBrief('White page with a pale blue gradient panel hero and a dashboard mockup.'));
-    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('Dark hero with a full-bleed high-contrast portrait, metadata in the corners.'));
+    assert_eq('metadata-corners', HeroComposition::statedInBrief('Dark hero with a full-bleed high-contrast portrait, metadata in the corners.'), 'the corner facts outrank the plain portrait phrase (frm W2c)');
     assert_eq(null, HeroComposition::statedInBrief('Create a website for a Georgian restaurant in Tbilisi.'));
     assert_eq(null, HeroComposition::statedInBrief('a photo-heavy gallery'), 'a phrase must match at word boundaries');
 
@@ -483,4 +483,42 @@ test('a hero the brief states in so many words outranks the stable pick inside t
     $picked = \Automattic\SiteBuild\Steps\DesignDirectionStep::selectHeroRecipe($constrained, 'stated-site', 'A seed', $warnings, $note);
     assert_true(in_array($picked, HeroComposition::compatible(['allowed_hero_media_modes' => ['cover-image']]), true), 'an incompatible stated hero falls back to the pool');
     assert_eq(null, $note);
+});
+
+test('the metadata-corners recipe is a cover recipe whose facts ride the corners after the copy (frm W2c)', function () {
+    assert_true(in_array('metadata-corners', HeroComposition::RECIPES, true));
+    $meta = HeroComposition::metadata('metadata-corners');
+    assert_eq(['cover-image'], $meta['media_modes']);
+    assert_eq('full-bleed-cover', $meta['layout_archetype']);
+    assert_eq('hero-compositions/metadata-corners.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_eq('bottom-start', $meta['defaults']['text_anchor']);
+    assert_eq('hero-composition__meta', HeroComposition::META_CLASS);
+    assert_eq([2, 3], HeroComposition::META_FACT_COUNTS);
+    assert_eq('metadata-corners', HeroComposition::statedInBrief('Dark hero with a full-bleed portrait, metadata in the corners, a stacked display headline'));
+    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('A full-bleed high-contrast portrait hero'));
+    $blueprint = HeroBlueprint::defaultFor('metadata-corners');
+    assert_eq('cover-image', $blueprint['media_mode']);
+
+    $fact = static fn (string $t): string => '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">' . $t . '</p><!-- /wp:paragraph -->';
+    $copy = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","justifyContent":"left"}} --><div class="wp-block-group hero-composition__copy"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Drawn sharp,<br>built to last</h1><!-- /wp:heading --><!-- wp:paragraph --><p>A New York studio.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $metaGroup = static fn (string $facts): string => '<!-- wp:group {"className":"hero-composition__meta","layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group hero-composition__meta">' . $facts . '</div><!-- /wp:group -->';
+    $hero = static fn (string $inner): string => '<!-- wp:group {"align":"full","className":"hero-composition--metadata-corners"} --><div class="wp-block-group alignfull hero-composition--metadata-corners"><!-- wp:cover {"url":"assets/hero.jpg","align":"full","className":"hero-composition__media"} --><div class="wp-block-cover alignfull hero-composition__media"><img class="wp-block-cover__image-background" src="assets/hero.jpg" alt="AI_IMAGE: a portrait | hero | photorealistic | landscape"/><div class="wp-block-cover__inner-container">' . $inner . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+
+    $good = $hero($copy . $metaGroup($fact('New York') . $fact('Est. 2014') . $fact('Identity · Editorial')));
+    $joined = implode("\n", HeroComposition::markupWarnings($good, 'metadata-corners', 'page-home--hero'));
+    assert_true(!str_contains($joined, 'recipe corner facts'), $joined);
+    assert_true(!str_contains($joined, 'hero copy budget'), 'the facts never count against the copy budget');
+
+    $none = $hero($copy);
+    assert_contains('recipe corner facts', implode("\n", HeroComposition::markupWarnings($none, 'metadata-corners', 'page-home--hero')));
+    $one = $hero($copy . $metaGroup($fact('New York')));
+    assert_contains('"facts":1', implode("\n", HeroComposition::markupWarnings($one, 'metadata-corners', 'page-home--hero')));
+    $before = $hero($metaGroup($fact('New York') . $fact('Est. 2014')) . $copy);
+    assert_contains('recipe corner facts', implode("\n", HeroComposition::markupWarnings($before, 'metadata-corners', 'page-home--hero')), 'a fact group before the copy is an eyebrow');
+    $inside = $hero(str_replace('</div><!-- /wp:group -->', $metaGroup($fact('A') . $fact('B')) . '</div><!-- /wp:group -->', $copy));
+    assert_contains('recipe corner facts', implode("\n", HeroComposition::markupWarnings($inside, 'metadata-corners', 'page-home--hero')), 'facts inside the copy region');
+
+    $other = str_replace('hero-composition--metadata-corners', 'hero-composition--cinematic-safe-zone', $none);
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($other, 'cinematic-safe-zone', 'page-home--hero')), 'corner facts'));
 });

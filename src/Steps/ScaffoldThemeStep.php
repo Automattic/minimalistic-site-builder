@@ -589,6 +589,51 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
+        /* metadata-corners (frm W2c): one full-bleed cover at viewport
+           height; the inner container becomes a column that pushes the copy
+           to the bottom and the fact group to the top, where its flex row
+           spreads two or three short facts into the corners. The facts sit
+           last in the DOM (the H1 stays the first text line); `order`
+           lifts them. The copy keeps a reading measure on the leading side. */
+        .hero-composition--metadata-corners > .wp-block-cover {
+            min-height: 100svh;
+            align-items: stretch;
+        }
+        .hero-composition--metadata-corners > .wp-block-cover > .wp-block-cover__inner-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: var(--wp--preset--spacing--lg, 3rem);
+            width: 100%;
+            max-width: none;
+            box-sizing: border-box;
+            padding: var(--wp--preset--spacing--md, 1.5rem) var(--wp--preset--spacing--lg, 3rem);
+        }
+        .hero-composition--metadata-corners .hero-composition__meta {
+            order: -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: var(--wp--preset--spacing--md, 1.5rem);
+            width: 100%;
+            opacity: 0.85;
+        }
+        .hero-composition--metadata-corners .hero-composition__meta > p {
+            margin: 0;
+            max-inline-size: 16rem;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+        }
+        .hero-composition--metadata-corners .hero-composition__meta > p:last-child:not(:first-child) {
+            text-align: end;
+        }
+        .hero-composition--metadata-corners .hero-composition__copy {
+            margin-inline-start: 0;
+            max-width: min(100%, 44rem);
+        }
+        .hero-composition--metadata-corners .hero-composition__copy h1 {
+            line-height: 0.95;
+            text-wrap: balance;
+        }
         /* panel-stage (frm W2a): the opener is one rounded, tinted panel on
            the page ground. Rounded from the committed shape scale, clipped,
            with a faint dot grid on the tint; the copy row centers vertically
@@ -764,6 +809,16 @@ final class ScaffoldThemeStep implements Step
                 .wp-block-cover__inner-container
                 :is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link) {
                 color: var(--wp--preset--color--base) !important;
+            }
+            .hero-composition--metadata-corners > .wp-block-cover {
+                min-height: 88svh;
+            }
+            .hero-composition--metadata-corners > .wp-block-cover > .wp-block-cover__inner-container {
+                padding: var(--wp--preset--spacing--md, 1.5rem);
+            }
+            .hero-composition--metadata-corners .hero-composition__meta {
+                flex-wrap: wrap;
+                gap: var(--wp--preset--spacing--sm, 0.75rem) var(--wp--preset--spacing--md, 1.5rem);
             }
             .hero-mobile--flatten-layers .hero-composition__layers,
             .hero-mobile--flatten-layers .hero-composition__copy,
