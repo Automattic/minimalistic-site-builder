@@ -308,6 +308,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 67 | #514 | W7 (PR-7f) | Inspect every hero-part picture with the vision check (frm) | merged | gate replay on the cohort-4 image rows: one more picture per site (cohesion's avatar plate, zova's hero dashboard, the three hero covers), the .png objects stay out; no build | 49463bd4 |
 | 68 | #515 | W3 (PR-3r) | Let a footer the brief states outrank the hash pick (frm) | merged | reader replay on the cohort-4 briefs (cohesion and spector -> sunken-wordmark, zova -> newsletter-columns, two silent); page-plan rerun on a cohesion copy persisted sunken-wordmark with the yield note; no build | 0156a9aa |
 | 69 | #516 | W9 (PR-9a) | Retry a page section once when its first response is unusable (frm) | merged | unit test with the fake transport (prose first, markup second, part survives with the note; header never retries); the red-team sink test shows the retry firing on a hostile part and the sink holding; no build | e2d48e42 |
+| 70 | #517 | W5 (PR-5g) | Strip model custom CSS on the emphasis hook (frm) | merged | gist 6497574daf448165ead47a92cc5f221c: cohesion-like16 at 390 before (heading clipped, page 474px wide) / after (phrase wraps, 390px); cohort-5 mobile sheet | 386b8119 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -386,6 +387,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 73: PR-3r #515 merged. Next: PR-9a on branch frm/section-retry: a plain page section whose first response is unusable gets one fresh sample with the parse failure quoted into the prompt (so the markup cache never replays the same answer) before the drop; chrome, heroes and openings keep their reviewed fallbacks. Blocks path only; the HTML-first path keeps the single attempt.
 - 2026-09-05 turn 74: PR-9a #516 merged; every cohort-4 row is merged (PR-7e, PR-4k, PR-7f, PR-3r, PR-9a) and the backlog holds only parked rows. Per the loop rule the next step is cohort-5 with images (cohesion-like16, dreammotion-like15, zova-like16, luzia-like12, spector-like13) to verify the five fixes and critique again.
 - 2026-09-05 turn 75: cohort-5 built with images (cohesion-like16, dreammotion-like15, zova-like16, luzia-like12, spector-like13; 70/70 images OK). The five cohort-4 fixes hold: solid cutouts, stated footers on cohesion, zova and spector, no dropped section, no objects warning; fidelity 4.5 / 4 / 4.5 / 4 / 4.5 (section 7 cohort-5 rows). New rows: PR-5g emphasis span clips on phones (P1, next), PR-3s stated card highlight, PR-3t cover band after the hero, PR-7g QA upright rule for mockups, PR-3u no-image archetypes get no images, PR-2k phone copy over the portrait. Warning classes: none new beyond those rows.
+- 2026-09-05 turn 76: PR-5g #517 merged (theme.json custom CSS on `.emph` is stripped; the legacy prompt fixture re-recorded). Next: PR-3s on branch frm/stated-highlight: a brief that asks for one highlighted card reaches the equal-card-grid as a committed device (directive in the fragment, exactly-one check, `stated_highlight` in the shared section input).
 
 ## 10. Parked / rejected
 
