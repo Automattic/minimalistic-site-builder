@@ -69,6 +69,8 @@
     --motion-hover-scale: 1.03;
     --motion-hover-brightness: 0.92;
     --motion-hover-shadow-opacity: 0.18;
+    --motion-word-keyframe: motion-kit-word;
+    --motion-word-stagger: 70ms;
 }
 
 @media screen and (prefers-reduced-motion: no-preference) {
@@ -375,7 +377,8 @@
     .reveal-aperture.motion-skip,
     .reveal-zoom.motion-skip,
     .stagger-children > *.motion-skip,
-    .hero-entrance.motion-skip {
+    .hero-entrance.motion-skip,
+    .word-reveal.motion-skip .word-reveal__word {
         opacity: 1 !important;
         animation: none !important;
     }
@@ -392,11 +395,43 @@
     html.motion-js .reveal-aperture:focus-within,
     html.motion-js .reveal-zoom:focus-within,
     html.motion-js .stagger-children > *:focus-within,
-    .hero-entrance:focus-within {
+    .hero-entrance:focus-within,
+    html.motion-js .word-reveal:focus-within .word-reveal__word {
         opacity: 1 !important;
         transform: none !important;
         filter: none !important;
         clip-path: none !important;
+    }
+
+    /* ── Word reveal (frm W8a): the hero headline arrives one word at a
+       time. Like hero-entrance it plays on load, outside the scroll
+       observer (which marks first-viewport targets static). motion.js wraps
+       each word in `.word-reveal__word` with its `--word-index` and marks
+       the heading `word-reveal--split` before it announces motion-ready; the
+       unsplit heading is hidden only under the driver scope before that
+       moment, so a failed driver (which removes the scope) fails open and
+       a heading the driver could not split is fully visible from
+       motion-ready on. Same vertical-only, no-overshoot contract as every
+       entrance; the stagger is a profile token. ── */
+    html.motion-js:not(.motion-ready) .word-reveal {
+        opacity: 0;
+    }
+    html.motion-js .word-reveal--split .word-reveal__word {
+        display: inline-block;
+        animation-name: var(--motion-word-keyframe);
+        animation-duration: var(--motion-hero-duration);
+        animation-timing-function: var(--motion-hero-ease);
+        animation-delay: calc(var(--motion-hero-delay) + var(--word-index, 0) * var(--motion-word-stagger));
+        animation-fill-mode: backwards;
+    }
+    @keyframes motion-kit-word {
+        from {
+            opacity: 0;
+            filter: blur(var(--motion-blur-amount));
+            transform: translateY(calc(var(--motion-distance) * 0.5));
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; filter: blur(0); transform: none; }
     }
 
     /* ── Ambient effects (pure CSS, never hide anything) ──────────────── */

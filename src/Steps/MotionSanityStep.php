@@ -524,12 +524,16 @@ final class MotionSanityStep implements Step
         }
         $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
         $isAmbient = in_array($token, Motion::AMBIENT_CLASSES, true);
-        $isHero = $token === 'hero-entrance';
+        $isHero = in_array($token, Motion::HERO_CLASSES, true);
+        // hero-entrance and word-reveal budget separately: the copy group
+        // may fade in while the headline's words arrive one at a time.
+        $heroKey = $token === 'hero-entrance' ? 'hero' : 'word';
+        $budget[$heroKey] ??= 0;
 
         // Check every budget before consuming any of them: a class rejected
         // by a page-level limit must not steal this section's entrance slot.
         if ($isHero && !$heroAllowed) {
-            return 'hero-entrance is allowed only in the first section';
+            return "{$token} is allowed only in the first section";
         }
         if ($isEntrance && $sectionEntrances >= Motion::MAX_ENTRANCES_PER_SECTION) {
             return 'section entrance budget: at most two entrances per section';
@@ -537,8 +541,8 @@ final class MotionSanityStep implements Step
         if ($isAmbient && $budget['ambient'] >= 1) {
             return 'ambient budget: one signature effect per page';
         }
-        if ($isHero && $budget['hero'] >= 1) {
-            return 'hero-entrance budget: once per page';
+        if ($isHero && $budget[$heroKey] >= 1) {
+            return "{$token} budget: once per page";
         }
 
         if ($isEntrance) {
@@ -548,7 +552,7 @@ final class MotionSanityStep implements Step
             $budget['ambient']++;
         }
         if ($isHero) {
-            $budget['hero']++;
+            $budget[$heroKey]++;
         }
 
         $keptKitClass = $token;

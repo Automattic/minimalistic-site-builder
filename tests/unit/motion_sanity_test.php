@@ -247,7 +247,7 @@ test('motion vocabulary agrees between the static kit and its isolated authoring
     $heroPrompt = file_get_contents(repo_path('prompts/hero.md'));
     $kitCss = file_get_contents(repo_path('assets/motion/motion.css'));
     foreach (Motion::kitClasses() as $class) {
-        $authoringPrompt = $class === 'hero-entrance' ? $heroPrompt : $sectionPrompt;
+        $authoringPrompt = in_array($class, \Automattic\SiteBuild\Motion::HERO_CLASSES, true) ? $heroPrompt : $sectionPrompt;
         assert_contains("`{$class}`", $authoringPrompt, "{$class} documented at its authoring boundary");
         assert_contains(".{$class}", $kitCss, "{$class} implemented by the kit");
     }
@@ -265,4 +265,28 @@ test('motion vocabulary agrees between the static kit and its isolated authoring
         'prompt documents the transform conflict enforced by motion-sanity'
     );
     assert_contains('keeps only the first two', $sectionPrompt, 'prompt states the enforced section entrance cap');
+});
+
+test('motion-sanity treats word-reveal as a hero-only entrance with its own once-per-page budget (frm W8a)', function () {
+    $budget = MotionSanityStep::newBudget();
+    $both = MotionSanityStep::sanitize(
+        motion_group('hero-entrance', '<!-- wp:heading {"level":1,"className":"word-reveal"} --><h1 class="wp-block-heading word-reveal">Frames that hold</h1><!-- /wp:heading -->'),
+        'calm',
+        $budget,
+    );
+    assert_eq(2, substr_count($both['markup'], 'word-reveal'), 'the headline keeps its word-reveal beside the copy group entrance');
+    assert_eq(2, substr_count($both['markup'], 'hero-entrance'));
+
+    $twiceBudget = MotionSanityStep::newBudget();
+    $twice = MotionSanityStep::sanitize(
+        motion_group('word-reveal') . "\n" . motion_group('word-reveal'),
+        'calm',
+        $twiceBudget,
+    );
+    assert_eq(2, substr_count($twice['markup'], 'word-reveal'), 'once per page — once in attrs, once in html');
+
+    $laterBudget = MotionSanityStep::newBudget();
+    $later = MotionSanityStep::sanitize(motion_group('word-reveal'), 'calm', $laterBudget, false);
+    assert_true(!str_contains($later['markup'], 'word-reveal'), 'a later section cannot claim the headline reveal');
+    assert_contains('word-reveal is allowed only in the first section', implode(' ', $later['notes'] ?? []) . implode(' ', $later['warnings'] ?? []));
 });
