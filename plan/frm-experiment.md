@@ -166,12 +166,15 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 |---|---|---|---|---|---|---|
 | 1 | #448 | W0 | Add the frm cohort briefs (frm) | merged | baseline cohort, section 7 | 8bf3a9d1 |
 | 2 | #449 | W1a | Add the floating-pill header archetype (frm) | merged | gist c227b01f7ba99e8dd9b91e9afa93aa2c: zova-like2 + cohesion-like2 forced pill, glass/glass sticky, mobile 390 | 5a9f9783 |
+| 3 | #450 | W4a | Execute the committed shape as one radius scale on card shells (frm) | merged | gist 48d9a6f9049c9aa5578eae48174479fe: lumen7 round replay (square to 24px), naturaleza5 soft (20px to 12px) | 93469974 |
 
 ## 9. Iteration log (one line per loop turn)
 
 - 2026-09-04 turn 1: setup (branch, worktree, baseline 61 failures = trunk), PR-0a #448 merged, baseline cohort built (images failed: WPCOM proxy read-only, retried once), references captured, section 7 filled. Started PR-1a `floating-pill` on branch `frm/floating-pill-header`.
 - 2026-09-05 turn 2: PR-1a #449 merged (CI green, no new unit failures). Evidence forced `HEADER_ARCHETYPE=floating-pill` because image-led heroes resolve overlay; `register` is now persisted on the direction. Images still failing (proxy read-only). Next: W4a as a shape-owned radius scale (no separate `radius_scale` token, see section 10).
+- 2026-09-05 turn 3: PR-4a #450 merged. Evidence was a replay (shape pass + block fixer + screenshot) because no cohort build carries card shells; PR-4e filed for that. Image proxy now times out (cURL 28) instead of read-only. Started W5a `heading_emphasis` (none / two-tone / italic-word / highlight; `gradient-fill` parked until the stops are palette-proven) on branch `frm/heading-emphasis`.
 
 ## 10. Parked / rejected
 
+- `gradient-fill` heading emphasis (Spector's red-to-cream display): parked 2026-09-05. Needs palette-proven gradient stops (darkest and lightest stop each clearing the floor on the heading's surface); the first three emphasis values ship without it.
 - `radius_scale` as a separate direction token (PR-4a as written): rejected 2026-09-05. It overlaps `shape`, which already is the site's one corner commitment. Instead the build executes `shape` as a scale (media / card / panel / pill) and publishes it as custom properties for later kits (rounded band, badge, glass).
