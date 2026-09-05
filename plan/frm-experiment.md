@@ -330,6 +330,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 77 | #525 | W8 (PR-8j) | Keep a kit device on a custom-motion target (frm) | merged | gist dd7062ff479ed682edd1d8bc7499e6f6: the recorded spector-like14 marquee-loop response replayed through the sanity pass (marquee stays, custom-motion leaves the block, one note); the metrics figures get count-up from the figure marker later, so the raw replay shows the marquee case only; no build | c6111bb0 |
 | 78 | #526 | W3 (PR-3w) | Let a stated numbered stack carry the committed numeral (frm) | merged | gist ec5d05670c35643bd169f980b95891c4: cohesion-like17 services before crop (no numbers) + reader replay on the five cohort-6 plans (only the cohesion services row is a stated row; purpose prose excluded after the first replay matched pricing and a CTA); no build | b2367585 |
 | 79 | #527 | W5 (PR-5h) | Teach the headline fit the wide display faces (frm) | merged | gist f9ae0ba97dfcc597c38c69fc8b7a1beb: spector-like14 at 390 before (16.3vw, ENOUGH past the edge) / after (fit re-derived with the Unbounded factor: 12.4vw, mirrored, headline inside the viewport) + fit replay | 3b85b57d |
+| 80 | #528 | W1 (PR-1x) | Keep the phone pill header on one row (frm) | merged | gist cc631bde55ab693724499a372ae00d7c: cohesion-like17 pill at 390 before (title truncated, two-line CTA) / after (rule mirrored into the built kit: full title, one-line caption CTA) | 7ed1ebfc |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -419,6 +420,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 84: PR-8j #525 merged (a kit device on a custom-motion target stays; the custom tag leaves the block). Next: PR-3w on branch frm/stated-numbered-stack: a stated numbered stack counts as a process section for the numeral rule on its own row (StepNumeral::statedNumbered + numberedDirective, SectionComposition::clauseAppliesTo shared with PR-3s).
 - 2026-09-05 turn 85: PR-3w #526 merged (a stated numbered stack counts as a process section for the numeral rule on its own row). Next: PR-5h on branch frm/wide-face-headline-fit: the headline fit reads the theme's heading family and uses a wider per-character em for the wide display faces (Unbounded and kin), so the phone bound bites before the word overflows.
 - 2026-09-05 turn 86: PR-5h #527 merged (the headline fit reads the heading family; wide display faces get a wider per-character em). Next: PR-1x on branch frm/phone-pill-row: the phone pill keeps one row (tight gap, nowrap caption CTA, shrinking title); probe on cohesion-like17 already made.
+- 2026-09-05 turn 87: PR-1x #528 merged (the phone pill keeps one row). Next: PR-7h on branch frm/portrait-fills-half: the metadata-corners fragment asks for a person filling the trailing half of the frame at large scale, never a small figure at the edge of an empty room. After it the cohort-6 rows are done and the loop owes cohort-7.
 
 ## 10. Parked / rejected
 
