@@ -86,7 +86,9 @@ final class SectionLabel
                 @media (min-width: 782px) {
                     .wp-block-column:has(> p.{$hook}) {
                         position: sticky;
-                        top: calc(var(--header-safe-top, 0px) + 1.5rem);
+                        /* No kit publishes the header height yet; 5rem clears
+                           every sticky bar in the catalog with room to spare. */
+                        top: calc(var(--header-safe-top, 5rem) + 1rem);
                         align-self: start;
                     }
                 }
