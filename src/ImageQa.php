@@ -65,7 +65,7 @@ final class ImageQa
      *
      * @return array{ok:bool,findings:list<string>,note:string}|null
      */
-    public static function verdict(string $answer): ?array
+    public static function verdict(string $answer, bool $keepsTilt = false): ?array
     {
         $start = strpos($answer, '{');
         $end = strrpos($answer, '}');
@@ -86,7 +86,9 @@ final class ImageQa
             return null;
         }
         $findings = [];
-        if (($data['upright'] ?? true) === false) {
+        // A mockup or a rendered object is tilted on purpose (frm PR-7g):
+        // the upright question is a photograph rule and never a finding here.
+        if (!$keepsTilt && ($data['upright'] ?? true) === false) {
             $findings[] = 'camera not upright (scene rotated or tilted)';
         }
         if (($data['rendered_text'] ?? false) === true) {

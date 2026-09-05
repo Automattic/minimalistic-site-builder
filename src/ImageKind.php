@@ -110,6 +110,39 @@ final class ImageKind
     }
 
     /**
+     * Whether a picture of this kind is framed at an angle on purpose (frm
+     * PR-7g): a product screen "seen straight-on and gently tilted" or a
+     * rendered object floating in perspective. The QA upright question is a
+     * photograph rule (horizon level, sky at the top); zova-like16 lost a good
+     * dashboard to it and regenerated a flat one.
+     */
+    public static function keepsTilt(?string $raw): bool
+    {
+        return in_array(self::explicit($raw), ['ui-mockup', '3d-object'], true);
+    }
+
+    /**
+     * The kind-specific reading of the QA prompt's upright question (frm
+     * PR-7g). For a mockup or a rendered object a tilt is the requested
+     * framing; the verdict reader also drops the finding for these kinds.
+     */
+    public static function qaUprightRule(?string $raw): string
+    {
+        $kind = self::explicit($raw);
+        if ($kind === 'ui-mockup') {
+            return ' This picture is a product-interface mockup, not a photograph: a gentle tilt, a perspective'
+                . ' view or a floating angle is the requested framing. Answer false only for a picture that is'
+                . ' upside down or rotated a full quarter turn.';
+        }
+        if ($kind === '3d-object') {
+            return ' This picture is a rendered object, not a photograph: a tilt, a floating angle or a'
+                . ' perspective view is the requested framing. Answer false only for a picture that is upside'
+                . ' down or rotated a full quarter turn.';
+        }
+        return '';
+    }
+
+    /**
      * The kind-specific reading of the QA prompt's text question. A mockup
      * is drawn with blurred placeholder bars and chart shapes on purpose;
      * only legible letters, words or numerals are a finding there.

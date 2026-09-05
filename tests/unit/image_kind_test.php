@@ -98,9 +98,27 @@ test('a ui-mockup site inspects every picture and reads placeholder bars as shap
 
     $prompt = \Automattic\SiteBuild\PromptRenderer::fill(
         (string) file_get_contents(__DIR__ . '/../../prompts/image-qa.md'),
-        ['subject' => 'a dashboard', 'text_rule' => ImageKind::qaTextRule('ui-mockup')],
+        ['subject' => 'a dashboard', 'upright_rule' => '', 'text_rule' => ImageKind::qaTextRule('ui-mockup')],
     );
     assert_contains('abstract marks do not count. This picture is a product-interface mockup', $prompt);
+});
+
+test('a mockup or a rendered object keeps its tilt through the QA upright question (frm PR-7g)', function () {
+    assert_true(ImageKind::keepsTilt('ui-mockup'));
+    assert_true(ImageKind::keepsTilt('3d-object'));
+    assert_true(!ImageKind::keepsTilt('photo'));
+    assert_true(!ImageKind::keepsTilt('line-illustration'));
+    assert_true(!ImageKind::keepsTilt(null));
+    assert_eq('', ImageKind::qaUprightRule('photo'));
+    assert_contains('product-interface mockup, not a photograph', ImageKind::qaUprightRule('ui-mockup'));
+    assert_contains('rendered object, not a photograph', ImageKind::qaUprightRule('3d-object'));
+    assert_contains('upside down or rotated a full quarter turn', ImageKind::qaUprightRule('ui-mockup'));
+
+    $prompt = \Automattic\SiteBuild\PromptRenderer::fill(
+        (string) file_get_contents(__DIR__ . '/../../prompts/image-qa.md'),
+        ['subject' => 'a dashboard', 'upright_rule' => ImageKind::qaUprightRule('ui-mockup'), 'text_rule' => ''],
+    );
+    assert_contains('is NOT upright. This picture is a product-interface mockup, not a photograph', $prompt);
 });
 
 test('the direction fact tells a ui-mockup author about the frame and the one tilt class (frm W7b)', function () {
