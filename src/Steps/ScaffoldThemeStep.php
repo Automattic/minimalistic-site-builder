@@ -893,6 +893,15 @@ final class ScaffoldThemeStep implements Step
                 bottom: auto;
                 height: min(62vw, 28rem);
             }
+            /* The copy no longer sits on the photo here, so the authored
+               protection layer has nothing to protect: at its desktop dim
+               (70% of the page ground) it flattened the 240px field to a
+               blank slab on dreammotion-like13 and luzia-like10 (frm PR-2j).
+               A light veil keeps the grade; the desktop cover keeps its dim. */
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .wp-block-cover__background[class*="has-background-dim-"] {
+                opacity: 0.25;
+            }
             .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
                 .wp-block-cover__inner-container {
                 width: 100%;
