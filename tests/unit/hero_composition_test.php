@@ -563,3 +563,33 @@ test('the portrait-backdrop recipe is a foreground recipe with one marked portra
     $other = str_replace('hero-composition--portrait-backdrop', 'hero-composition--foreground-split', $unmarked);
     assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($other, 'foreground-split', 'page-home--hero')), 'portrait plate'));
 });
+
+
+test('a marquee-name hero on a 3d-object site may float two to four png objects outside the copy, uncounted as media (frm W7c)', function () {
+    assert_eq('hero-composition__objects', HeroComposition::OBJECTS_CLASS);
+    assert_eq([2, 3, 4], HeroComposition::OBJECT_COUNTS);
+    $object = static fn (string $file): string => '<!-- wp:image --><figure class="wp-block-image"><img src="assets/' . $file . '" alt="AI_IMAGE: one matte clay sphere alone | floating hero object | 3d-render | square"/></figure><!-- /wp:image -->';
+    $objects = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition__objects","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__objects" aria-hidden="true">' . $inner . '</div><!-- /wp:group -->';
+    $media = '<!-- wp:group {"className":"hero-composition__media","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__media"><!-- wp:image --><figure class="wp-block-image"><img src="assets/avatar.jpg" alt="AI_IMAGE: a portrait | avatar plate | photorealistic | portrait"/></figure><!-- /wp:image --></div><!-- /wp:group -->';
+    $copy = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy"><!-- wp:heading {"level":1,"textAlign":"center"} --><h1 class="wp-block-heading has-text-align-center">Hi, I am Larry</h1><!-- /wp:heading --></div><!-- /wp:group -->';
+    $marquee = '<!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee" aria-hidden="true">Larry Bron</p><!-- /wp:paragraph -->';
+    $hero = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition--marquee-name","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition--marquee-name">' . $inner . '</div><!-- /wp:group -->';
+    $blueprint = ['media_aspect' => 'portrait'];
+
+    $plain = $hero($media . $copy . $marquee);
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($plain, 'marquee-name', 'page-home--hero', $blueprint)), 'floating objects'), 'the group is optional');
+
+    $good = $hero($media . $copy . $marquee . $objects($object('sphere.png') . $object('torus.png') . $object('cube.png')));
+    $joined = implode("\n", HeroComposition::markupWarnings($good, 'marquee-name', 'page-home--hero', $blueprint));
+    assert_true(!str_contains($joined, 'floating objects'), $joined);
+    assert_true(!str_contains($joined, 'recipe image aspect'), 'square objects never count against the portrait avatar slot');
+
+    $one = $hero($media . $copy . $marquee . $objects($object('sphere.png')));
+    $joined = implode("\n", HeroComposition::markupWarnings($one, 'marquee-name', 'page-home--hero', $blueprint));
+    assert_contains('recipe floating objects', $joined);
+    assert_contains('"objects":1', $joined);
+    $opaque = $hero($media . $copy . $marquee . $objects($object('sphere.jpg') . $object('torus.png')));
+    assert_contains('recipe floating objects', implode("\n", HeroComposition::markupWarnings($opaque, 'marquee-name', 'page-home--hero', $blueprint)), 'an opaque object is not a cutout');
+    $inside = $hero($media . str_replace('</div><!-- /wp:group -->', $objects($object('a.png') . $object('b.png')) . '</div><!-- /wp:group -->', $copy) . $marquee);
+    assert_contains('recipe floating objects', implode("\n", HeroComposition::markupWarnings($inside, 'marquee-name', 'page-home--hero', $blueprint)), 'objects inside the copy region');
+});

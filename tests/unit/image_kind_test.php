@@ -159,3 +159,10 @@ test('finalize-theme reads images.json to exempt portraits from the screen frame
     assert_true(!str_contains($css, 'dash.jpg'), 'a screen is framed');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('the direction fact tells a 3d-object author about the floating-object group (frm W7c)', function () {
+    $rendered = DesignDirectionStep::format(['description' => 'x', 'image_kind' => '3d-object']);
+    assert_contains('floating-object group', $rendered);
+    assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x', 'image_kind' => 'photo']), 'floating-object'));
+});

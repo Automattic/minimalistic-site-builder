@@ -1795,6 +1795,10 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Image kind**: {$imageKind} — " . ImageKind::meaning($imageKind)
                 . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
                 . '`; the build appends the kind\'s render instruction to every image request.'
+                . ($imageKind === '3d-object'
+                    ? ' On a marquee-name opener the hero may add the floating-object group the recipe describes:'
+                        . ' two to four single clay objects as `.png` cutouts the build pins around the copy.'
+                    : '')
                 . ($imageKind === 'ui-mockup'
                     ? ' The build frames every contained picture as a product window (radius, hairline ring, window'
                         . ' bar), so author no frame, border or shadow around an image. Add the class `'

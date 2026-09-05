@@ -670,6 +670,60 @@ final class ScaffoldThemeStep implements Step
             margin-block: 0;
             text-wrap: balance;
         }
+        /* marquee-name floating objects (frm W7c): the aria-hidden object
+           group is taken out of the flow and pinned over the whole hero;
+           each cutout takes a corner slot around the centered stack, above
+           the marquee name and below the copy, and drifts a few pixels up
+           and down on its own clock. Reduced motion holds them still;
+           phones keep the first two, smaller. */
+        .hero-composition--marquee-name .hero-composition__objects {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+            padding: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure {
+            position: absolute;
+            margin: 0;
+            width: clamp(4.5rem, 11vw, 10rem);
+            animation: hero-object-drift 7s ease-in-out infinite alternate;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(1) {
+            inset-block-start: 14%;
+            inset-inline-start: 9%;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(2) {
+            inset-block-start: 12%;
+            inset-inline-end: 10%;
+            animation-delay: -2.4s;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(3) {
+            inset-block-end: 12%;
+            inset-inline-start: 13%;
+            animation-delay: -4.1s;
+        }
+        .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(4) {
+            inset-block-end: 10%;
+            inset-inline-end: 8%;
+            animation-delay: -1.3s;
+        }
+        @keyframes hero-object-drift {
+            from { translate: 0 -0.5rem; }
+            to { translate: 0 0.5rem; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .hero-composition--marquee-name .hero-composition__objects > figure {
+                animation: none;
+                translate: none;
+            }
+        }
         /* panel-stage (frm W2a): the opener is one rounded, tinted panel on
            the page ground. Rounded from the committed shape scale, clipped,
            with a faint dot grid on the tint; the copy row centers vertically
@@ -845,6 +899,12 @@ final class ScaffoldThemeStep implements Step
                 .wp-block-cover__inner-container
                 :is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link) {
                 color: var(--wp--preset--color--base) !important;
+            }
+            .hero-composition--marquee-name .hero-composition__objects > figure {
+                width: clamp(3rem, 16vw, 4.5rem);
+            }
+            .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(n + 3) {
+                display: none;
             }
             .hero-composition--metadata-corners > .wp-block-cover {
                 min-height: 88svh;
