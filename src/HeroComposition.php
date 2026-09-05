@@ -179,6 +179,33 @@ final class HeroComposition
         ],
     ];
 
+    /** Supported structures, exposed for concept-led choice rather than random assignment. */
+    public static function choicePrompt(array $constraints = []): string
+    {
+        $choices = [];
+        foreach (self::compatible($constraints) as $recipe) {
+            $meta = self::metadata($recipe);
+            $choices[$recipe] = [
+                'structure' => $meta['layout_archetype'],
+                'media_modes' => $meta['media_modes'],
+                'headline_registers' => $meta['headline_registers'],
+                'height_profiles' => $meta['height_profiles'],
+                'mobile_transformations' => $meta['mobile_transformations'],
+                'media_aspects' => $meta['media_aspects'],
+                'media_weights' => $meta['media_weights'],
+                'blueprint_example' => HeroBlueprint::defaultFor($recipe, $constraints),
+            ];
+        }
+        return "Choose the hero composition that best expresses the user's requested style and this concept. "
+            . "Set hero_blueprint.recipe to one of the compatible choices below. These are supported structures, "
+            . "not a ranking: choose deliberately, not by list position. Choose the permitted media aspect, weight, "
+            . "headline register, height and mobile transformation yourself; example values are not assignments. "
+            . "A cinematic cover centers restrained copy on a photograph; foreground-split pairs copy with one "
+            . "contained image; layered-poster gives display typography the leading role over a photographic plate. "
+            . "Describe the hero only in hero_blueprint, not in the site-wide narrative.\n\n"
+            . json_encode($choices, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
     public static function assertKnown(string $recipe): void
     {
         if (!isset(self::CATALOG[$recipe])) {
@@ -548,44 +575,39 @@ final class HeroComposition
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
         }
-        // BIGR-775 advisory copy-budget check: every hero holds at most the
-        // headline plus ONE supporting paragraph (naturaleza9's three stacked
-        // bodies read as clutter even inside the old standard budget).
-        // copy_capacity stays a selection-only dimension. Overrun keeps the
-        // safe hero and stays actionable.
+        // Match the delivery budget: headline, support, and optionally one
+        // short caption before the headline. Keep excess copy advisory here.
         $copyTextBlocks = 0;
+        $captionAllowed = false;
+        $seenHeadline = false;
         foreach ($document->indices() as $index) {
             if (!in_array($document->name($index), ['heading', 'paragraph'], true)) {
                 continue;
             }
             if (self::hasAncestorClass($document, $index, 'hero-composition__copy')) {
                 $copyTextBlocks++;
+                $attrs = $document->attrs($index) ?? [];
+                if ($document->name($index) === 'heading' && ($attrs['level'] ?? 2) === 1) {
+                    $seenHeadline = true;
+                }
+                if (!$seenHeadline && $document->name($index) === 'paragraph'
+                    && ($attrs['fontSize'] ?? null) === 'caption'
+                ) {
+                    $text = PlainText::fromMarkup($document->innerHtml($index));
+                    $captionAllowed = $captionAllowed || ($text !== '' && mb_strlen($text, 'UTF-8') <= 80);
+                }
             }
         }
-        $textBudget = 2;
+        $textBudget = 2 + (int) $captionAllowed;
         if ($copyTextBlocks > $textBudget) {
             $warnings[] = self::markupWarning(
                 $part,
                 'hero copy budget',
                 ['copy_capacity' => $meta['copy_capacity'], 'max_text_blocks' => $textBudget],
                 ['text_blocks' => $copyTextBlocks],
-                'safe parseable hero was retained; fold the overflow lines into the standfirst instead of stacking more copy',
+                'safe parseable hero was retained; move excess copy into a following section, keeping one headline, '
+                    . 'one short standfirst and at most one optional caption label',
             );
-        }
-
-        // BIGR-775 advisory headline-punctuation check: an em/en dash joins
-        // two thoughts the H1 should not carry together (audited: atlas7).
-        if (preg_match('~<h1\b[^>]*>(.*?)</h1>~is', $markup, $h1Match) === 1) {
-            $headline = PlainText::fromMarkup($h1Match[1]);
-            if (preg_match('/[\x{2013}\x{2014}]/u', $headline) === 1) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'hero headline punctuation',
-                    ['headline' => 'a short phrase without em/en dashes'],
-                    ['headline' => $headline],
-                    'safe parseable hero was retained; move the dash-joined clause into the standfirst',
-                );
-            }
         }
 
         $images = self::imageFacts($markup);

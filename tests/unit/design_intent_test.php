@@ -1,0 +1,118 @@
+<?php
+declare(strict_types=1);
+
+use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
+
+test('explicit style filters conflicting seeds without prescribing fonts or colors', function () {
+    $seeds = array_map(static fn (array $raw): array => ConceptSeeds::normalize($raw), [
+        ['seed' => 'Concrete Clarity', 'register' => 'brutalist', 'ground' => 'light'],
+        ['seed' => 'Stripped Steel', 'register' => 'technical', 'ground' => 'dark'],
+        ['seed' => 'Burnt Foundation', 'register' => 'archival', 'ground' => 'dark'],
+    ]);
+    $warnings = [];
+    $kept = ConceptSeeds::respectStyle($seeds, 'Brutalist', $warnings);
+    assert_eq([$seeds[0]], $kept);
+    assert_eq(2, count($warnings));
+    assert_contains('Burnt Foundation', implode("\n", $warnings));
+    assert_contains('brutalist', implode("\n", $warnings));
+    assert_contains('removed', implode("\n", $warnings));
+    $again = [];
+    assert_eq($kept, ConceptSeeds::respectStyle($kept, 'Brutalist', $again));
+    assert_eq([], $again);
+    $open = [];
+    assert_eq($seeds, ConceptSeeds::respectStyle($seeds, '', $open));
+    assert_eq([], $open);
+});
+
+test('style constraint supports freeform styles and does not infer one from the business topic', function () {
+    assert_eq('swiss punk collage', ConceptSeeds::requestedStyle('{"visual_vibe":"Swiss punk collage"}'));
+    assert_eq('', ConceptSeeds::requestedStyle('{"topic":"organic bakery"}'));
+    assert_eq('', ConceptSeeds::requestedStyle('{"visual_vibe":[]}'));
+    $vars = ConceptSeeds::seedPromptVars('A Swiss punk collage site', '{"visual_vibe":"Swiss punk collage"}');
+    assert_contains('swiss punk collage', $vars['locked_labels']);
+    assert_contains('every candidate', $vars['locked_labels']);
+    $freeform = ConceptSeeds::normalize(['seed' => 'Punk index', 'register' => 'Swiss punk collage'], [
+        'registers' => ['swiss punk collage'],
+    ]);
+    $warnings = [];
+    assert_eq([$freeform], ConceptSeeds::respectStyle([$freeform], 'swiss punk collage', $warnings));
+    assert_eq([], $warnings);
+});
+
+test('style eligibility treats grammatical variants as the same requested aesthetic', function () {
+    foreach (['brutalist styled' => 'brutalist', 'bold brutalist' => 'brutalist', 'brutalist style' => 'brutalist', 'Brutalism' => 'brutalist',
+        'organically styled' => 'organic', 'professionally, organically styled' => 'organic',
+        'art deco' => 'art-deco', 'Swiss punk collage' => 'swiss punk collage',
+        'not brutalist' => 'not brutalist', 'organic and brutalist' => 'organic and brutalist'] as $raw => $canonical) {
+        assert_eq($canonical, ConceptSeeds::requestedStyle(json_encode(['visual_vibe' => $raw])));
+        $seed = ConceptSeeds::normalize(['seed' => 'One defensible interpretation', 'register' => $canonical], ['registers' => [$canonical]]);
+        $warnings = [];
+        assert_eq([$seed], ConceptSeeds::respectStyle([$seed], $raw, $warnings));
+        assert_eq([], $warnings);
+    }
+});
+
+test('fleet willow seed regression expands brutalism instead of archival even with a conflicting forced seed', function () {
+    [$project, $llm] = make_designdir_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'A brutalist Super Coaching site.']);
+    $project->writeJson('siteSpec.json', ['name' => 'Super Coaching', 'visual_vibe' => 'brutalist']);
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('Concrete Clarity', 'light', 'brutalist', 'neutral'),
+        designdir_seed_obj('Stripped Steel', 'dark', 'technical', 'cool'),
+        designdir_seed_obj('Burnt Foundation', 'dark', 'archival', 'earth'),
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+    putenv('DESIGN_DIRECTION_CHOICE=3');
+    try {
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } finally {
+        putenv('DESIGN_DIRECTION_CHOICE');
+    }
+    assert_eq('Concrete Clarity', $project->readJson('designDirection.json')['concept_seed']);
+    assert_contains('USER-REQUESTED STYLE: "brutalist"', DesignDirectionStep::readFor($project));
+    assert_eq(3, count($project->readJson('logs/design-direction-seeds.json')['candidates']));
+    assert_contains('**Design tradition**: brutalist', $llm->calls[1]['prompt']);
+    assert_true(!str_contains($llm->calls[1]['prompt'], 'Burnt Foundation'));
+    assert_contains('requested style', implode("\n", $project->readJson('warnings.json')['design-direction']));
+});
+
+test('all conflicting seeds fall back to the requested style without another model call', function () {
+    [$project, $llm] = make_designdir_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'A Swiss punk collage coaching site.']);
+    $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => 'Swiss punk collage']);
+    $llm->queueJson(['seeds' => [designdir_seed_obj('Warm Archive', 'dark', 'archival', 'earth')]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, count($llm->calls));
+    assert_contains('swiss punk collage', $llm->calls[1]['prompt']);
+    assert_true(!str_contains($llm->calls[1]['prompt'], 'Warm Archive'));
+    assert_contains('requested style', implode("\n", $project->readJson('warnings.json')['design-direction']));
+});
+
+test('design model chooses a compatible hero and its media proportions', function () {
+    [$project, $llm] = make_designdir_fixture();
+    $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => '']);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $direction = designdir_direction();
+    $direction['hero_blueprint'] = array_replace(HeroBlueprint::defaultFor('foreground-split'), [
+        'media_aspect' => 'square', 'media_weight' => 'dominant',
+    ]);
+    $llm->queueJson(['direction' => $direction]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq($direction['hero_blueprint'], $project->readJson('designDirection.json')['hero_blueprint']);
+    assert_contains('Choose the hero composition', $llm->calls[1]['prompt']);
+    assert_contains('layered-poster', $llm->calls[1]['prompt']);
+    assert_contains('cinematic-safe-zone', $llm->calls[1]['prompt']);
+});
+
+test('homepage creative emphasis has no section or image quota', function () {
+    $reflection = new ReflectionClass(Automattic\SiteBuild\Steps\PagePlanStep::class);
+    $emphasis = $reflection->getConstant('FRONT_EMPHASIS');
+    assert_true(!str_contains($emphasis, 'at least 3'));
+    assert_true(!str_contains($emphasis, '5 to 8'));
+    assert_true(!str_contains($emphasis, 'image-rich'));
+    assert_contains('content', $emphasis);
+});

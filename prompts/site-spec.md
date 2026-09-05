@@ -21,7 +21,7 @@ Always include exactly these fixed properties:
   "persona_name": string,    // personal sites only (portfolio, CV, personal blog): the full name of the one person the site is about; "" for non-personal sites
   "email_domain": string,    // user-stated domain for contact — lowercase, no "@" or scheme; "" when the user stated none. NEVER invent one
   "invented": [string],      // which of "name" / "persona_name" you invented rather than took from the prompt; [] if both were stated. NEVER invent email_domain or any other contact fact
-  "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling (two to six mood words) — a vibe, NOT concrete colors or fonts
+  "visual_vibe": string,     // a SHORT phrase preserving the user's explicitly stated mood/style; "" when unspecified — never infer a conventional aesthetic from the topic
   "subject_is_visual_work": boolean, // true ONLY when the site's core offering IS visual imagery — a photography, art, design, food, or architecture portfolio where the pictures are the product; false for everything else (a factual judgment about the subject, not a design choice)
   "animation_request": string, // VERBATIM any SPECIFIC animation/motion behavior the user explicitly asked for (e.g. "the logo should spin on hover", "typewriter effect on the headline"); "" when none — never invent one, and general mood words ("dynamic", "lively") do NOT count
   "sections": [string],      // ordered sections the HOMEPAGE needs (4-7), each named after its own content
@@ -45,6 +45,6 @@ Beyond these fixed properties, **add any additional factual fields the user actu
 
 A shop is a catalog storefront: product cards, prices only when the user supplied them, and a contact enquiry. Do NOT invent Cart, Checkout, Basket, or WooCommerce pages. The build has no cart backend.
 
-Keep `visual_vibe` to a brief mood phrase. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
+Keep `visual_vibe` to the user's stated mood/style, or "" when none was stated. Leave aesthetic invention to design-direction. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
 
 Output JSON only.

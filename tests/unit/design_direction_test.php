@@ -25,7 +25,7 @@ function make_designdir_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_designdir_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
-    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'visual_vibe' => 'warm and rustic']);
+    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'visual_vibe' => '']);
     return [$project, new FakeLlm(), $tmp];
 }
 
@@ -82,6 +82,34 @@ function designdir_direction(): array
         'hero_blueprint'   => HeroBlueprint::defaultFor('foreground-split'),
     ];
 }
+
+test('design direction preserves familiar fonts and a complementary cross-register pairing', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $authored = designdir_direction();
+    $authored['type']['heading']['family'] = 'Playfair Display';
+    $authored['type']['body']['family'] = 'Inter';
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => $authored]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $out = $project->readJson('designDirection.json');
+    foreach (['heading', 'body'] as $slot) {
+        assert_eq($authored['type'][$slot], $out['type'][$slot], 'authored family, weights and axes survive');
+    }
+    $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json')['design-direction'] ?? [] : [];
+    assert_true(!str_contains(implode("\n", $warnings), 'monoculture'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('formatted direction treats item patterns as preferences and expansive spacing without quotas', function () {
+    $text = DesignDirectionStep::format(array_replace(designdir_direction(), [
+        'item_pattern' => 'rule-row', 'density' => 'expansive', 'rhythm' => 'stacked',
+    ]));
+    assert_contains('preferred idiom', $text);
+    assert_contains('Each section may choose another supported idiom', $text);
+    assert_contains('spacious sequences', $text);
+    assert_true(!str_contains($text, 'keep the rest standard'));
+    assert_true(!str_contains($text, 'every allowed spacious pause'));
+});
 
 /** @param list<string> $rows @return list<string> */
 function designdir_card_rows(array $rows): array
@@ -184,9 +212,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $assigned = $written['hero_blueprint']['recipe'];
     assert_contains($assigned, $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
-        if ($other !== $assigned) {
-            assert_true(!str_contains($llm->calls[1]['prompt'], $other), "{$other} recipe does not leak");
-        }
+        assert_contains($other, $llm->calls[1]['prompt'], "{$other} is available to the designer");
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));

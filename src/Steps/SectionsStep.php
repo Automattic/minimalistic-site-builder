@@ -1028,6 +1028,10 @@ final class SectionsStep implements Step
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $cardStyle = DesignDirectionStep::cardStyleFor($project, $warnings);
+        $motionProfile = DesignDirectionStep::motionProfileFor($project);
+        $motionClasses = $project->exists('designDirection.json')
+            ? ($project->readJson('designDirection.json')['motion_note'] ?? [])
+            : [];
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
 
         // One read serves both consumers: the raw text goes verbatim into the
@@ -1048,6 +1052,8 @@ final class SectionsStep implements Step
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
             'card_style'        => $cardStyle,
+            'motion_profile'    => $motionProfile,
+            'motion_classes'    => $motionClasses,
             'site_pages'        => PagePlanStep::sitePagesList($pages),
             // A host capability, not a site fact: it says whether a real form
             // backend exists to replace the placeholders, so it stays in the

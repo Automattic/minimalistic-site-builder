@@ -353,7 +353,7 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
     assert_eq([], $coverAspect);
 });
 
-test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {
+test('hero copy overruns stay advisory while meaningful headline punctuation is accepted', function () {
     $media = '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
         . '<img src="theme:./assets/subject.jpg" alt="AI_IMAGE: Subject | foreground slot | photorealistic | landscape" />'
         . '</div><!-- /wp:group -->';
@@ -377,9 +377,9 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
         . '</div><!-- /wp:group --></div><!-- /wp:group -->';
     $warnings = HeroComposition::markupWarnings($inBudget, 'foreground-split', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero copy budget'))));
-    // The em dash inside the H1 is its own advisory.
+    // A dash can carry meaning; punctuation alone is not a defect.
     $dash = array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation')));
-    assert_eq(1, count($dash));
+    assert_eq([], $dash);
 
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'foreground-split', 'page-home--hero');

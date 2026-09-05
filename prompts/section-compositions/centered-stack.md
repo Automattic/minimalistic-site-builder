@@ -1,8 +1,8 @@
 ### centered-stack
 
 Build one constrained column and let type scale and whitespace carry it. This
-is the page's quiet beat, so it earns its band through restraint rather than
-through a device. Do not rescue it with a rule, a box, or a decorative motif.
+can be a quiet pause or an emphatic typographic beat. A divider or motif is
+welcome when it belongs to the site's visual language; it is not required.
 
 - Structure: one constrained column of headings and paragraphs. The theme
   centers the whole band through the root marker class, so author every
@@ -21,5 +21,4 @@ through a device. Do not rescue it with a rule, a box, or a decorative motif.
 - Objective failure: a heading or a paragraph forced back to start alignment
   inside the centered band (repeated item rows, lists, and a form the host
   substitutes in are the exceptions, and the theme handles them), a
-  multi-column grid built inside the stack, or a
-  hairline rule under the heading.
+  multi-column grid built inside the stack.

@@ -14,6 +14,20 @@ function seed_refine_meta(Project $project, bool $multiPage = false, string $pro
     ]);
 }
 
+test('refinement request preserves stated aesthetics and leaves unstated style open', function () {
+    with_project('builder_refine_style_', function (Project $project) {
+        seed_refine_meta($project, prompt: 'A swimming club. Keep the black-and-white photography.');
+        $llm = new FakeLlm();
+        $llm->queueText('A swimming club site using black-and-white photography.');
+        (new RefinePromptStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        $prompt = $llm->calls[0]['prompt'];
+        assert_contains('Preserve explicit aesthetic choices', $prompt);
+        assert_contains('do not add an inferred palette, mood, era, typography, or design tradition', $prompt);
+        assert_contains('suggestions, not user-stated facts', $prompt);
+        assert_contains('Keep the black-and-white photography', $prompt);
+    });
+});
+
 test('refine-prompt without multi_page turns named pages into on-page sections', function () {
     with_project('builder_refine_', function (Project $project) {
         seed_refine_meta($project, multiPage: false);

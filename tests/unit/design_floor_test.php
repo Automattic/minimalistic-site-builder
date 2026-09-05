@@ -136,15 +136,15 @@ test('skipped-heading fires on h2 to h4 and not on h2 to h3', function () {
     assert_true(!design_floor_has_rule(DesignFloor::check($ok, []), DesignFloor::RULE_SKIPPED_HEADING));
 });
 
-test('kicker-above-heading fires on a caption kicker and skips a standfirst', function () {
+test('captions and standfirsts above headings are not automatically design defects', function () {
     $kicker = '<!-- wp:paragraph {"fontSize":"caption","style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.2em"}}} -->'
         . '<p class="has-caption-font-size">Studio hours</p><!-- /wp:paragraph -->'
         . '<!-- wp:heading {"level":2} --><h2>Visit</h2><!-- /wp:heading -->';
-    assert_true(design_floor_has_rule(DesignFloor::check($kicker, []), DesignFloor::RULE_KICKER_ABOVE_HEADING));
+    assert_true(!design_floor_has_rule(DesignFloor::check($kicker, []), 'kicker-above-heading'));
 
     $standfirst = '<!-- wp:paragraph --><p>A mixed-case standfirst under nothing, then a heading.</p><!-- /wp:paragraph -->'
         . '<!-- wp:heading {"level":2} --><h2>Visit</h2><!-- /wp:heading -->';
-    assert_true(!design_floor_has_rule(DesignFloor::check($standfirst, []), DesignFloor::RULE_KICKER_ABOVE_HEADING));
+    assert_true(!design_floor_has_rule(DesignFloor::check($standfirst, []), 'kicker-above-heading'));
 });
 
 test('tiny-text fires when body is under 0.75rem and skips caption-only tininess', function () {
@@ -219,12 +219,11 @@ test('empty theme.json and empty markup yield no findings', function () {
     assert_eq([], DesignFloor::check('', []));
 });
 
-test('section prompt bans kickers above headings', function () {
+test('section prompt makes useful orientation labels optional', function () {
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
-    assert_contains('Eyebrows are banned', $section);
-    assert_contains('no brief earns it back', $section);
-    assert_true(!str_contains($section, 'Eyebrows are rationed'));
-    assert_contains('Never put an eyebrow or kicker line above the row heading', $section);
+    assert_true(!str_contains($section, 'Eyebrows are banned'));
+    assert_true(!str_contains($section, 'no brief earns it back'));
+    assert_contains('optional', $section);
 });
 
 test('design-direction offers no numeral device and no numbered-index idiom', function () {
@@ -241,7 +240,7 @@ test('design-direction offers no numeral device and no numbered-index idiom', fu
             'the item_pattern vocabulary must not offer a bare index token',
         );
     }
-    assert_contains('banned unless the SITE BRIEF explicitly asks for visible numbering', $direction);
+    assert_contains('meaningful sequence or identifier', $direction);
 });
 
 test('side-tab skips an unnamed group with a thick left border', function () {

@@ -1,0 +1,3 @@
+Image-card construction: use `card-style--{{card_style}}` on the outer card group. Keep related text and actions in one inner group with `className:"card-body"` when a wrapper is needed. On equal-card rows this lets a nested `cta-bottom` align with its siblings.
+
+- `overlap` — flush media with the text panel riding up over the image's bottom edge. Build exactly like `flush` (card group with `"className":"card-style--overlap card-flush"`, image first, no card padding), but the inner text group gets BOTH class hooks in `"className":"card-body overlap-up"`, its OWN backgroundColor, its own padding, and small side margins (`"style":{"spacing":{"margin":{"left":"1rem","right":"1rem"}}}`) so the image shows around the panel.

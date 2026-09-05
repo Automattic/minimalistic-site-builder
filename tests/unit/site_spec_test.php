@@ -1,6 +1,13 @@
 <?php
 declare(strict_types=1);
 
+test('site-spec leaves unstated visual style open for design-direction', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/site-spec.md'));
+    assert_contains('"" when unspecified', $prompt);
+    assert_contains('never infer a conventional aesthetic from the topic', $prompt);
+    assert_contains('Leave aesthetic invention to design-direction', $prompt);
+});
+
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ProjectStore;

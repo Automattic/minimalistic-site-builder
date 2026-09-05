@@ -22,7 +22,6 @@ final class DesignFloor
     public const RULE_SIDE_TAB = 'side-tab';
     public const RULE_ALL_CAPS_BODY = 'all-caps-body';
     public const RULE_SKIPPED_HEADING = 'skipped-heading';
-    public const RULE_KICKER_ABOVE_HEADING = 'kicker-above-heading';
     public const RULE_TINY_TEXT = 'tiny-text';
     public const RULE_WIDE_TRACKING = 'wide-tracking';
     public const RULE_TIGHT_LEADING = 'tight-leading';
@@ -37,7 +36,6 @@ final class DesignFloor
         self::RULE_SIDE_TAB,
         self::RULE_ALL_CAPS_BODY,
         self::RULE_SKIPPED_HEADING,
-        self::RULE_KICKER_ABOVE_HEADING,
     ];
 
     /** @var list<string> */
@@ -64,7 +62,6 @@ final class DesignFloor
     private const TIGHT_LEADING = 1.3;
     private const FLAT_RATIO = 2.0;
     private const BODY_CAPS_MIN_CHARS = 80;
-    private const KICKER_MAX_CHARS = 90;
     private const ROOT_PX = 16.0;
 
     /**
@@ -143,7 +140,6 @@ final class DesignFloor
             self::RULE_SIDE_TAB => static fn (BlockMarkup $document): array => self::sideTab($document),
             self::RULE_ALL_CAPS_BODY => static fn (BlockMarkup $document): array => self::allCapsBody($document),
             self::RULE_SKIPPED_HEADING => static fn (BlockMarkup $document): array => self::skippedHeading($document),
-            self::RULE_KICKER_ABOVE_HEADING => static fn (BlockMarkup $document): array => self::kickerAboveHeading($document),
         ];
     }
 
@@ -310,31 +306,6 @@ final class DesignFloor
                 );
             }
             $previous = ['level' => $level, 'index' => $index];
-        }
-        return $findings;
-    }
-
-    /** @return list<Finding> */
-    private static function kickerAboveHeading(BlockMarkup $document): array
-    {
-        $findings = [];
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'heading') {
-                continue;
-            }
-            $level = self::headingLevel($document, $index);
-            if ($level === null) {
-                continue;
-            }
-            $kicker = self::previousSibling($document, $index);
-            if ($kicker === null || !self::isKickerCandidate($document, $kicker)) {
-                continue;
-            }
-            $findings[] = self::finding(
-                self::RULE_KICKER_ABOVE_HEADING,
-                'kicker or eyebrow above a heading',
-                self::blockPath($document, $kicker),
-            );
         }
         return $findings;
     }
@@ -625,60 +596,6 @@ final class DesignFloor
         return false;
     }
 
-    private static function isKickerCandidate(BlockMarkup $document, int $index): bool
-    {
-        $name = $document->name($index);
-        if (!in_array($name, ['paragraph', 'heading'], true)) {
-            return false;
-        }
-        $attrs = $document->attrs($index) ?? [];
-        if ($name === 'heading') {
-            $level = self::headingLevel($document, $index);
-            if ($level === null || $level < 4) {
-                return false;
-            }
-        }
-        $text = self::readingText($document->innerHtml($index));
-        if ($text === '' || mb_strlen($text, 'UTF-8') > self::KICKER_MAX_CHARS) {
-            return false;
-        }
-        $typography = is_array($attrs['style']['typography'] ?? null)
-            ? $attrs['style']['typography']
-            : [];
-        $fontSize = $attrs['fontSize'] ?? '';
-        $textTransform = is_string($typography['textTransform'] ?? null)
-            ? $typography['textTransform']
-            : '';
-        $letterSpacing = is_string($typography['letterSpacing'] ?? null)
-            ? $typography['letterSpacing']
-            : '';
-        if ($name === 'heading') {
-            return true;
-        }
-        return self::isCaptionSlug($fontSize)
-            || strtolower($textTransform) === 'uppercase'
-            || trim($letterSpacing) !== ''
-            || self::inlineHasUppercaseOrTracking($document, $index);
-    }
-
-    private static function inlineHasUppercaseOrTracking(BlockMarkup $document, int $index): bool
-    {
-        foreach (self::inlineDeclarations($document, $index) as $decl) {
-            if ($decl['value'] === null) {
-                continue;
-            }
-            if ($decl['property'] === 'text-transform'
-                && preg_match('/uppercase/i', $decl['value']) === 1
-            ) {
-                return true;
-            }
-            if ($decl['property'] === 'letter-spacing' && trim($decl['value']) !== '') {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static function headingLevel(BlockMarkup $document, int $index): ?int
     {
         $level = ($document->attrs($index) ?? [])['level'] ?? 2;
@@ -692,22 +609,6 @@ final class DesignFloor
             return (int) $level;
         }
         return null;
-    }
-
-    private static function previousSibling(BlockMarkup $document, int $index): ?int
-    {
-        $parent = $document->parent($index);
-        $siblings = $parent === null
-            ? array_values(array_filter(
-                $document->indices(),
-                static fn (int $candidate): bool => $document->parent($candidate) === null,
-            ))
-            : $document->children($parent);
-        $position = array_search($index, $siblings, true);
-        if ($position === false || $position === 0) {
-            return null;
-        }
-        return $siblings[$position - 1];
     }
 
     private static function isCaptionSlug(mixed $slug): bool

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\SectionUnit;
@@ -48,13 +49,36 @@ function section_unit_request_text(array $request): string
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
-test('section prompt keeps dash-free headings semantically lossless', function () {
+test('SectionUnit sends a profile-safe motion palette and only the assigned layout recipe', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    foreach (Motion::PROFILES as $profile) {
+        $input = section_unit_input();
+        $input['motion_profile'] = $profile;
+        $input['motion_classes'] = ['reveal-fade', 'hover-lift', 'hero-entrance', 'invented-wobble'];
+        $prompt = section_unit_request_text($unit->request($input));
+        $allowed = Motion::validateNote($input['motion_classes'], $profile)['classes'];
+        $palette = $allowed === [] ? 'Use no motion-kit classes.'
+            : 'Choose effects from this site\'s palette: `' . implode('`, `', $allowed) . '`.';
+        assert_contains($palette, $prompt);
+        assert_true(!str_contains($prompt, 'invented-wobble'));
+        assert_true(!str_contains($prompt, 'hero-entrance'));
+        assert_true(!str_contains($prompt, '### equal-card-grid'));
+        assert_contains('### full-bleed-cover', $prompt);
+    }
+    $input = section_unit_input();
+    $input['motion_profile'] = 'calm';
+    $input['motion_classes'] = [];
+    $prompt = section_unit_request_text($unit->request($input));
+    foreach (array_intersect(Motion::allowedClasses('calm'), Motion::noteClasses()) as $class) {
+        assert_contains('`' . $class . '`', $prompt, 'an empty preference uses the profile vocabulary');
+    }
+});
+
+test('section prompt permits meaningful punctuation without losing ranges', function () {
     $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
 
-    assert_contains('no em or en dashes', $prompt, 'all section heading levels reject dash-joined labels');
-    assert_contains('preserve both endpoints', $prompt, 'semantic ranges cannot lose a bound');
-    assert_contains('From 2004 to 2024', $prompt, 'ranges have a dash-free heading form');
-    assert_contains('move the intact range into supporting copy', $prompt, 'ranges may move without losing meaning');
+    assert_contains('Punctuation, including dashes and ranges, is allowed', $prompt);
+    assert_true(!str_contains($prompt, 'no em or en dashes'));
 });
 
 test('section prompt keeps unbreakable contact tokens out of display type', function () {
@@ -284,62 +308,33 @@ test('SectionUnit teaches the attribute-light markup contract without sacrificin
     }
 });
 
-test('SectionUnit documents the nested flush-card body contract', function () {
-    $request = (new SectionUnit(
-        new FakeLlm(),
-        new PromptRenderer(repo_path('prompts')),
-    ))->request(section_unit_input());
-    $prompt = section_unit_request_text($request);
-
-    assert_contains(
-        'ONE inner `wp:group` with `"className":"card-body"`',
-        $prompt,
-        'flush cards give their padded text group the stable flex-body hook',
-    );
-    assert_contains(
-        '`"className":"card-body overlap-up"`',
-        $prompt,
-        'overlap cards retain both the flex-body and overlap hooks',
-    );
-    assert_contains(
-        'a nested `cta-bottom` can align with sibling cards',
-        $prompt,
-        'the placement requirement explains why the body hook is structural',
-    );
-    assert_contains(
-        'put ALL of that content in ONE such wrapper and give it `"className":"card-body"` regardless of treatment',
-        $prompt,
-        'every optional nested card text wrapper receives the shared structural hook',
-    );
-    assert_contains(
-        'REQUIRED for `flush` and `overlap`; it is OPTIONAL for `framed` and `borderless`',
-        $prompt,
-        'framed and borderless cards may stay flat but cannot create an unhooked nested body',
-    );
-    foreach (['flush', 'framed', 'overlap', 'borderless'] as $treatment) {
-        assert_contains(
-            '`card-style--' . $treatment . '`',
-            $prompt,
-            "the {$treatment} construction has one universal treatment marker",
-        );
+test('SectionUnit loads only the selected card construction and keeps its structural hooks', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    foreach (['flush', 'framed', 'overlap', 'borderless'] as $style) {
+        $input = section_unit_input();
+        $input['card_style'] = $style;
+        $prompt = section_unit_request_text($unit->request($input));
+        assert_contains('Image-card construction: use `card-style--' . $style . '`', $prompt);
+        assert_contains('card-body', $prompt, 'nested card text keeps the flex hook');
+        foreach (array_diff(['flush', 'framed', 'overlap', 'borderless'], [$style]) as $other) {
+            assert_true(!str_contains($prompt, '- `' . $other . '` ('), 'unused construction is absent');
+        }
+        if ($style === 'flush') {
+            assert_contains('ONE inner `wp:group` with `"className":"card-body"`', $prompt);
+        } elseif ($style === 'overlap') {
+            assert_contains('"className":"card-body overlap-up"', $prompt);
+        } elseif ($style === 'framed') {
+            assert_contains('ONE uniform literal pixel value for all four padding sides', $prompt);
+        }
     }
-    assert_contains(
-        '`"className":"card-style--overlap card-flush"`',
-        $prompt,
-        'overlap cards carry the universal marker and flush behavior hook together',
-    );
-    assert_contains(
-        'ONE uniform literal pixel value for all four padding sides',
-        $prompt,
-        'framed geometry remains deterministic enough for the delivery contract to verify',
-    );
 });
+
 
 test('SectionUnit documents the complete list-thumb delivery contract', function () {
     $request = (new SectionUnit(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
-    ))->request(section_unit_input());
+    ))->request(array_replace_recursive(section_unit_input(), ['section' => ['layout_archetype' => 'list-with-thumbnails']]));
     $prompt = section_unit_request_text($request);
 
     assert_contains(
@@ -372,7 +367,7 @@ test('SectionUnit gives standalone requests the authoritative machine card style
 
     assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): framed', $prompt);
     assert_contains(
-        'overrides absent or conflicting prose in the DESIGN DIRECTION',
+        'Image-card construction: use `card-style--framed`',
         $prompt,
     );
     assert_true(
@@ -444,6 +439,8 @@ test('SectionUnit layered request loses only cache marker separators', function 
         ]), "\r\n"),
         'language'          => $input['language'],
         'card_style'        => $input['card_style'],
+        'card_instructions' => $renderer->render('card-styles/' . $input['card_style'] . '.md', ['card_style' => $input['card_style']]),
+        'motion_instructions' => $renderer->render('section-motion.md', ['motion_profile' => 'none', 'motion_palette' => 'Use no motion-kit classes.']),
         'outline'           => $input['outline'],
         'site_pages'        => $input['site_pages'],
         'page_title'        => $input['page']['title'],

@@ -14,7 +14,6 @@ use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
-use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
@@ -182,7 +181,7 @@ final class DesignDirectionStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json'],
-            writes: ['designDirection.json', 'warnings.json'],
+            writes: ['designDirection.json', 'warnings.json', 'logs/design-direction-seeds.json'],
             concurrent: false,
         );
     }
@@ -209,8 +208,8 @@ final class DesignDirectionStep implements Step
 
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
-        // Loaded once: the expansion prompt samples its font shortlist from
-        // it, and the monoculture floor below substitutes against it.
+        // The expansion prompt samples discovery suggestions from the catalog;
+        // they do not restrict the authored font pairing.
         $fontCatalog = FontCatalog::load();
 
         $warnings = [];
@@ -221,17 +220,17 @@ final class DesignDirectionStep implements Step
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
             'color_economy' => $seedColorEconomy,
-        ] = $this->chooseSeed($prompt, $spec, $warnings);
+        ] = $this->chooseSeed($prompt, $spec, $warnings, $project);
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
             $seed,
             $warnings,
         );
-        // The recipe is code-owned and seeded, and so are its media axes
-        // (BIGR-912). The prompt below tells the model to preserve the defaults
-        // it is handed, so handing every site the same aspect and weight would
-        // make the merged contained-split recipe draw one composition forever.
+        $recipeAssigned = trim((string) Env::get(self::HERO_RECIPE_ENV)) !== ''
+            || array_key_exists('hero_assignment', $meta);
+        // Explicit assignments keep reproducible media defaults. Ordinary
+        // builds receive the compatible choices instead of an assigned recipe.
         $blueprintDefaults = array_merge(
             HeroBlueprint::defaultFor($recipe, $constraints),
             HeroComposition::selectMediaAxes(
@@ -251,6 +250,10 @@ final class DesignDirectionStep implements Step
                 [],
             ),
         ]);
+
+        if (!$recipeAssigned) {
+            $heroComposition = HeroComposition::choicePrompt($constraints);
+        }
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
@@ -297,6 +300,17 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
+        if (!$recipeAssigned) {
+            $authoredRecipe = $payload['direction']['hero_blueprint']['recipe'] ?? null;
+            if (is_string($authoredRecipe) && in_array($authoredRecipe, HeroComposition::compatible($constraints), true)) {
+                $recipe = $authoredRecipe;
+            } else {
+                $warnings[] = 'file=designDirection.json; path=hero_blueprint.recipe; authored='
+                    . self::describe($authoredRecipe) . '; delivered=' . self::describe($recipe)
+                    . '; disposition=missing or incompatible model choice replaced by stable compatible fallback';
+            }
+        }
+
         $repairs = [];
         $direction = self::normalize(
             $payload['direction'] ?? null,
@@ -326,6 +340,11 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
+        // Carry the user's intent independently of the generated narrative so
+        // every downstream author can resolve a conflicting design detail.
+        $direction['requested_style'] = is_string($specData['visual_vibe'] ?? null)
+            ? trim($specData['visual_vibe']) : '';
+
         if (isset($constraints['hero_canvas']) && $direction['canvas'] !== $constraints['hero_canvas']) {
             $repairs[] = 'designDirection.json: field canvas authored '
                 . self::describe($direction['canvas']) . ' delivered '
@@ -338,16 +357,8 @@ final class DesignDirectionStep implements Step
             Narrator::write('  [design-direction] repaired ' . count($repairs)
                 . " generated direction field(s) (reported separately from durable warnings).\n");
         }
-        // Naming the reflex faces in the prompt moved us off them and straight
-        // onto the next tier — prose is a suggestion the model may decline.
-        // This is the floor under it, and it runs here rather than in
-        // normalize() because it needs the shipped catalog off disk.
-        $direction = self::substituteMonocultureFonts(
-            $direction,
-            (string) ($specData['slug'] ?? $project->slug()),
-            $fontCatalog,
-            $warnings,
-        );
+        // The committed pairing is a creative choice. Font availability and
+        // face resolution are checked downstream; familiarity is not a defect.
 
         // Last, with every field final: does the narrative promise decoration
         // no step can execute? The prose is handed to every downstream design
@@ -358,10 +369,8 @@ final class DesignDirectionStep implements Step
         // model), so this is rung 4: record it and continue.
         array_push($warnings, ...DirectionExecutability::problems($direction));
 
-        // Narrated HERE, after every source has contributed: font substitution
-        // and the executability walk both add warnings, and announcing the
-        // count before them printed no line at all for a build whose only
-        // durable warning came from one of the two.
+        // Narrate after every source has contributed, including the
+        // executability walk, so its residual problems are counted too.
         if ($warnings !== []) {
             Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
                 . " generated-content degradation(s) (recorded in warnings.json)\n");
@@ -465,10 +474,11 @@ final class DesignDirectionStep implements Step
      * @param list<string> $warnings
      * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
      */
-    private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
+    private function chooseSeed(string $brief, string $spec, array &$warnings, Project $project): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
+        $requestedStyle = ConceptSeeds::requestedStyle($spec);
 
         $seeds = [];
         try {
@@ -485,6 +495,9 @@ final class DesignDirectionStep implements Step
             }
             $payload = $this->llm->completeJson($rendered, $opts);
             $locked = ConceptSeeds::lockedFromBrief($brief);
+            if ($requestedStyle !== '') {
+                $locked['registers'][] = $requestedStyle;
+            }
             foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
                 $seed = ConceptSeeds::normalize($raw, $locked);
                 if ($seed !== null) {
@@ -498,6 +511,11 @@ final class DesignDirectionStep implements Step
             // Fall through to the fallback seed below.
         }
 
+        $project->writeJson('logs/design-direction-seeds.json', [
+            'requested_style' => $requestedStyle,
+            'candidates' => $seeds,
+        ]);
+
         if ($isForced) {
             $n = (int) $forced;
             if ($n < 1 || $n > count($seeds)) {
@@ -508,20 +526,36 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return self::chosen($seeds[$n - 1]);
+            $candidate = $seeds[$n - 1];
+            if ($requestedStyle === '' || (is_string($candidate['register'])
+                && ConceptSeeds::styleKey($candidate['register']) === $requestedStyle)) {
+                return self::chosen($candidate);
+            }
+            $warnings[] = 'file=designDirection.json; path=concept_seed; authored=forced candidate '
+                . $n . '; delivered=style-compatible selection; disposition=forced candidate bypassed because '
+                . 'the requested style outranks a generated candidate';
         }
 
+        $seeds = ConceptSeeds::respectStyle($seeds, $requestedStyle, $warnings);
         if ($seeds === []) {
+            if ($requestedStyle !== '') {
+                $warnings[] = 'file=designDirection.json; path=concept_seed; authored=no compatible candidate; '
+                    . 'delivered=' . self::describe($requestedStyle)
+                    . '; disposition=expand the requested style directly instead of an unrelated seed';
+            }
             return [
-                'text' => self::SEED_FALLBACK,
+                'text' => $requestedStyle === '' ? self::SEED_FALLBACK
+                    : 'Develop one distinctive interpretation of the user-requested style: ' . $requestedStyle
+                        . '. The brief owns the aesthetic; choose all unspecified details to serve it.',
                 'ground' => '',
                 'tint' => '',
-                'register' => '',
+                'register' => $requestedStyle,
                 'type_register' => '',
                 'color_economy' => '',
             ];
         }
-        $pool = ConceptSeeds::distinct($seeds, $warnings);
+        // Coarse labels must not erase different interpretations of one style.
+        $pool = $requestedStyle === '' ? ConceptSeeds::distinct($seeds, $warnings) : $seeds;
         $triples = [];
         foreach ($pool as $seed) {
             $key = ConceptSeeds::axisKey($seed);
@@ -532,7 +566,7 @@ final class DesignDirectionStep implements Step
         // distinct() already records a collapsed round (one world, kept
         // whole). A second row that restates the shared axis is the same
         // event, and "open brief" is a claim this step never checked.
-        if (count($triples) > 1) {
+        if ($requestedStyle === '' && count($triples) > 1) {
             $sharedGround = ConceptSeeds::sharedGround($pool);
             if ($sharedGround !== null) {
                 $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
@@ -1008,6 +1042,7 @@ final class DesignDirectionStep implements Step
             'motion_note'      => $motionNote,
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
+            'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
         ];
     }
 
@@ -1085,45 +1120,6 @@ final class DesignDirectionStep implements Step
             $warnings,
             'unsupported elevation treatment replaced by flat',
         );
-    }
-
-    /**
-     * Move any type slot off a monoculture face, keeping its category.
-     *
-     * `axes` is cleared alongside the swap: an `opsz` range was committed for
-     * the family the model named, and carrying it onto a different face would
-     * promise an optical-size axis the replacement may not have. Weights need
-     * no such care — FontCatalog::faces() already resolves to the nearest
-     * weight the delivered family actually ships.
-     *
-     * Pure given the catalog — unit-testable.
-     *
-     * @param array<string,mixed> $direction
-     * @param list<string> $warnings
-     * @return array<string,mixed>
-     */
-    public static function substituteMonocultureFonts(
-        array $direction,
-        string $seed,
-        FontCatalog $catalog,
-        array &$warnings = [],
-    ): array {
-        foreach (['heading', 'body', 'accent'] as $slot) {
-            $family = $direction['type'][$slot]['family'] ?? null;
-            if (!is_string($family) || trim($family) === '') {
-                continue;
-            }
-            $replacement = FontMonoculture::substitute(trim($family), $seed, $catalog, $slot);
-            if ($replacement === null) {
-                continue;
-            }
-            $direction['type'][$slot]['family'] = $replacement;
-            $direction['type'][$slot]['axes'] = [];
-            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                . Warnings::value($family) . '; delivered ' . Warnings::value($replacement)
-                . '; disposition substituted a monoculture face for one outside it, category preserved';
-        }
-        return $direction;
     }
 
     /**
@@ -1429,6 +1425,13 @@ final class DesignDirectionStep implements Step
         $title = trim((string) ($direction['title'] ?? ''));
         $description = trim((string) ($direction['description'] ?? ''));
         $head = $title === '' ? $description : "# {$title}\n\n{$description}";
+        $requestedStyle = is_string($direction['requested_style'] ?? null)
+            ? trim($direction['requested_style']) : '';
+        if ($requestedStyle !== '') {
+            $head = 'USER-REQUESTED STYLE: ' . json_encode($requestedStyle, JSON_UNESCAPED_UNICODE)
+                . ". This aesthetic outranks conflicting generated design details; express it in the composition, not just the copy.\n\n"
+                . $head;
+        }
 
         $facts = [];
 
@@ -1545,12 +1548,13 @@ final class DesignDirectionStep implements Step
         $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
         if ($itemPattern !== null) {
             $meaning = match ($itemPattern) {
-                'card'        => 'list-like sections repeat discrete bounded cards',
-                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
-                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
-                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+                'card'        => 'discrete bounded cards',
+                'rule-row'    => 'compact name/detail rows joined by a purposeful hairline',
+                'spec-table'  => 'compact label/value pairs aligned for comparison',
+                'tag-cluster' => 'short categorical labels wrapped as compact inline chips',
             };
-            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
+            $facts[] = "- **Item pattern**: {$itemPattern} — preferred idiom: {$meaning}. "
+                . 'Each section may choose another supported idiom for its content; its assigned recipe takes precedence.';
         }
 
         $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
@@ -1569,11 +1573,7 @@ final class DesignDirectionStep implements Step
         if ($rhythm !== null) {
             $facts[] = '- **Rhythm**: ' . $rhythm . ' — ' . match ($rhythm) {
                 'stacked'     => 'bands follow one another in one steady column; carry the page on type scale and spacing, not on changes of shape',
-                // Deliberately says nothing about backgrounds. Alternating the
-                // page's surfaces is the "stripes" pattern the page plan already
-                // rejects, and this is the DEFAULT rhythm — a background clause
-                // here would contradict that rule on every build.
-                'alternating' => 'consecutive bands carry visibly different compositions; vary the layout archetype down the page rather than repeating one and varying only its contents',
+                'alternating' => 'vary compositions where a change clarifies the sequence; repeated layouts remain valid when the content benefits',
                 'offset'      => 'bands break the centre line: unequal splits and staggered starts, so the eye never settles on one axis',
                 'interrupted' => 'a mostly steady stack broken by full-bleed bands at deliberate intervals — plan at least one edge-to-edge image or colour band per page',
                 'banded'      => 'the page is paced by its surfaces: spend the page\'s contrast and tinted bands here rather than carrying it on layout change',
@@ -1584,15 +1584,13 @@ final class DesignDirectionStep implements Step
 
         $density = BoundedChoice::explicit($direction['density'] ?? null, self::DENSITIES);
         if ($density !== null) {
-            // A bias, not an override: spacious pauses stay accents under every
-            // density, so these clauses must not read as "spacious everywhere"
-            // — the page plan caps them and would demote the excess anyway.
+            // Overall intent, not a per-page quota or a ban on local exceptions.
             $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
-                'expansive' => 'monumental vertical breathing room; spend every allowed spacious pause, keep the rest standard, and let emptiness carry the page',
-                'airy'      => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
-                'measured'  => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'expansive' => 'monumental vertical breathing room; spacious sequences may let emptiness carry the page',
+                'airy'      => 'generous vertical breathing room; favor spacious or standard sections according to their content',
+                'measured'  => 'an even, unhurried rhythm; favor standard spacing, with local changes where useful',
                 'dense'     => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
-                'packed'    => 'maximally compressed; compact everywhere the content permits, no spacious pauses, and the content itself paces the page',
+                'packed'    => 'maximally compressed; favor compact spacing where the content permits and let the content pace the page',
                 default     => 'the committed page density',
             } . '. The build derives the section-padding ramp, component spacing, and page gutter from this commitment.';
         }
@@ -1843,7 +1841,7 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The authoritative repeated-item idiom, with the card default for a
+     * The preferred repeated-item idiom, with the card default for a
      * missing or pre-field direction. Callers persist any invalid-value
      * warning at their own step boundary.
      *

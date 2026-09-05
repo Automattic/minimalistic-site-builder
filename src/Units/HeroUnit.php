@@ -96,15 +96,9 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
-        // Remove non-copy children first so an eyebrow-only decorated shell
-        // is visible as empty to the fresh parse in stripHeroEyebrow().
-        $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs, $warnings);
-        $markup = GeneratedMarkup::stripHeroEyebrow($markup, $key, $repairs, $warnings);
-        $markup = GeneratedMarkup::stripEyebrowChipChrome($markup, $key, $repairs);
         $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);
         $markup = $budget['markup'];
         array_push($warnings, ...$budget['warnings']);
-        $markup = GeneratedMarkup::headlineFirstHeroCopy($markup, $key, $repairs, $warnings);
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);

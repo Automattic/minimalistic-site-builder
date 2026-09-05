@@ -193,11 +193,87 @@ final class ConceptSeeds
      */
     public static function seedPromptVars(string $brief, string $spec): array
     {
+        $style = self::requestedStyle($spec);
+        $labels = self::lockedLabelsPrompt($brief);
+        if ($style !== '') {
+            $labels .= "\nUSER-REQUESTED STYLE (not an industry inference): "
+                . json_encode($style, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                . ". Set register to this exact value in every candidate, even when it is not on the general list. "
+                . 'Each sentence must visibly express this style; merely attaching its label is not enough. '
+                . 'Explore different compositions, typography and imagery WITHIN this request. '
+                . 'User intent outranks candidate differentiation and industry conventions.';
+        }
         return [
             'user_prompt'   => $brief,
             'site_spec'     => $spec,
-            'locked_labels' => self::lockedLabelsPrompt($brief),
+            'locked_labels' => $labels,
         ];
+    }
+
+    /** The spec copies only an explicitly requested style, never a topic default. */
+    public static function requestedStyle(string $spec): string
+    {
+        $data = json_decode($spec, true);
+        $style = is_array($data) ? ($data['visual_vibe'] ?? '') : '';
+        return is_string($style) ? self::styleKey($style) : '';
+    }
+
+    /**
+     * Compare style names, not verbatim grammatical wrappers. This reads only
+     * the spec's explicit aesthetic, never the business topic or raw brief.
+     * Preserve freeform, hybrid and negative requests instead of guessing a
+     * single tradition for them. The full wording still travels in the spec.
+     */
+    public static function styleKey(string $style): string
+    {
+        $style = mb_strtolower(trim($style), 'UTF-8');
+        if (preg_match('/\b(?:not|no|without|avoid)\b|\bnon[- ]/u', $style)) {
+            return $style;
+        }
+        $matches = [];
+        foreach (array_merge(self::REGISTERS, array_keys(self::EXTRA_REGISTERS)) as $register) {
+            $aliases = [$register, str_replace('-', ' ', $register), $register . 'ly', $register . 'ally'];
+            if (str_ends_with($register, 'ist')) {
+                $aliases[] = substr($register, 0, -3) . 'ism';
+            }
+            array_push($aliases, ...(self::EXTRA_REGISTERS[$register] ?? []));
+            $pattern = '/(?<![\p{L}\p{N}])(?:'
+                . implode('|', array_map(static fn (string $alias): string => preg_quote($alias, '/'), $aliases))
+                . ')(?![\p{L}\p{N}])/u';
+            if (preg_match($pattern, $style)) {
+                $matches[] = $register;
+            }
+        }
+        return count($matches) === 1 ? $matches[0] : $style;
+    }
+
+    /**
+     * Label-level eligibility, not a claim of visual fidelity. Arbitrary named
+     * styles and hybrids work without an industry-keyword classifier. The
+     * direction prompt and rendered evaluation still judge the actual design.
+     *
+     * @param list<array<string,mixed>> $seeds
+     * @param list<string> $warnings
+     * @return list<array<string,mixed>>
+     */
+    public static function respectStyle(array $seeds, string $requestedStyle, array &$warnings = []): array
+    {
+        $requestedStyle = self::styleKey($requestedStyle);
+        if ($requestedStyle === '') {
+            return $seeds;
+        }
+        $kept = [];
+        foreach ($seeds as $index => $seed) {
+            if (is_string($seed['register'] ?? null) && self::styleKey($seed['register']) === $requestedStyle) {
+                $kept[] = $seed;
+                continue;
+            }
+            $warnings[] = 'file=logs/design-direction-seeds.json; path=candidates[' . $index . ']; authored='
+                . json_encode(['seed' => $seed['text'], 'register' => $seed['register'] ?? null], JSON_UNESCAPED_UNICODE)
+                . '; delivered=removed; disposition=candidate excluded because it does not declare the requested style '
+                . json_encode($requestedStyle, JSON_UNESCAPED_UNICODE);
+        }
+        return $kept;
     }
 
     /**
@@ -362,7 +438,11 @@ final class ConceptSeeds
         if (!is_string($raw)) {
             return null;
         }
-        $value = strtolower(trim($raw));
+        $value = mb_strtolower(trim($raw), 'UTF-8');
+        // Explicit freeform style names may contain spaces and Unicode.
+        if (in_array($value, $vocabulary, true)) {
+            return $value;
+        }
         $value = preg_replace('/\s+/', '-', $value) ?? $value;
         return in_array($value, $vocabulary, true) ? $value : null;
     }

@@ -6,17 +6,16 @@ namespace Automattic\SiteBuild;
 /**
  * Code-owned catalog for the site's repeated-item idiom.
  *
- * The design direction commits one value, PagePlanStep assigns it only to
- * list-like sections, and SectionUnit exposes exactly one matching recipe to
+ * The design direction suggests one value; PagePlanStep chooses a supported
+ * value or null per section, and SectionUnit exposes one matching recipe to
  * the section author. Delivery checks are advisory: generated markup that
  * misses the recipe remains usable and is shipped with an actionable warning.
  */
 final class ItemPattern
 {
     /**
-     * A numbered/lettered index is deliberately absent: identifier columns
-     * ("01", "02", …) are banned unless the site brief asks for them
-     * (BIGR-949). Legacy 'index' commitments normalize to the default.
+     * These are the supported constructions. Meaningful sequence numbers may
+     * appear as ordinary content; there is no separate numbered-index recipe.
      *
      * @var list<string>
      */
