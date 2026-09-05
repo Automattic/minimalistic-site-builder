@@ -315,7 +315,7 @@ test('footer prompt renders only its selected high-impact recipe', function () {
         'status-readout' => 'quiet status readout',
         'contact-sheet' => 'A film contact sheet closes the page',
         'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
-        'color-field' => 'One massive inset panel of a single strong palette color',
+        'color-field' => 'One massive inset panel in the `contrast` palette color',
         'repeat-rail' => 'The identity as printed tape',
     ];
     assert_contains($recipeMarkers[$archetype], $footer);

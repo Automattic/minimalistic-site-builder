@@ -72,6 +72,14 @@ final class FooterUnit extends AbstractMarkupUnit
             }
         }
         $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        if ($archetype === 'color-field') {
+            // The one massive panel never takes the accent (frm PR-4k).
+            $before = $markup;
+            $markup = FooterMarkup::withBoundedColorFieldPanel($markup, $warnings);
+            if ($markup !== $before) {
+                $repairs[] = self::repair('color-field-panel-bounded', $key);
+            }
+        }
         $before = $markup;
         $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
