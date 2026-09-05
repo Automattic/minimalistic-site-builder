@@ -166,3 +166,19 @@ test('the direction fact tells a 3d-object author about the floating-object grou
     assert_contains('floating-object group', $rendered);
     assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x', 'image_kind' => 'photo']), 'floating-object'));
 });
+
+
+test('a 3d-object cutout keeps its pale surfaces opaque; other kinds unmatte their edges (frm PR-7d)', function () {
+    assert_true(ImageKind::keepsSolidCutout('3d-object'));
+    assert_true(!ImageKind::keepsSolidCutout('photo'));
+    assert_true(!ImageKind::keepsSolidCutout('line-illustration'));
+    assert_true(!ImageKind::keepsSolidCutout(null));
+});
+
+
+test('a transparent 3d-object request asks for a floating, shadowless object (frm PR-7d)', function () {
+    assert_contains('no contact shadow', ImageKind::promptClause('3d-object', true));
+    assert_contains('floating', ImageKind::promptClause('3d-object', true));
+    assert_contains('plain seamless backdrop', ImageKind::promptClause('3d-object'));
+    assert_eq(ImageKind::promptClause('ui-mockup'), ImageKind::promptClause('ui-mockup', true), 'other kinds ignore the flag');
+});

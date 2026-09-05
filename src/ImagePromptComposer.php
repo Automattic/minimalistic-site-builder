@@ -144,7 +144,7 @@ final class ImagePromptComposer
         // The committed imagery kind (frm W7a) is a render instruction like
         // the grade and rides with it; unlike the grade it also applies to a
         // transparent asset, whose whole point may be an isolated 3D object.
-        $kindClause = ImageKind::promptClause($imageKind);
+        $kindClause = ImageKind::promptClause($imageKind, $transparent);
         if ($kindClause !== '') {
             $gradeClause = trim($gradeClause . ' ' . $kindClause);
         }
