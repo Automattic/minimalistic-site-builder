@@ -621,7 +621,11 @@ test('scaffold-theme draws stat-ledger hairlines between figure columns and stac
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
     assert_contains('.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {', $css);
-    assert_contains('font-size: min(var(--wp--preset--font-size--display), 7vw)', $css, 'a figure never runs out of its column');
+    assert_contains('font-size: min(var(--wp--preset--font-size--display), 26cqi)', $css, 'a figure never runs out of its column (frm PR-3m: the column cap)');
+    assert_true(!str_contains($css, '7vw, 26cqi'), 'the viewport cap is gone: it shrank phone figures');
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column {', $css);
+    assert_contains('container-type: inline-size', $css, 'each ledger column is its own inline-size container');
+    assert_contains('min-width: 0', $css, 'a ledger column may shrink below its figure');
     assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,', $css);
     assert_contains('border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
     assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css, 'the phone hairline is horizontal');
