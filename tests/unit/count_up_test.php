@@ -62,3 +62,15 @@ test('the section boundary marks figure-only blocks with count-up when the profi
     assert_eq($markup, $minimal, 'the minimal profile runs no entrances');
     assert_eq($markup, \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'page-home--metrics', 'none', $repairs));
 });
+
+test('the sanity step drops a model-authored count-up on a year or on prose (frm PR-8h)', function () {
+    $heading = static fn (string $text): string => '<!-- wp:heading {"level":3,"className":"count-up"} --><h3 class="wp-block-heading count-up">' . $text . '</h3><!-- /wp:heading -->';
+    $budget = MotionSanityStep::newBudget();
+    $result = MotionSanityStep::sanitize($heading('2024') . $heading('98%') . $heading('Founded in Berlin') . $heading('50M+'), 'calm', $budget);
+    assert_eq(2, substr_count($result['markup'], 'class="wp-block-heading count-up"'), 'the two figures keep counting');
+    assert_contains('<h3 class="wp-block-heading">2024</h3>', $result['markup'], 'a year stays still');
+    assert_contains('<h3 class="wp-block-heading">Founded in Berlin</h3>', $result['markup'], 'prose stays still');
+    $joined = implode("\n", $result['notes']);
+    assert_contains('never counts a year', $joined);
+    assert_contains('figure-only block', $joined);
+});
