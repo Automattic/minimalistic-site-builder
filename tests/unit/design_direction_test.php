@@ -2556,3 +2556,19 @@ test('a glass depth on a light ground degrades to the ring it is built on, and s
         assert_eq($expected === 'ring' ? 1 : 0, count($glassRepairs), "repair recorded only on the {$ground} ground");
     }
 });
+
+test('the stated ground is read from the user\'s own words before the refined brief (frm PR-4i)', function () {
+    assert_eq('light', DesignDirectionStep::statedGroundFor([
+        'original_prompt' => 'Create a portfolio for a designer in Lisbon. Light page, tight sans headings.',
+        'prompt' => 'A single-page portfolio landing site for an independent designer based in Lisbon with tight sans headings.',
+    ]), 'the refine step dropped the phrase; the original still decides');
+    assert_eq('dark', DesignDirectionStep::statedGroundFor([
+        'prompt' => 'A studio site on a dark ground.',
+    ]), 'the refined brief is read when no original is kept');
+    assert_eq('light', DesignDirectionStep::statedGroundFor([
+        'original_prompt' => 'white page please',
+        'prompt' => 'a dark ground',
+    ]), 'the user\'s words outrank the rewrite when both speak');
+    assert_eq(null, DesignDirectionStep::statedGroundFor(['original_prompt' => 'A cafe in Tbilisi.', 'prompt' => 'A cafe in Tbilisi with warm wood.']));
+    assert_eq(null, DesignDirectionStep::statedGroundFor([]));
+});
