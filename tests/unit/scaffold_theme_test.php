@@ -628,7 +628,7 @@ test('scaffold-theme draws stat-ledger hairlines between figure columns and stac
     $project = (new ProjectStore($tmp))->create('Spector');
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
-    assert_contains('.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {', $css);
+    assert_contains('.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {', $css);
     assert_contains('font-size: min(var(--wp--preset--font-size--display), 26cqi)', $css, 'a figure never runs out of its column (frm PR-3m: the column cap)');
     assert_true(!str_contains($css, '7vw, 26cqi'), 'the viewport cap is gone: it shrank phone figures');
     assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column {', $css);
@@ -705,5 +705,20 @@ test('scaffold-theme deepens the metadata-corners cover dim under the phone copy
     assert_contains('#000 48%, #000 100%)', $body, 'the copy region sits on the full dim');
     $desktop = substr($css, 0, (int) strpos($css, '@media (max-width: 781.98px)'));
     assert_true(!str_contains($desktop, 'mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55)'), 'desktop covers keep their authored dim');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+
+test('the stat-ledger figure rule names level-3 figures, so a section heading in a lead column wraps (frm PR-3z)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_h2_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $rule = '.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {';
+    assert_contains($rule, $css);
+    $body = substr($css, (int) strpos($css, $rule), 700);
+    assert_contains('white-space: nowrap;', $body, 'the figure still never wraps mid-token');
+    assert_contains('26cqi', $body);
+    assert_true(!str_contains($css, '.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {'), 'no level-agnostic figure rule remains');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
