@@ -58,6 +58,25 @@ final class ShapeMarkup
         ],
     ];
 
+    /**
+     * The radius scale each corner language executes beyond contained media:
+     * marked card shells (`card-style--flush/framed/overlap` groups), panels
+     * (rounded bands, closing CTA cards) and pill controls (badges, nav
+     * pills). The reference corpus rounds cards at 12-24px and panels at
+     * 24-48px; `sharp` keeps every surface square. Published as custom
+     * properties by kitCss() so later kits execute the same commitment.
+     *
+     * @var array<string,array{media:string,card:string,panel:string,pill:string}>
+     */
+    public const RADIUS_SCALE = [
+        'sharp' => ['media' => '0', 'card' => '0', 'panel' => '0', 'pill' => '0'],
+        'soft'  => ['media' => '0.5rem', 'card' => '0.75rem', 'panel' => '1.5rem', 'pill' => '9999px'],
+        'round' => ['media' => '1.25rem', 'card' => '1.5rem', 'panel' => '2.5rem', 'pill' => '9999px'],
+    ];
+
+    /** Card shells whose radius the commitment owns; borderless has no box. */
+    private const CARD_SHELL_CLASSES = ['card-style--flush', 'card-style--framed', 'card-style--overlap'];
+
     /** @var array<string,string> disposition wording per owned target */
     private const TARGET_LABELS = [
         'core/image' => 'image',
@@ -78,16 +97,35 @@ final class ShapeMarkup
     public static function kitCss(?string $shape): ?string
     {
         $shape = is_string($shape) ? strtolower(trim($shape)) : '';
-        if (!in_array($shape, ['soft', 'round'], true)) {
+        if (!in_array($shape, self::SHAPES, true)) {
             return null;
         }
+        $scale = self::RADIUS_SCALE[$shape];
+        // The scale ships for every commitment, sharp included: later kits
+        // (rounded bands, badges, glass cards) read these properties, and a
+        // sharp site must resolve them to zero rather than to a fallback.
+        $css = <<<CSS
+            /* Committed '{$shape}' corner language as one radius scale. Marked
+               card shells carry the card value in their block attributes (the
+               shape pass writes it); panels and pill controls read it from
+               here. Written by the build, never by a model. */
+            :root {
+                --shape-radius-media: {$scale['media']};
+                --shape-radius-card: {$scale['card']};
+                --shape-radius-panel: {$scale['panel']};
+                --shape-radius-pill: {$scale['pill']};
+            }
+
+            CSS;
+        if ($shape === 'sharp') {
+            return $css;
+        }
         $radius = self::COMMITTED_RADII[$shape]['core/cover'];
-        return <<<CSS
-            /* Committed '{$shape}' corner language for contained media surfaces
-               theme.json cannot reach: the media half of core/media-text and the
-               core/cover canvas. Full-bleed (alignfull) rows keep their media
-               square, matching the committed image rule. Written by the build,
-               never by a model. */
+        return $css . <<<CSS
+            /* Contained media surfaces theme.json cannot reach: the media half
+               of core/media-text and the core/cover canvas. Full-bleed
+               (alignfull) rows keep their media square, matching the committed
+               image rule. */
             .wp-block-media-text:not(.alignfull) .wp-block-media-text__media,
             .wp-block-media-text:not(.alignfull) .wp-block-media-text__media img,
             .wp-block-media-text:not(.alignfull) .wp-block-media-text__media video {
@@ -222,6 +260,12 @@ final class ShapeMarkup
                     $changes,
                     $changedAttrs,
                 );
+            } elseif ($name === 'core/group' && self::isCardShell($doc, $i, $attrs)) {
+                // A marked card shell's radius is the committed card value
+                // (frm W4a). Block attributes serialize inline, so writing the
+                // value here beats any generated declaration without a kit
+                // rule fighting importance; generic groups stay untouched.
+                self::normalizeCardShellRadius($attrs, $shape, $path, $changes, $changedAttrs);
             }
 
             self::normalizeCarriedStyleOverrides(
@@ -483,6 +527,71 @@ final class ShapeMarkup
     private static function selectorTargetsImplicitBlockRoot(string $selector): bool
     {
         return CssChecks::selectorTargetsSubject($selector, '&');
+    }
+
+    /** Whether a group carries one of the owned card-shell markers. */
+    private static function isCardShell(BlockMarkup $doc, int $i, array $attrs): bool
+    {
+        $tokens = is_string($attrs['className'] ?? null)
+            ? preg_split('/\s+/', trim($attrs['className']), -1, PREG_SPLIT_NO_EMPTY) ?: []
+            : [];
+        if (preg_match('/^\s*<[a-z][^>]*\sclass="([^"]*)"/i', $doc->ownHtml($i), $match) === 1) {
+            $tokens = array_merge($tokens, preg_split('/\s+/', trim($match[1]), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        }
+        return array_intersect($tokens, self::CARD_SHELL_CLASSES) !== [];
+    }
+
+    /**
+     * Write the committed card radius onto a marked card shell. An equivalent
+     * authored value is canonicalized silently; a different one is replaced
+     * and recorded as a repair. Malformed style containers are left to the
+     * block fixer, which owns structural recovery.
+     *
+     * @param array<mixed> $attrs
+     * @param list<array{
+     *     blockPath:string,blockName:string,property:string,authored:mixed,
+     *     delivered:mixed,disposition:string
+     * }> $changes
+     */
+    private static function normalizeCardShellRadius(
+        array &$attrs,
+        string $shape,
+        string $path,
+        array &$changes,
+        bool &$changedAttrs,
+    ): void {
+        $committed = self::RADIUS_SCALE[$shape]['card'];
+        $style = $attrs['style'] ?? [];
+        if (!is_array($style) || !self::isObject($style)) {
+            return;
+        }
+        $border = $style['border'] ?? [];
+        if (!is_array($border) || !self::isObject($border)) {
+            return;
+        }
+        $hasRadius = array_key_exists('radius', $border);
+        $authored = $hasRadius ? $border['radius'] : null;
+        if ($hasRadius && $authored === $committed) {
+            return;
+        }
+        if (!$hasRadius && self::isCssZero($committed)) {
+            // Sharp: an unstyled shell is already square; no inline zero.
+            return;
+        }
+        $border['radius'] = $committed;
+        $style['border'] = $border;
+        $attrs['style'] = $style;
+        $changedAttrs = true;
+        $changes[] = [
+            'blockPath' => $path,
+            'blockName' => 'core/group',
+            'property' => 'style.border.radius',
+            'authored' => $authored,
+            'delivered' => $committed,
+            'disposition' => $hasRadius && self::radiusEquals($authored, $committed)
+                ? "canonicalized an equivalent card shell radius for the committed {$shape} corner language"
+                : "card shell radius follows the committed {$shape} corner language",
+        ];
     }
 
     /** Disposition wording for an owned target block. */

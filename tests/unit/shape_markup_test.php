@@ -720,7 +720,7 @@ test('FixBlocksStep keeps an already-normalized shape fixed point warning-free',
 });
 
 test('shape kit css wires rounded contained cover and media-text surfaces and exempts alignfull', function () {
-    foreach ([null, '', 'wavy', 'sharp'] as $shape) {
+    foreach ([null, '', 'wavy'] as $shape) {
         assert_true(ShapeMarkup::kitCss($shape) === null, var_export($shape, true));
     }
 
@@ -731,11 +731,11 @@ test('shape kit css wires rounded contained cover and media-text surfaces and ex
     assert_contains('.wp-block-cover:not(.alignfull)', $soft);
     assert_contains('border-radius: 0.5rem', $soft);
     assert_contains('overflow: hidden', $soft);
-    assert_true(!str_contains($soft, '9999px'), 'media surfaces never take the pill radius');
+    assert_true(!str_contains($soft, 'border-radius: 9999px'), 'media surfaces never take the pill radius');
 
     $round = ShapeMarkup::kitCss(' ROUND ');
     assert_contains('border-radius: 1.25rem', $round);
-    assert_true(!str_contains($round, '0.5rem'));
+    assert_true(!str_contains($round, 'border-radius: 0.5rem'));
 });
 
 test('shape markup strips authored cover and media-text radii for every alignment', function () {
@@ -796,4 +796,69 @@ test('shape markup polices media-text per-block css that rounds the owned media 
     $changes = $result['changes'];
     assert_eq(1, count($changes));
     assert_contains('media-text corner language', $changes[0]['disposition']);
+});
+
+test('the shape kit publishes one radius scale for every commitment, sharp included (frm W4a)', function () {
+    foreach (['sharp', 'soft', 'round'] as $shape) {
+        $css = (string) ShapeMarkup::kitCss($shape);
+        $scale = ShapeMarkup::RADIUS_SCALE[$shape];
+        assert_contains('--shape-radius-media: ' . $scale['media'] . ';', $css);
+        assert_contains('--shape-radius-card: ' . $scale['card'] . ';', $css);
+        assert_contains('--shape-radius-panel: ' . $scale['panel'] . ';', $css);
+        assert_contains('--shape-radius-pill: ' . $scale['pill'] . ';', $css);
+    }
+    assert_true(!str_contains((string) ShapeMarkup::kitCss('sharp'), '.wp-block-cover'), 'sharp ships no media rules');
+    assert_contains('.wp-block-cover:not(.alignfull)', (string) ShapeMarkup::kitCss('round'));
+    assert_eq(null, ShapeMarkup::kitCss(null), 'no commitment ships no kit');
+    assert_eq(null, ShapeMarkup::kitCss('bubbly'));
+});
+
+test('shape markup writes the committed card radius onto marked card shells only (frm W4a)', function () {
+    $shell = static fn (string $class, string $style = ''): string => '<!-- wp:group {"className":"' . $class . '"'
+        . ($style === '' ? '' : ',"style":' . $style)
+        . ',"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group ' . $class . '"><!-- wp:paragraph --><p>x</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
+
+    // Authored 12px on a flush card under `round`: replaced with 1.5rem, recorded.
+    $result = ShapeMarkup::normalize($shell('card-style--flush card-flush', '{"border":{"radius":"12px"}}'), 'round');
+    $doc = BlockMarkup::parse($result['markup']);
+    assert_eq('1.5rem', $doc->attrs($doc->indices()[0])['style']['border']['radius']);
+    assert_eq(1, count($result['changes']));
+    assert_eq('style.border.radius', $result['changes'][0]['property']);
+    assert_contains('card shell radius follows the committed round', $result['changes'][0]['disposition']);
+    assert_true(!array_key_exists('warning', $result['changes'][0]), 'a repaired card radius is not durable');
+    $again = ShapeMarkup::normalize($result['markup'], 'round');
+    assert_eq($result['markup'], $again['markup'], 'fixed point');
+    assert_eq([], $again['changes']);
+
+    // No authored radius on a framed card under `soft`: the card value is added.
+    $added = ShapeMarkup::normalize($shell('card-style--framed'), 'soft');
+    $doc = BlockMarkup::parse($added['markup']);
+    assert_eq('0.75rem', $doc->attrs($doc->indices()[0])['style']['border']['radius']);
+
+    // Equivalent authored value: canonicalized, no repair wording.
+    $equivalent = ShapeMarkup::normalize($shell('card-style--overlap card-flush', '{"border":{"radius":".750rem"}}'), 'soft');
+    assert_contains('canonicalized an equivalent card shell radius', $equivalent['changes'][0]['disposition']);
+
+    // Sharp: an unstyled shell stays untouched (already square), an authored radius is zeroed.
+    $sharpBare = ShapeMarkup::normalize($shell('card-style--flush card-flush'), 'sharp');
+    assert_eq([], $sharpBare['changes']);
+    $sharpAuthored = ShapeMarkup::normalize($shell('card-style--flush card-flush', '{"border":{"radius":"16px"}}'), 'sharp');
+    $doc = BlockMarkup::parse($sharpAuthored['markup']);
+    assert_eq('0', $doc->attrs($doc->indices()[0])['style']['border']['radius']);
+
+    // Borderless and generic groups are outside the commitment.
+    foreach (['card-style--borderless', 'section-intro'] as $class) {
+        $markup = $shell($class, '{"border":{"radius":"12px"}}');
+        $untouched = ShapeMarkup::normalize($markup, 'round');
+        assert_eq($markup, $untouched['markup'], "{$class} keeps its authored radius");
+        assert_eq([], $untouched['changes']);
+    }
+
+    // The marker may live only in the saved HTML; the attribute path still applies.
+    $htmlOnly = '<!-- wp:group {"style":{"border":{"radius":"12px"}}} -->'
+        . '<div class="wp-block-group card-style--flush card-flush"></div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse(ShapeMarkup::normalize($htmlOnly, 'round')['markup']);
+    assert_eq('1.5rem', $doc->attrs($doc->indices()[0])['style']['border']['radius']);
 });
