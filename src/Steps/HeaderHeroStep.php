@@ -466,6 +466,7 @@ final class HeaderHeroStep implements Step
                 $writes[$heroRel],
                 is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null,
                 PlaygroundArtifact::blogDescription($siteSpec),
+                self::keepsHeaderAction($archetype),
             );
             $writes[$headerRel] = $dedupe['markup'];
             foreach ($dedupe['notes'] as $note) {
@@ -1711,11 +1712,23 @@ final class HeaderHeroStep implements Step
      * @param string $taglineText the text wp:site-tagline renders at runtime
      * @return array{markup:string,notes:string[],warnings:string[]}
      */
+    /**
+     * The chromes whose one action is the archetype's point (frm W1b, PR-1f):
+     * the references repeat it in the hero, so the duplicate-control rule
+     * keeps it. Every other archetype still drops a header button that
+     * repeats the hero's primary action.
+     */
+    public static function keepsHeaderAction(string $archetype): bool
+    {
+        return in_array($archetype, ['floating-pill', 'bar-center-cta'], true);
+    }
+
     public static function dedupeAgainstHero(
         string $headerMarkup,
         string $heroMarkup,
         ?array $primaryAction,
         string $taglineText = '',
+        bool $keepsAction = false,
     ): array {
         $heroLines = [];
         $hero = BlockMarkup::parse($heroMarkup);
@@ -1733,7 +1746,10 @@ final class HeaderHeroStep implements Step
                 $heroLines[] = $tokens;
             }
         }
-        $actionLabel = $primaryAction === null
+        // A chrome that commits one persistent action (keepsHeaderAction)
+        // keeps its button even when the label repeats the hero's: the
+        // references show the action twice in the first viewport.
+        $actionLabel = $primaryAction === null || $keepsAction
             ? []
             : self::textTokens((string) ($primaryAction['label'] ?? ''));
         $taglineText = trim($taglineText);

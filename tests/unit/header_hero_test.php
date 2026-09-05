@@ -2956,3 +2956,32 @@ test('bar-center-cta asks for persistent chrome regardless of site depth (frm W1
         HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'bar-center-cta'),
     );
 });
+
+test('the pill and the centered bar keep their action against the hero; other chromes drop the duplicate (frm PR-1f)', function () {
+    assert_true(HeaderHeroStep::keepsHeaderAction('floating-pill'));
+    assert_true(HeaderHeroStep::keepsHeaderAction('bar-center-cta'));
+    foreach (['standard-row', 'branded-lockup', 'minimal-overlay', 'spread-nav', 'centered-masthead', ''] as $archetype) {
+        assert_true(!HeaderHeroStep::keepsHeaderAction($archetype), $archetype);
+    }
+    $src = (string) file_get_contents(repo_path('src/Steps/HeaderHeroStep.php'));
+    assert_contains('self::keepsHeaderAction($archetype),', $src, 'the run-time dedupe call passes the flag');
+});
+
+test('dedupeAgainstHero keeps the header CTA when the chrome commits a persistent action (frm W1b, PR-1f)', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"level":1} --><h1>Every frame you imagine</h1><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/start/">Start creating</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Work","url":"/work/","kind":"custom"} /--><!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/start/">Start creating</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+    );
+    $action = ['label' => 'Start creating', 'intent' => 'Start a trial', 'destination' => '/start/'];
+    $kept = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action, '', true);
+    assert_contains('Start creating', $kept['markup'], 'the chrome keeps its one action');
+    assert_eq([], $kept['notes']);
+    $plain = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
+    assert_true(!str_contains($plain['markup'], 'Start creating'), 'a plain bar still drops the duplicate');
+});
