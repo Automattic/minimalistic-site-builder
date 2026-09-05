@@ -429,3 +429,34 @@ function item_pattern_unit_input(?string $pattern): array
         'header_contract' => '',
     ];
 }
+
+
+test('a cardless archetype releases its planned item pattern and corrects the notes (frm PR-3v)', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'asymmetric-split', 'item_pattern' => null],
+            ['slug' => 'services', 'type' => 'services', 'layout_archetype' => 'statement-lines', 'item_pattern' => 'card', 'content_notes' => 'Four service cards.'],
+            ['slug' => 'numbers', 'type' => 'metrics', 'layout_archetype' => 'stat-ledger', 'item_pattern' => 'rule-row'],
+            ['slug' => 'partners', 'type' => 'partners', 'layout_archetype' => 'logo-strip', 'item_pattern' => null],
+            ['slug' => 'values', 'type' => 'values', 'layout_archetype' => 'feature-row-hairlines', 'item_pattern' => 'card'],
+            ['slug' => 'plans', 'type' => 'pricing', 'layout_archetype' => 'pricing-tiers', 'item_pattern' => 'card'],
+            ['slug' => 'work', 'type' => 'case-studies', 'layout_archetype' => 'equal-card-grid', 'item_pattern' => 'card'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'card', $repairs);
+    assert_eq([null, null, null, null, null, 'card', 'card'], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(3, count($repairs), 'one repair per authored pattern on a cardless archetype');
+    assert_contains("sections[1].item_pattern", $repairs[0]);
+    assert_contains("released the 'statement-lines' section from the item idiom", $repairs[0]);
+    assert_contains("sections[2].item_pattern", $repairs[1]);
+    assert_contains("sections[4].item_pattern", $repairs[2]);
+    assert_contains('Four service cards.', $delivered[0]['sections'][1]['content_notes']);
+    assert_contains('Build correction', $delivered[0]['sections'][1]['content_notes'], 'the author is told the idiom did not survive');
+    assert_true(!isset($delivered[0]['sections'][5]['content_notes']), 'pricing keeps its cards untouched');
+
+    $fixedPointRepairs = [];
+    assert_eq($delivered, PagePlanStep::reconcileItemPatternAssignments($delivered, 'card', $fixedPointRepairs));
+    assert_eq([], $fixedPointRepairs);
+});

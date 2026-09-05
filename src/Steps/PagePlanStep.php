@@ -957,6 +957,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param list<string> $repairs
      * @return array<int,array<string,mixed>>
      */
+    /**
+     * Archetypes whose recipe draws no cards and no columns (frm PR-3v): a
+     * ledger of lines, a hairline row, a figure row, a name strip. A planner
+     * item pattern on one of them dresses the section in an idiom the recipe
+     * forbids; cohesion-like16 planned `card` on its statement-lines
+     * services row and the author appended a pair of card columns under the
+     * ledger.
+     *
+     * @var list<string>
+     */
+    private const CARDLESS_ARCHETYPES = ['statement-lines', 'feature-row-hairlines', 'stat-ledger', 'logo-strip'];
+
     public static function reconcileItemPatternAssignments(
         array $pages,
         string $committed,
@@ -978,6 +990,29 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $explicit = ItemPattern::explicit($authored);
                 $type = strtolower(trim((string) ($section['type'] ?? '')));
                 $listLike = self::isListLikeType($type);
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (in_array($archetype, self::CARDLESS_ARCHETYPES, true)) {
+                    // frm PR-3v: the recipe owns the row; no idiom dresses it.
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                null,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            null,
+                            "released the '{$archetype}' section from the item idiom: its recipe draws no cards "
+                            . 'and no columns, so no pattern may dress it',
+                        );
+                    }
+                    continue;
+                }
                 if (self::isQuoteLedType($type) && $committed !== 'card') {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
