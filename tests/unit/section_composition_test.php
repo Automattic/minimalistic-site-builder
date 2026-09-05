@@ -578,3 +578,37 @@ test('the faq-split archetype requires an accordion of three or more details blo
     $plain = str_replace('section-composition--faq-split', 'section-composition--asymmetric-split', $thin);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'faq'));
 });
+
+test('the cta-panel archetype checks one contained panel and exactly one action (frm W3d)', function () {
+    assert_true(in_array('cta-panel', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('cta-panel');
+    assert_eq('section-compositions/cta-panel.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_eq(['base', 'tinted'], $meta['backgrounds'], 'the band stays on the page ground; the panel carries contrast');
+
+    $button = '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/start/">Start</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
+    $panel = static fn (string $inner, string $class = 'cta-panel'): string => '<!-- wp:group {"className":"' . $class . '","align":"wide","backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide ' . $class . ' has-contrast-background-color has-base-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Start tonight</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+
+    assert_eq([], SectionComposition::markupWarnings($band($panel($button)), 'cta-panel', 'page-home--closing'));
+
+    $noPanel = $band($panel($button, 'closing-box'));
+    $joined = implode("\n", SectionComposition::markupWarnings($noPanel, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel container', $joined);
+    assert_contains('"panel_groups":0', $joined);
+
+    $twoButtons = $band($panel($button . $button));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoButtons, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel action', $joined);
+    assert_contains('"buttons":2', $joined);
+
+    $noButton = $band($panel(''));
+    assert_contains('"buttons":0', implode("\n", SectionComposition::markupWarnings($noButton, 'cta-panel', 'x')));
+
+    $other = str_replace('section-composition--cta-panel', 'section-composition--centered-stack', $noPanel);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'centered-stack', 'x')), 'cta panel'));
+});

@@ -176,6 +176,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | 5 | #452 | W6a | Add the section_label direction token with the section-badge device (frm) | merged | gist ab73adbab27ac572fe43b241000677f8: zova-like3 + dreammotion-like3 committed section-badge unforced, one badge per section, desktop + 390 | 0ce85d1b |
 | 6 | #453 | W4 (PR-4e) | Make the direction honor a brief that names cards, pills or a product landing (frm) | merged | gist 8166f7f623ecd0e8de0277a7bc9724bd: 5/5 direction reruns moved to card/flush/soft-round/ring (spector kept brutalist); zova-like4 + luzia-like2 renders | 08583ee6 |
 | 7 | #454 | W3a | Add the bento-grid section archetype (frm) | merged | gist d0f8b3b121983a19fef2c3a057038341: luzia-like2 + dreammotion-like4 planned one bento each unforced, two rows + one highlight, mobile 390 | a519d3ac |
+| 8 | #455 | W3b | Add the faq-split section archetype with a native accordion (frm) | merged | gist ff61116857a54a4f6ad558612603856a: zova-like5 + dreammotion-like5 planned faq-split unforced, 7 details each, mobile 390 | ce16c44d |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -186,6 +187,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 - 2026-09-05 turn 5: PR-6a #452 merged (both builds committed section-badge unforced; W4a + W5a visibly compound on dreammotion-like3). Next: PR-4e, the direction under-commits to the brief's surface vocabulary (branch `frm/direction-brief-surface`), before W3a bento so cards exist for it.
 - 2026-09-05 turn 6: PR-4e #453 merged. luzia-like2 (built with the W3a code on disk) auto-assigned the floating pill, badges, two-tone, ring card shells and one bento with a highlight tile: the kits compound. W3a `bento-grid` moved to branch `frm/bento-grid` by cherry-pick after landing on the PR-4e branch by mistake. New craft defect PR-5e filed. Never `pkill -f` a pattern that also matches the calling shell.
 - 2026-09-05 turn 7: PR-3a #454 merged (both plans chose bento-grid unforced). Started W3b `faq-split` (core/details accordion; summary text joins the contrast walk; accordion rows styled in the scaffold) on branch `frm/faq-split`.
+- 2026-09-05 turn 8: PR-3b #455 merged (both plans chose faq-split unforced). Started W3d `cta-panel` (contained rounded closing panel, one action; band stays on the page ground) on branch `frm/cta-panel`.
 - 2026-09-05 turn 9: PR-3d #456 opened (both plans chose cta-panel unforced); its 390px shot clipped a display word inside the panel, fixed by a phone-scale headline cap. W8a `word-reveal` built on branch `frm/word-reveal`: the first version registered the H1 as a scroll target and the driver marked it static (first viewport), so it now plays on load like hero-entrance; verified in-page (opacities 0.15/0.01/0/0 at 240ms, settled at 1.2s; reduced motion leaves the heading whole). Neither evidence build authored the class unprompted, so the hero prompt now makes it the default for calm/dramatic display H1s.
 
 ## 10. Parked / rejected
