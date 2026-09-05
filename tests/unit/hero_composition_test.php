@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(7, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -521,4 +521,45 @@ test('the metadata-corners recipe is a cover recipe whose facts ride the corners
 
     $other = str_replace('hero-composition--metadata-corners', 'hero-composition--cinematic-safe-zone', $none);
     assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($other, 'cinematic-safe-zone', 'page-home--hero')), 'corner facts'));
+});
+
+
+test('the portrait-backdrop recipe is a foreground recipe with one marked portrait and one two-column copy row (frm W2d)', function () {
+    assert_true(in_array('portrait-backdrop', HeroComposition::RECIPES, true));
+    $meta = HeroComposition::metadata('portrait-backdrop');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    assert_eq(['portrait', 'square'], $meta['media_aspects']);
+    assert_eq('hero-compositions/portrait-backdrop.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_eq('hero-composition__portrait', HeroComposition::PORTRAIT_CLASS);
+    assert_eq('portrait-backdrop', HeroComposition::statedInBrief('A light portfolio with a portrait photo centered behind the hero copy'));
+    assert_eq('portrait-backdrop', HeroComposition::statedInBrief('Hero: portrait centered behind, copy left'));
+    $warnings = [];
+    assert_eq(HeroBlueprint::defaultFor('portrait-backdrop'), HeroBlueprint::normalize(HeroBlueprint::defaultFor('portrait-backdrop'), 'portrait-backdrop', $warnings));
+    assert_eq([], $warnings);
+
+    $media = static fn (string $cls): string => '<!-- wp:group {"className":"hero-composition__media","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__media"><!-- wp:image {"className":"' . $cls . '"} --><figure class="wp-block-image ' . $cls . '"><img src="assets/owner.jpg" alt="AI_IMAGE: a portrait | hero portrait plate | photorealistic | portrait"/></figure><!-- /wp:image --></div><!-- /wp:group -->';
+    $row = static fn (int $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Brand and web,<br>drawn by hand</h1><!-- /wp:heading --></div><!-- /wp:column -->'
+        . ($columns >= 2 ? '<!-- wp:column {"width":"40%"} --><div class="wp-block-column"><!-- wp:paragraph --><p>Independent designer in Lisbon.</p><!-- /wp:paragraph --></div><!-- /wp:column -->' : '')
+        . ($columns >= 3 ? '<!-- wp:column --><div class="wp-block-column"><!-- wp:paragraph --><p>x</p><!-- /wp:paragraph --></div><!-- /wp:column -->' : '')
+        . '</div><!-- /wp:columns -->';
+    $copy = static fn (int $columns): string => '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">' . $row($columns) . '</div><!-- /wp:group -->';
+    $hero = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition--portrait-backdrop","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition--portrait-backdrop">' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $hero($media('hero-composition__portrait') . $copy(2));
+    $joined = implode("\n", HeroComposition::markupWarnings($good, 'portrait-backdrop', 'page-home--hero'));
+    assert_true(!str_contains($joined, 'recipe portrait plate'), $joined);
+
+    $unmarked = $hero($media('card-media') . $copy(2));
+    assert_contains('recipe portrait plate', implode("\n", HeroComposition::markupWarnings($unmarked, 'portrait-backdrop', 'page-home--hero')));
+    $stacked = $hero($media('hero-composition__portrait') . $copy(1));
+    $joined = implode("\n", HeroComposition::markupWarnings($stacked, 'portrait-backdrop', 'page-home--hero'));
+    assert_contains('recipe portrait plate', $joined);
+    assert_contains('"copy_rows":[1]', $joined);
+    $three = $hero($media('hero-composition__portrait') . $copy(3));
+    assert_contains('"copy_rows":[3]', implode("\n", HeroComposition::markupWarnings($three, 'portrait-backdrop', 'page-home--hero')));
+
+    $other = str_replace('hero-composition--portrait-backdrop', 'hero-composition--foreground-split', $unmarked);
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($other, 'foreground-split', 'page-home--hero')), 'portrait plate'));
 });
