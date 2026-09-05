@@ -1046,7 +1046,8 @@ final class ScaffoldThemeStep implements Step
            wordmarks in the heading face at caption scale, muted, spread on
            one line; on phones the row wraps to two or three per line. */
         .section-composition--logo-strip .wp-block-group.logo-strip {
-            column-gap: var(--wp--preset--spacing--lg, 3rem);
+            justify-content: center;
+            column-gap: clamp(2rem, 6vw, 5.5rem);
             row-gap: var(--wp--preset--spacing--sm, 0.75rem);
             align-items: center;
         }

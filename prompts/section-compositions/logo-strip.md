@@ -8,7 +8,7 @@ never request a logo image or a badge.
 - Structure: an optional ONE `wp:paragraph` lead of at most eight words
   (for example "Trusted by teams at") centered above the row, then ONE
   `wp:group` with `"className":"logo-strip"`, `"align":"wide"` and
-  `"layout":{"type":"flex","justifyContent":"space-between","flexWrap":"wrap"}`
+  `"layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"}`
   holding four to eight `wp:paragraph`, each ONE name of one to three words
   and nothing else: no link, no image, no punctuation, no fontSize, no color.
 - Names: use the client, partner or publication names the SITE SPEC or the

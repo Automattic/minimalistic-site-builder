@@ -897,7 +897,7 @@ test('the logo-strip archetype checks one marked row of four to eight one-line n
     assert_eq([4, 5, 6, 7, 8], SectionComposition::LOGO_STRIP_COUNTS);
 
     $name = static fn (string $t): string => '<!-- wp:paragraph --><p>' . $t . '</p><!-- /wp:paragraph -->';
-    $row = static fn (string $inner): string => '<!-- wp:group {"className":"logo-strip","align":"wide","layout":{"type":"flex","justifyContent":"space-between","flexWrap":"wrap"}} --><div class="wp-block-group alignwide logo-strip">' . $inner . '</div><!-- /wp:group -->';
+    $row = static fn (string $inner): string => '<!-- wp:group {"className":"logo-strip","align":"wide","layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"}} --><div class="wp-block-group alignwide logo-strip">' . $inner . '</div><!-- /wp:group -->';
     $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--logo-strip","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--logo-strip"><!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">Trusted by teams at</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
 
     $good = $band($row($name('Northline') . $name('Atlas Harbor') . $name('Vellum Press') . $name('Observatory') . $name('Kite Labs')));
