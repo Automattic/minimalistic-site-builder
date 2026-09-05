@@ -1697,6 +1697,7 @@ final class DesignDirectionStep implements Step
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
                 'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+                'glass'       => 'the build turns band-coloured cards into frosted panels (a translucent band tint over the blurred page, one light hairline, a deep soft drop); inverted cards stay solid',
             } . '. Full-bleed media stays unelevated; do not add another shadow.';
         }
 

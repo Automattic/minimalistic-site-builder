@@ -77,3 +77,11 @@ test('Depth glass frosts band-coloured card shells on a blurred page and keeps i
     assert_true(!str_contains(Depth::kitCss('glow'), 'backdrop-filter'), 'only glass blurs');
     assert_eq('ring', Depth::GLASS_LIGHT_FALLBACK);
 });
+
+test('every bounded depth renders a direction fact, glass included (frm W4b)', function () {
+    foreach (Depth::ALL as $depth) {
+        $rendered = \Automattic\SiteBuild\Steps\DesignDirectionStep::format(['description' => 'x', 'depth' => $depth]);
+        assert_contains("**Depth**: {$depth}", $rendered, $depth);
+    }
+    assert_contains('frosted panels', \Automattic\SiteBuild\Steps\DesignDirectionStep::format(['description' => 'x', 'depth' => 'glass']));
+});
