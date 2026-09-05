@@ -84,3 +84,43 @@ test('a gallery on a zero-media archetype goes as one block (frm PR-3u)', functi
     assert_contains('Services', $out);
     assert_eq(1, count($warnings), 'the outermost span is one removal');
 });
+
+
+test('a section over its media budget keeps the first pictures in document order and drops the rest (frm PR-3y)', function () {
+    $band = static fn (string $archetype, string $inner): string => no_image_band($archetype, $inner);
+    $three = $band('centered-stack', no_image_picture('screen-one') . '<!-- wp:paragraph --><p>Copy.</p><!-- /wp:paragraph -->' . no_image_picture('screen-two') . no_image_picture('screen-three'));
+    $repairs = [];
+    $warnings = [];
+    $out = GeneratedMarkup::stripMediaOverBudget($three, 'page-home--dashboard', 'centered-stack', $repairs, $warnings);
+    assert_eq(2, preg_match_all('~<img\\b~', $out), 'the budget of two holds');
+    assert_contains('screen-one', $out);
+    assert_contains('screen-two', $out);
+    assert_true(!str_contains($out, 'screen-three'), 'the third picture, last in document order, goes');
+    assert_contains('Copy.', $out);
+    assert_eq(1, count($repairs));
+    assert_eq('media-over-budget-removed', $repairs[0]['code']);
+    assert_eq('3 authored image(s) on centered-stack (budget 2)', $repairs[0]['authored']);
+    assert_eq('2 kept', $repairs[0]['delivered']);
+    assert_eq(1, count($warnings));
+    assert_contains('budgets 2 picture(s) and this section authored 3', $warnings[0]);
+    assert_contains('screen-three', $warnings[0]);
+    $joined = implode("\n", SectionComposition::markupWarnings($out, 'centered-stack', 'page-home--dashboard'));
+    assert_true(!str_contains($joined, 'archetype media count'), 'the media count check is satisfied');
+
+    // A budget of one keeps exactly one; a section within budget is byte-identical; no assignment, no repair.
+    $two = $band('cta-panel', no_image_picture('a') . no_image_picture('b'));
+    $repairs = [];
+    $warnings = [];
+    $one = GeneratedMarkup::stripMediaOverBudget($two, 'page-home--cta', 'cta-panel', $repairs, $warnings);
+    assert_eq(1, preg_match_all('~<img\\b~', $one));
+    assert_contains('assets/a.jpg', $one);
+    $within = $band('centered-stack', no_image_picture('a') . no_image_picture('b'));
+    $repairs = [];
+    $warnings = [];
+    assert_eq($within, GeneratedMarkup::stripMediaOverBudget($within, 'page-home--x', 'centered-stack', $repairs, $warnings));
+    assert_eq([], $repairs);
+    assert_eq($within, GeneratedMarkup::stripMediaOverBudget($within, 'page-home--x', null, $repairs, $warnings));
+    $zero = $band('statement-lines', no_image_picture('a'));
+    assert_eq($zero, GeneratedMarkup::stripMediaOverBudget($zero, 'page-home--x', 'statement-lines', $repairs, $warnings), 'a zero budget belongs to the other repair');
+    assert_eq([], $repairs);
+});
