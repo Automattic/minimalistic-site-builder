@@ -280,6 +280,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 60 | #507 | W8 (PR-8i) | Wrap the marquee whole under reduced motion (frm) | merged | gist 126b587259ea911f756fd7f2ee407c1b: spector-like11 marquee before (ellipsis) / after (three balanced lines), 390 five lines; kit mirrored | 763c7500 |
 | 61 | #508 | W2 (PR-2h) | Open a stated light page on its ground when the brief names no hero (frm) | merged | selector replay on luzia-like10's own seed: cinematic-safe-zone -> marquee-name with the yield note; direction rerun on a copy kept an already-grounded pick; no build | 2bb1685e |
 | 62 | #509 | W2 (PR-2i) | Give the cinematic phone panel the page ground (frm) | merged | gist 9e482e9efe9ade468bcd82ebf17bd24c: dreammotion-like13 and luzia-like10 at 390 before/after (CSS mirrored); found PR-2j on the same shots | ee30bc96 |
+| 63 | #510 | W2 (PR-2j) | Let the phone photo field show its picture (frm) | merged | gist 03ac1925143cef08c0ef5a23fe46bcbd: dreammotion-like13 and luzia-like10 at 390 before/after (CSS mirrored), probes read the dim layer at .25 with the image loaded | e4154859 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -349,6 +350,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 64: PR-8i #507 merged (the marquee wraps whole under reduced motion and without the script). Next: PR-2h on branch frm/light-ground-hero: a stated light page with no stated hero drops the cover recipes from the pool inside the caller's constraints, so the site opens on its ground.
 - 2026-09-05 turn 65: PR-2h #508 merged (a cover stable pick yields to the foreground pool on a stated light page with no stated hero; an already-grounded pick keeps its seat). Next: PR-2i on branch frm/phone-panel-ground: the cinematic phone panel takes the page ground (base) with contrast ink instead of a contrast slab.
 - 2026-09-05 turn 66: PR-2i #509 merged (the cinematic phone panel takes the page ground with contrast ink). The phone shots showed the photo field empty on both grounds; a computed-style probe at 390 found the photo present and the authored 70% base-colored dim flattening it. Next: PR-2j on branch frm/phone-photo-veil: the phone transform caps that dim at .25 (the copy is off the photo there). PR-5f drafted (ConceptSeeds::statedTypeRegister + statedTypeRegisterFor).
+- 2026-09-05 turn 67: PR-2j #510 merged (the phone photo field keeps a light veil instead of the authored 70% dim). Next: PR-5f on branch frm/stated-type: ConceptSeeds::statedTypeRegister reads a letterform tradition the brief names ('bold black type', 'serif headings', 'monospace' ...) and the direction step lets it outrank the seed's type_register, the way the stated ground does. After PR-5f the cohort-3 rows are done; the loop returns to a fresh critique when budget allows.
 
 ## 10. Parked / rejected
 

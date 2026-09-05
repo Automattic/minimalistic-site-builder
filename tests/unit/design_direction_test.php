@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
@@ -2613,4 +2614,25 @@ test('a stated light page with no stated hero opens on its ground: the cover rec
     $recipe = DesignDirectionStep::selectHeroRecipe($pinned, 'atelier-lisbon', $seed, $warnings, $note);
     assert_eq(['cover-image'], HeroComposition::metadata($recipe)['media_modes']);
     assert_eq(null, $note);
+});
+
+
+test('a letterform tradition the brief states outranks the seed (frm PR-5f)', function () {
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('Create a playful portfolio. Light, white page, bold black type with one giant marquee.'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('tight sans headings with muted two-tone lines'));
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('Near-black ground, serif display headings with two-tone emphasis.'));
+    assert_eq('mono', ConceptSeeds::statedTypeRegister('monospace labels everywhere'));
+    assert_eq('geometric', ConceptSeeds::statedTypeRegister('a geometric sans for the display'));
+    assert_eq(null, ConceptSeeds::statedTypeRegister('Create a website for a Georgian restaurant.'), 'a silent brief decides nothing');
+    assert_eq(null, ConceptSeeds::statedTypeRegister('a boldness of flavour, monotone walls'), 'a phrase must be a whole word');
+    foreach (['grotesque', 'transitional', 'mono', 'geometric', 'slab', 'didone', 'display-serif', 'script', 'condensed', 'humanist'] as $register) {
+        assert_true(in_array($register, ConceptSeeds::TYPE_REGISTERS, true), $register);
+    }
+
+    assert_eq('grotesque', DesignDirectionStep::statedTypeRegisterFor([
+        'original_prompt' => 'Light page, bold black type, floating objects.',
+        'prompt' => 'A single-page portfolio with a marquee.',
+    ]), 'the user\'s words decide when the rewrite dropped the phrase');
+    assert_eq('transitional', DesignDirectionStep::statedTypeRegisterFor(['prompt' => 'serif headings on a dark ground']));
+    assert_eq(null, DesignDirectionStep::statedTypeRegisterFor([]));
 });
