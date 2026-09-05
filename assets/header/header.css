@@ -396,6 +396,21 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     padding: 0.35em 0.75em;
 }
 
+/* Active-item pill (frm W1c): header.js marks the navigation item whose
+ * section is in view. The item takes a tint of the header ink, so it stays
+ * readable in every proven header state without a new colour pair; only the
+ * pill and the centered bar mark sections, and only in-page links qualify. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
+    border-radius: 999px;
+    transition: background-color var(--header-state-duration) var(--header-state-ease);
+}
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    padding: 0.35em 0.75em;
+    margin: -0.35em -0.75em;
+}
+
 /* Below the hamburger breakpoint the pill spans the rail so a long wordmark,
  * the CTA and the menu button all fit. */
 @media (max-width: 600px) {
