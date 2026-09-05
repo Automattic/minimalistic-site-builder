@@ -638,6 +638,15 @@ final class DesignFloor
                 return false;
             }
         }
+        // The committed section badge (frm W6a) is the one label form the
+        // build paints on purpose; the delivery boundary already removed any
+        // badge the direction did not commit, so this class is never a
+        // freelance eyebrow by the time the floor reads it.
+        if ($name === 'paragraph'
+            && is_string($attrs['className'] ?? null)
+            && in_array(SectionLabel::BADGE_CLASS, preg_split('/\s+/', trim($attrs['className'])) ?: [], true)) {
+            return false;
+        }
         $text = self::readingText($document->innerHtml($index));
         if ($text === '' || mb_strlen($text, 'UTF-8') > self::KICKER_MAX_CHARS) {
             return false;

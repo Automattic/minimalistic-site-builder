@@ -1139,6 +1139,8 @@ final class SectionsStep implements Step
                     ],
                     'section'   => $section,
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
+                    'section_label' => DesignDirectionStep::sectionLabelFor($project),
+                    'is_opening' => $opening,
                     'header_contract' => $opening
                         ? ($frontHero
                             ? $frontContract

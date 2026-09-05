@@ -9,6 +9,7 @@ use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\HeadingEmphasis;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
@@ -439,6 +440,7 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'heading_emphasis' => HeadingEmphasis::DEFAULT,
+            'section_label'    => SectionLabel::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -902,6 +904,7 @@ final class DesignDirectionStep implements Step
             $warnings,
         );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
+        $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1004,6 +1007,9 @@ final class DesignDirectionStep implements Step
             // One clause per heading set apart by tone, face or highlighter;
             // the model marks it with the `emph` hook and a kit paints it.
             'heading_emphasis' => $headingEmphasis,
+            // The one committed form in which a small label above a section
+            // heading may return; eyebrows stay banned otherwise.
+            'section_label'    => $sectionLabel,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -1196,6 +1202,18 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeSectionLabel(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            SectionLabel::ALL,
+            SectionLabel::DEFAULT,
+            'section_label',
+            $warnings,
+            'unsupported section label replaced by none',
+        );
+    }
+
     public static function normalizeHeadingEmphasis(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1680,6 +1698,13 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
         }
 
+        $sectionLabel = SectionLabel::explicit($direction['section_label'] ?? null);
+        if ($sectionLabel !== null && $sectionLabel !== 'none') {
+            $facts[] = "- **Section label**: {$sectionLabel} — " . SectionLabel::meaning($sectionLabel)
+                . '. Never in the hero or any page opening; never two per section; the label names the topic'
+                . ' ("Use cases", "Pricing"), never repeats the heading.';
+        }
+
         $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
         if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
             $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
@@ -2079,6 +2104,15 @@ final class DesignDirectionStep implements Step
      * The committed page surface, or `none` when no direction was persisted
      * or the field is absent.
      */
+    /** The committed section label device, or `none`. */
+    public static function sectionLabelFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return SectionLabel::DEFAULT;
+        }
+        return self::normalizeSectionLabel($project->readJson(self::FILE)['section_label'] ?? null);
+    }
+
     /** The committed heading emphasis, or `none`. */
     public static function headingEmphasisFor(Project $project): string
     {
