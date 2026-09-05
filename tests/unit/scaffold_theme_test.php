@@ -614,3 +614,16 @@ test('scaffold-theme sets the pricing figure in the heading face and lifts the r
     assert_contains('transform: translateY(-0.75rem)', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme draws stat-ledger hairlines between figure columns and stacks them on phones (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {', $css);
+    assert_contains('font-size: var(--wp--preset--font-size--display)', $css);
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {', $css);
+    assert_contains('border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css, 'the phone hairline is horizontal');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
