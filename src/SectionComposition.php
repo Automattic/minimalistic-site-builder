@@ -678,7 +678,7 @@ TEXT;
             $columnRows = 0;
             $highlights = 0;
             foreach ($document->indices() as $index) {
-                if ($document->name($index) === 'columns') {
+                if ($document->name($index) === 'columns' && !self::isSideLabelSplit($document, $index)) {
                     $columnRows++;
                 }
                 if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
@@ -744,7 +744,7 @@ TEXT;
             $lists = 0;
             foreach ($document->indices() as $index) {
                 $name = $document->name($index);
-                if ($name === 'columns') {
+                if ($name === 'columns' && !self::isSideLabelSplit($document, $index)) {
                     $tiers = 0;
                     foreach ($document->children($index) as $child) {
                         if ($document->name($child) === 'column') {
@@ -798,7 +798,7 @@ TEXT;
             $figureColumns = 0;
             $columnsTotal = 0;
             foreach ($document->indices() as $index) {
-                if ($document->name($index) !== 'columns') {
+                if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
                     continue;
                 }
                 $columns = array_values(array_filter(
@@ -845,7 +845,7 @@ TEXT;
             $headedColumns = 0;
             $columnsTotal = 0;
             foreach ($document->indices() as $index) {
-                if ($document->name($index) !== 'columns') {
+                if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
                     continue;
                 }
                 $columns = array_values(array_filter(
@@ -1095,5 +1095,26 @@ TEXT;
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+    /**
+     * A committed side-label split (frm W6b): a columns row whose first column
+     * holds only the label paragraph. The archetype's own rows live in the
+     * trailing column, so row counts skip the split itself (frm PR-3j).
+     */
+    private static function isSideLabelSplit(BlockMarkup $document, int $index): bool
+    {
+        $columns = array_values(array_filter(
+            $document->children($index),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        if (count($columns) < 2) {
+            return false;
+        }
+        $leading = $document->children($columns[0]);
+        if (count($leading) !== 1 || $document->name($leading[0]) !== 'paragraph') {
+            return false;
+        }
+        return in_array(SectionLabel::SIDE_CLASS, self::classTokens($document, $leading[0]), true);
     }
 }
