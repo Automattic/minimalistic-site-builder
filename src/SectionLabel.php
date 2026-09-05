@@ -68,7 +68,11 @@ final class SectionLabel
                 letter-spacing: 0;
                 text-transform: none;
             }
-            p.{$hook}.has-text-align-center {
+            /* A badge follows its heading's alignment: centered when the
+               author centered the badge, or when the heading right after it
+               is centered (a centered stack centers every element). */
+            p.{$hook}.has-text-align-center,
+            p.{$hook}:has(+ .wp-block-heading.has-text-align-center) {
                 margin-inline: auto !important;
             }
             p.{$hook}.has-text-align-right {

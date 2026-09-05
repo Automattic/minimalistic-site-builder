@@ -29,6 +29,7 @@ test('the section-badge kit paints the marked paragraph as a pill with a dot (fr
     assert_contains('var(--wp--preset--color--accent, currentColor)', $css, 'only the dot takes the accent');
     assert_contains('text-transform: none', $css, 'the badge is never tracked uppercase');
     assert_contains('p.section-badge.has-text-align-center', $css, 'a centered stack centers its badge');
+    assert_contains('p.section-badge:has(+ .wp-block-heading.has-text-align-center)', $css, 'so does a centered heading right after it');
 });
 
 test('the delivery boundary keeps one committed badge and removes every other (frm W6a)', function () {
