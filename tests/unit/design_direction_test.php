@@ -2010,7 +2010,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
     $direction = $project->readJson('designDirection.json');
     $delivered = $direction['hero_blueprint']['recipe'];
     assert_true(
-        in_array($delivered, ['cinematic-safe-zone', 'layered-poster'], true),
+        in_array($delivered, ['cinematic-safe-zone', 'layered-poster', 'metadata-corners'], true),
         'foreground request remapped inside the cover-image pool',
     );
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);

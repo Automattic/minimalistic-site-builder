@@ -122,6 +122,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
         'layered-poster' => 'cover image beneath controlled block-built type',
         'panel-stage' => 'one contained stage',
         'marquee-name' => 'giant and clipped behind a centered stack',
+        'metadata-corners' => 'scenery the build lifts into the corners',
     ];
 
     assert_eq(HeroComposition::RECIPES, array_keys($markers));

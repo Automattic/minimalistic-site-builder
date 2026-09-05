@@ -27,7 +27,8 @@
             },
             "eligible": [
                 "cinematic-safe-zone",
-                "layered-poster"
+                "layered-poster",
+                "metadata-corners"
             ]
         },
         {
@@ -43,7 +44,8 @@
             },
             "eligible": [
                 "cinematic-safe-zone",
-                "layered-poster"
+                "layered-poster",
+                "metadata-corners"
             ]
         },
         {
@@ -162,9 +164,26 @@
         },
         {
             "id": "product-stage",
-            "stable_identifier": "corpus-seed-2",
+            "stable_identifier": "north-panel",
             "concept_seed": "A rounded product panel with a dashboard plate.",
             "constraints": []
+        },
+        {
+            "id": "compact-cover-corners",
+            "stable_identifier": "vellum-press",
+            "concept_seed": "A high-contrast portrait with facts in the corners.",
+            "constraints": {
+                "allowed_hero_media_modes": [
+                    "cover-image"
+                ],
+                "max_hero_images": 1,
+                "hero_copy_capacity": "compact"
+            },
+            "eligible": [
+                "cinematic-safe-zone",
+                "layered-poster",
+                "metadata-corners"
+            ]
         }
     ]
 }
