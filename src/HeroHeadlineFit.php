@@ -93,6 +93,18 @@ final class HeroHeadlineFit
     private const MINIMUM_CAP_PX = 32;
 
     /**
+     * The phone bound (frm PR-2e). The desktop caps say nothing about a
+     * 390px viewport, where the display preset resolves to its clamp
+     * minimum and a long word still runs past the edge (cohesion-like9's
+     * "Bucharest," at 61px). A viewport-relative term joins the pin only
+     * when the longest word would overflow the phone measure at the size
+     * the heading reaches there; on wide viewports the same term resolves
+     * far above the px cap and never bites.
+     */
+    public const PHONE_VIEWPORT_PX = 390.0;
+    private const PHONE_GUTTER_PX = 32.0;
+
+    /**
      * Per-character advance for the LINE-COUNT estimate, in em.
      *
      * Separate from the two constants above on purpose. Those are deliberately
@@ -134,8 +146,12 @@ final class HeroHeadlineFit
      *        pass bounds the headline.
      * @return array{markup:string, notes:list<string>}
      */
-    public static function apply(string $markup, array $theme, ?array $desktopLineTarget = null): array
-    {
+    public static function apply(
+        string $markup,
+        array $theme,
+        ?array $desktopLineTarget = null,
+        ?float $phoneViewportPx = null,
+    ): array {
         $displayMax = self::displayMaxPx($theme);
         if ($displayMax === null || !is_finite($displayMax) || $displayMax <= 0 || $displayMax > PHP_INT_MAX) {
             return ['markup' => $markup, 'notes' => []];
@@ -190,21 +206,41 @@ final class HeroHeadlineFit
                 [$wordCap, $lineCap],
                 static fn (?int $value): bool => $value !== null,
             ));
-            if ($caps === []) {
+            $cap = $caps === [] ? null : min($caps);
+            $phoneVw = $phoneViewportPx === null
+                ? null
+                : self::phoneVw($fit['wordEm'], $cap, self::displayMinPx($theme), $phoneViewportPx);
+            if ($cap === null && $phoneVw === null) {
                 continue;
             }
-            $cap = min($caps);
             // The preset class must go with the preset attr: WordPress
             // renders `.has-display-font-size` with !important, which would
             // beat the pinned inline size. The min() keeps the preset var,
             // so fluid behaviour below the cap is unchanged.
             unset($attrs['fontSize']);
-            $attrs = self::withPinnedFontSize(
-                $attrs,
-                'min(var(--wp--preset--font-size--display), ' . $cap . 'px)',
-            );
+            $terms = ['var(--wp--preset--font-size--display)'];
+            if ($cap !== null) {
+                $terms[] = $cap . 'px';
+            }
+            if ($phoneVw !== null) {
+                $terms[] = $phoneVw . 'vw';
+            }
+            $attrs = self::withPinnedFontSize($attrs, 'min(' . implode(', ', $terms) . ')');
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-display-font-size');
+            if ($phoneVw !== null) {
+                $notes[] = sprintf(
+                    "headline phone-fit: '%s' (~%.2fem) would overflow a %dpx viewport at the size the heading"
+                        . ' reaches there; %svw joins the pin',
+                    $fit['word'],
+                    $fit['wordEm'],
+                    (int) $phoneViewportPx,
+                    $phoneVw,
+                );
+            }
+            if ($cap === null) {
+                continue;
+            }
             $notes[] = $cap === $wordCap
                 ? sprintf(
                     "headline word-fit: '%s' (%d chars%s, ~%.2fem) cannot fit the %dpx measure at the display "
@@ -729,6 +765,51 @@ final class HeroHeadlineFit
             $terms[] = trim($current);
         }
         return $terms;
+    }
+
+    /**
+     * The viewport-relative size (vw, one decimal) that keeps the longest
+     * word inside a phone measure, or null when no bound is needed: the
+     * heading resolves at the phone to the smaller of its px cap and the
+     * preset's clamp minimum, and a word that fits at that size needs no
+     * extra term.
+     */
+    private static function phoneVw(float $wordEm, ?int $cap, ?float $displayMin, float $viewportPx): ?float
+    {
+        $sizes = array_values(array_filter([$cap, $displayMin], static fn ($v): bool => $v !== null));
+        if ($sizes === [] || $wordEm <= 0 || $viewportPx <= 2 * self::PHONE_GUTTER_PX) {
+            return null;
+        }
+        $phoneSize = (float) min($sizes);
+        $available = ($viewportPx - 2 * self::PHONE_GUTTER_PX) * self::MEASURE_SAFETY;
+        if ($phoneSize * $wordEm <= $available) {
+            return null;
+        }
+        return floor(($available / $viewportPx * 100) / $wordEm * 10) / 10;
+    }
+
+    /** The display preset's smallest resolvable size in px, or null. */
+    private static function displayMinPx(array $theme): ?float
+    {
+        foreach ((array) ($theme['settings']['typography']['fontSizes'] ?? []) as $preset) {
+            if (!is_array($preset) || ($preset['slug'] ?? null) !== self::DISPLAY_SLUG) {
+                continue;
+            }
+            $size = $preset['size'] ?? null;
+            return is_string($size) ? self::cssMinPx($size) : null;
+        }
+        return null;
+    }
+
+    /** Resolves px/rem literals and the minimum term of a clamp(). */
+    private static function cssMinPx(string $value): ?float
+    {
+        $value = trim($value);
+        if (preg_match('/^clamp\((.*)\)$/is', $value, $m)) {
+            $terms = self::splitTopLevel($m[1]);
+            return count($terms) === 3 ? self::cssMinPx($terms[0]) : null;
+        }
+        return self::lengthPx($value);
     }
 
     /**
