@@ -238,6 +238,17 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedGround) . '; disposition the brief names its ground, so the seed yields to it';
             $seedGround = $statedGround;
         }
+        // A letterform tradition the brief states outranks the seed's the
+        // same way (frm PR-5f): cohesion-like14 set a serif display on a
+        // "bold black type" brief because the seed chose a serif tradition.
+        $statedType = self::statedTypeRegisterFor($meta);
+        $typeRepair = null;
+        if ($statedType !== null && $seedTypeRegister !== $statedType) {
+            $typeRepair = 'designDirection.json: field type_register seed committed '
+                . self::describe($seedTypeRegister === '' ? null : $seedTypeRegister) . ' delivered '
+                . self::describe($statedType) . '; disposition the brief names its letterform tradition, so the seed yields to it';
+            $seedTypeRegister = $statedType;
+        }
         $heroRepair = null;
         $recipe = self::selectHeroRecipe(
             $meta,
@@ -316,7 +327,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = array_values(array_filter([$groundRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
+        $repairs = array_values(array_filter([$groundRepair, $typeRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
@@ -2287,6 +2298,22 @@ final class DesignDirectionStep implements Step
      *
      * @param array<mixed> $meta
      */
+    /** The letterform tradition the brief names, the user's own words first (frm PR-5f). */
+    public static function statedTypeRegisterFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = ConceptSeeds::statedTypeRegister($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
     public static function statedGroundFor(array $meta): ?string
     {
         foreach (['original_prompt', 'prompt'] as $key) {
