@@ -627,3 +627,34 @@ test('a phone viewport adds a vw bound only for a word that would overflow it (f
     $again = HeroHeadlineFit::apply($onlyPhone['markup'], hhf_theme(), null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
     assert_eq($onlyPhone['markup'], $again['markup'], 'idempotent');
 });
+
+
+test('a wide display face widens the word estimate, so the phone bound bites harder (frm PR-5h)', function () {
+    // spector-like14: Unbounded uppercase, "Design cut sharp enough to hold a
+    // room". The generic 0.70em put DESIGN at 4.20em and pinned 16.3vw, and
+    // ENOUGH still ran past a 390px viewport. Unbounded's 0.92em gives
+    // 6 × 0.92 + 5 × 0.04 = 5.72em: (267 ÷ 390 × 100) ÷ 5.72 = 11.9vw.
+    $unbounded = hhf_theme(['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'name' => 'Unbounded', 'fontFamily' => '"Unbounded", "Arial Black", Impact, sans-serif'],
+        ['slug' => 'body', 'name' => 'Funnel Sans', 'fontFamily' => '"Funnel Sans", sans-serif'],
+    ]]]]);
+    $wide = HeroHeadlineFit::apply(hhf_hero('Design cut sharp enough to hold a room'), $unbounded, null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
+    assert_contains('11.9vw)"', $wide['markup'], 'the wide face pins tighter');
+    assert_contains("(~5.72em) would overflow a 390px viewport", implode("\n", $wide['notes']));
+
+    $generic = HeroHeadlineFit::apply(hhf_hero('Design cut sharp enough to hold a room'), hhf_theme(), null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
+    assert_true(!str_contains($generic['markup'], 'vw)'), 'the generic estimate lets a six-letter word fit at the clamp minimum');
+
+    // A family named only in the stack, without a name field, is read too.
+    $stackOnly = hhf_theme(['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'fontFamily' => "'Michroma', sans-serif"],
+    ]]]]);
+    $michroma = HeroHeadlineFit::apply(hhf_hero('Design cut sharp enough to hold a room'), $stackOnly, null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
+    assert_contains("(~6.20em) would overflow", implode("\n", $michroma['notes']));
+
+    // A narrow or unknown face is untouched: byte-identical to the generic run.
+    $unknown = hhf_theme(['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'name' => 'Inter', 'fontFamily' => '"Inter", sans-serif'],
+    ]]]]);
+    assert_eq($generic['markup'], HeroHeadlineFit::apply(hhf_hero('Design cut sharp enough to hold a room'), $unknown, null, HeroHeadlineFit::PHONE_VIEWPORT_PX)['markup']);
+});
