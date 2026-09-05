@@ -679,6 +679,9 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--marquee-name .hero-composition__objects {
             position: absolute;
             inset: 0;
+            /* The root's constrained layout caps every child to the content
+               width; the slots measure from the viewport edges instead. */
+            max-width: none;
             margin: 0;
             padding: 0;
             pointer-events: none;
@@ -690,10 +693,17 @@ final class ScaffoldThemeStep implements Step
             width: clamp(4.5rem, 11vw, 10rem);
             animation: hero-object-drift 7s ease-in-out infinite alternate;
         }
-        .hero-composition--marquee-name .hero-composition__objects > figure img {
+        /* A cutout carries no plate: the depth kit's image ring, shadow and
+           radius stay off it (the selector outweighs the kit's without
+           !important). */
+        .hero-composition--marquee-name .hero-composition__objects > figure.wp-block-image > img {
             display: block;
             width: 100%;
             height: auto;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
         }
         .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(1) {
             inset-block-start: 14%;
@@ -706,7 +716,7 @@ final class ScaffoldThemeStep implements Step
         }
         .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(3) {
             inset-block-end: 12%;
-            inset-inline-start: 13%;
+            inset-inline-start: 8%;
             animation-delay: -4.1s;
         }
         .hero-composition--marquee-name .hero-composition__objects > figure:nth-child(4) {

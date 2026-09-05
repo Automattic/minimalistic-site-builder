@@ -583,6 +583,7 @@ test('a marquee-name hero on a 3d-object site may float two to four png objects 
     $joined = implode("\n", HeroComposition::markupWarnings($good, 'marquee-name', 'page-home--hero', $blueprint));
     assert_true(!str_contains($joined, 'floating objects'), $joined);
     assert_true(!str_contains($joined, 'recipe image aspect'), 'square objects never count against the portrait avatar slot');
+    assert_true(!str_contains($joined, 'recipe media count'), 'objects never count as hero media');
 
     $one = $hero($media . $copy . $marquee . $objects($object('sphere.png')));
     $joined = implode("\n", HeroComposition::markupWarnings($one, 'marquee-name', 'page-home--hero', $blueprint));

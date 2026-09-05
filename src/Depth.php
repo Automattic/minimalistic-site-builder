@@ -150,7 +150,9 @@ final class Depth
             }
 
             /* One elevated card is one surface: its direct media must not draw
-               a second shadow. Borderless cards are absent on purpose. */
+               a second shadow. Borderless cards are absent on purpose. A
+               floating hero cutout (frm W7c) is no plate either. */
+            .hero-composition__objects > figure.wp-block-image > img,
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > img,
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > a > img,
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-cover:not(.alignfull),

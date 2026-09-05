@@ -633,7 +633,26 @@ final class HeroComposition
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
-        $imageCount = preg_match_all('~<img\b~i', $markup, $unused);
+        // frm W7c: the floating-object group is scenery. It is cut out of
+        // the markup the media checks read, so its cutouts never count as
+        // hero media; its own shape is checked further down.
+        $objectGroups = [];
+        foreach ($document->indices() as $index) {
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array(self::OBJECTS_CLASS, $classes, true)) {
+                $objectGroups[] = $index;
+            }
+        }
+        $mediaMarkup = $markup;
+        if ($objectGroups !== []) {
+            $start = $document->openingOffset($objectGroups[0]);
+            $end = $document->endOffset($objectGroups[0]);
+            if ($end !== null && $end > $start) {
+                $mediaMarkup = substr($markup, 0, $start) . substr($markup, $end);
+            }
+        }
+        $imageCount = preg_match_all('~<img\b~i', $mediaMarkup, $unused);
         $imageCount = is_int($imageCount) ? $imageCount : 0;
         $copyRegions = 0;
         $mediaRegions = 0;
@@ -823,18 +842,8 @@ final class HeroComposition
             }
         }
         // frm W7c: the floating objects are optional scenery. When the group
-        // is present it is exactly one, a group outside and after the copy
-        // region, holding two to four transparent (.png) images and nothing
-        // else. It is cut out of the markup before the media checks below.
-        $objectGroups = [];
-        foreach ($document->indices() as $index) {
-            $attrs = $document->attrs($index) ?? [];
-            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-            if (in_array(self::OBJECTS_CLASS, $classes, true)) {
-                $objectGroups[] = $index;
-            }
-        }
-        $mediaMarkup = $markup;
+        // is present it is exactly one, a group outside the copy region,
+        // holding two to four transparent (.png) images and nothing else.
         if ($objectGroups !== []) {
             $objects = [];
             $sound = count($objectGroups) === 1
@@ -855,11 +864,6 @@ final class HeroComposition
                     ['matching_groups' => count($objectGroups), 'objects' => count($objects)],
                     'safe parseable hero was retained; restore the one marked object group of two to four transparent images outside the copy region',
                 );
-            }
-            $start = $document->openingOffset($objectGroups[0]);
-            $end = $document->endOffset($objectGroups[0]);
-            if ($end !== null && $end > $start) {
-                $mediaMarkup = substr($markup, 0, $start) . substr($markup, $end);
             }
         }
         // BIGR-775 advisory copy-budget check: every hero holds at most the

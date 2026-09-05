@@ -32,6 +32,7 @@ test('Depth kit executes the preset on cards and contained media without double-
         assert_contains('.wp-block-cover:not(.alignfull)', $css);
         assert_contains('.wp-block-media-text:not(.alignfull)', $css);
         assert_contains('box-shadow: none !important', $css, 'direct card media gets no second shadow');
+        assert_contains('.hero-composition__objects > figure.wp-block-image > img,', $css, 'a floating hero cutout carries no ring (frm W7c)');
     }
 });
 

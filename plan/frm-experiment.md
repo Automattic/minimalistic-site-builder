@@ -97,6 +97,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-3f: `sticky-split-tabs` (reuse `sticky-side`).
 - PR-3g: `zigzag-steps` (depends on W6 numerals).
 - PR-3h: `project-grid-2x2` (cover tiles, name + meta line over the image; needs images).
+- PR-7d: ImageTransparency leaves a wide semi-transparent white halo on keyed clay objects (cohesion-like13 sphere: 27% clear, 21% mid alpha), so a cutout on a tinted ground still reads as a pale plate. Fix: key on distance from the corner-sampled backdrop with a hard threshold and a short feathered edge, and check the halo share in a unit test on a synthetic object.
 - PR-3m: stat-ledger figure overflow at four columns: spector-like10 rendered "$4.2M" into the next column's "18" (the 7vw cap holds per figure but the column has no `min-width: 0` / `overflow-wrap`, so a wide figure spills). Fix: the ledger column shrinks (`min-width: 0`) and the figure clamps to the column (`max-inline-size: 100%`, `overflow-wrap: anywhere`).
 - PR-3h2: `logo-strip` as a row of text wordmarks in muted ink; never generated logo images, because a painted wordmark is the text-in-image defect (BIGR-768) by construction.
 - PR-3i: `newsletter-columns` footer composition; verify `sunken-wordmark` renders like the references.
