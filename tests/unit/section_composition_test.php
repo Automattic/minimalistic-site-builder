@@ -920,3 +920,38 @@ test('the logo-strip archetype checks one marked row of four to eight one-line n
     $plain = str_replace('section-composition--logo-strip', 'section-composition--centered-stack', $three);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'logo strip'));
 });
+
+
+test('a highlighted card the brief states reaches an equal-card-grid as one committed highlight (frm PR-3s)', function () {
+    assert_eq('three service cards with one highlighted in violet', SectionComposition::statedHighlight('Light page, tight sans headings, three service cards with one highlighted in violet, a dark band.'));
+    assert_eq(null, SectionComposition::statedHighlight('three pricing tiers with the middle one highlighted, a photo testimonial'), 'a pricing row carries its own highlight');
+    assert_eq(null, SectionComposition::statedHighlight('highlight the craft in every card'), 'a verb is not a stated card');
+    assert_eq(null, SectionComposition::statedHighlight('Create a website for a Georgian restaurant.'));
+    assert_eq('three cards with one highlighted in violet', SectionComposition::statedHighlightFor(['original_prompt' => 'three cards with one highlighted in violet', 'prompt' => 'three cards']));
+    assert_eq(null, SectionComposition::statedHighlightFor([]));
+    $clause = 'three service cards with one highlighted in violet';
+    assert_true(SectionComposition::highlightAppliesTo($clause, ['slug' => 'services', 'title' => 'Three ways to work together', 'type' => 'services']));
+    assert_true(!SectionComposition::highlightAppliesTo($clause, ['slug' => 'work', 'title' => 'Selected work', 'type' => 'portfolio']), 'the work grid is not the services row');
+    assert_true(!SectionComposition::highlightAppliesTo(null, ['slug' => 'services']));
+    assert_true(!SectionComposition::highlightAppliesTo('one highlighted card', ['slug' => 'services']), 'a clause with no subject reaches nothing');
+
+    assert_contains('exactly ONE card group adds `"className":"card-highlight"`', SectionComposition::highlightDirective('equal-card-grid', true));
+    assert_eq('', SectionComposition::highlightDirective('equal-card-grid', false));
+    assert_eq('', SectionComposition::highlightDirective('bento-grid', true), 'bento carries its own highlight rule');
+    $vars = SectionComposition::recipeVars('equal-card-grid', 'card', true);
+    assert_contains('backgroundColor":"accent"', $vars['highlight_directive']);
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/section-compositions/equal-card-grid.md')), '{{highlight_directive}}'));
+
+    $card = static fn (string $extra = ''): string => '<!-- wp:column {"width":"33.33%","verticalAlignment":"stretch"} --><div class="wp-block-column"><!-- wp:group {"className":"item-pattern__item card-style--flush' . $extra . '","layout":{"type":"constrained"}} --><div class="wp-block-group item-pattern__item card-style--flush' . $extra . '"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Brand</h3><!-- /wp:heading --><!-- wp:paragraph --><p>Identity.</p><!-- /wp:paragraph --></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $band = static fn (string $cards): string => '<!-- wp:group {"className":"section-composition--equal-card-grid","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--equal-card-grid"><!-- wp:columns {"align":"wide","className":"equal-cards"} --><div class="wp-block-columns alignwide equal-cards">' . $cards . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+
+    $one = $band($card() . $card(' card-highlight') . $card());
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($one, 'equal-card-grid', 'page-home--services', 'card', true)), 'stated highlight'));
+    $none = $band($card() . $card() . $card());
+    $joined = implode("\n", SectionComposition::markupWarnings($none, 'equal-card-grid', 'page-home--services', 'card', true));
+    assert_contains('stated highlight', $joined);
+    assert_contains('"highlighted_cards":0', $joined);
+    $two = $band($card(' card-highlight') . $card(' card-highlight') . $card());
+    assert_contains('"highlighted_cards":2', implode("\n", SectionComposition::markupWarnings($two, 'equal-card-grid', 'page-home--services', 'card', true)));
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($none, 'equal-card-grid', 'page-home--services', 'card')), 'stated highlight'), 'no stated highlight, no check');
+});

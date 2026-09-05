@@ -18,5 +18,6 @@ same construction and the same crop, so the row reads as one system.
   paragraph, list, and buttons.
 - Surface/width: the band runs wide or full, and the `wp:columns` row takes
   `"align":"wide"` itself.
+{{highlight_directive}}
 - Objective failure: unequal card widths, widths that do not sum to 100%, one
   card built differently from its siblings, or mixed image crops in one row.

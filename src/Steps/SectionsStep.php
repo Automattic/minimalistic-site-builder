@@ -14,6 +14,7 @@ use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\PageOpeningFallback;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
@@ -1116,6 +1117,11 @@ final class SectionsStep implements Step
             // backend exists to replace the placeholders, so it stays in the
             // caller-owned meta rather than in the spec the model authors.
             'form_placeholders' => self::formPlaceholders($project),
+            // A highlighted card the brief states reaches every card row as a
+            // committed device (frm PR-3s); bento and pricing carry their own.
+            'stated_highlight'  => (string) SectionComposition::statedHighlightFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
         ];
 
         // Select the footer first: a singleton hero's lower edge must name the
