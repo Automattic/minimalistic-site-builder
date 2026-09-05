@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
+use Automattic\SiteBuild\NavigationSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\HeroComposition;
@@ -497,6 +498,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $rawSections = $plan['sections'] ?? null;
             $sectionCount = self::sectionArrayCount($rawSections);
             $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $rawSections = self::removeHeaderNavigationSections($rawSections, $warnings, $slug);
             $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
             if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
                 $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval(
@@ -609,6 +611,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $rawSections = $repaired['sections'] ?? null;
             $sectionCount = self::sectionArrayCount($rawSections);
             $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $rawSections = self::removeHeaderNavigationSections($rawSections, $warnings, $slug);
             $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
             if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
                 $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval(
@@ -1235,6 +1238,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $rawSections = self::removeTemplateFooterSections($plan['sections'] ?? null, $warnings, $slug);
+            $rawSections = self::removeHeaderNavigationSections($rawSections, $warnings, $slug);
             try {
                 $sections = self::normalize($rawSections, $front, $projection, $actionContext, $warnings, $slug, $repairs, $allowOffsetGrid);
                 if ($sections === []) {
@@ -1503,6 +1507,49 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . 'theme/parts/footer.html is appended by the page template';
         }
 
+        return $sections;
+    }
+
+    /**
+     * Drop a planned site-navigation section (frm PR-1y). Every assembled
+     * page receives theme/parts/header.html with its navigation from the
+     * template, so a planned "navigation" or "menu" band is a second menu;
+     * on spector it shipped as a split of image cards below the hero.
+     * Whole-word matching keeps a restaurant menu. Non-navigation siblings
+     * are returned unchanged and in order; a second pass is a fixed point.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place, one per removal
+     * @return array<mixed>
+     */
+    public static function removeHeaderNavigationSections(
+        $raw,
+        array &$warnings = [],
+        string $pageSlug = ''
+    ): array {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $sections = [];
+        foreach ($raw as $index => $section) {
+            if (!is_array($section) || !NavigationSectionIdentity::matches($section)) {
+                $sections[] = $section;
+                continue;
+            }
+            $pagePath = $pageSlug === ''
+                ? 'pages[].sections[' . $index . ']'
+                : "pages[slug='{$pageSlug}'].sections[{$index}]";
+            $authored = json_encode(
+                ['slug' => $section['slug'] ?? null, 'title' => $section['title'] ?? null, 'type' => $section['type'] ?? null],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+            if (!is_string($authored)) {
+                $authored = get_debug_type($section);
+            }
+            $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
+                . 'delivered=removed; disposition=template-owned site-navigation section removed because '
+                . 'theme/parts/header.html carries the navigation on every page';
+        }
         return $sections;
     }
 
