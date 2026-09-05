@@ -1728,6 +1728,7 @@ final class HeaderHeroStep implements Step
         string $heroMarkup,
         ?array $primaryAction,
         string $taglineText = '',
+        bool $keepsAction = false,
     ): array {
         $heroLines = [];
         $hero = BlockMarkup::parse($heroMarkup);
@@ -1745,7 +1746,10 @@ final class HeaderHeroStep implements Step
                 $heroLines[] = $tokens;
             }
         }
-        $actionLabel = $primaryAction === null
+        // A chrome that commits one persistent action (keepsHeaderAction)
+        // keeps its button even when the label repeats the hero's: the
+        // references show the action twice in the first viewport.
+        $actionLabel = $primaryAction === null || $keepsAction
             ? []
             : self::textTokens((string) ($primaryAction['label'] ?? ''));
         $taglineText = trim($taglineText);
