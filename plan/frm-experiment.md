@@ -227,6 +227,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 32 | #479 | W4c | Add the band_geometry direction token with a rounded band kit (frm) | merged | gist fa76f46f85132e45d43899fb54268d06: luzia-like6 committed rounded unforced; process band inset (margin 27px, radius 24px), mobile 390 | (see git) |
 | 33 | #480 | W4 (PR-4i) | Read the stated ground from the user's own words first (frm) | merged | gist 6aa3dec6b0fd464aeb515c2dcfb58e61: luzia-like6-4i dark seed forced, original prompt read, light page (239,231,220) vs (11,15,20) | (see git) |
 | 34 | #481 | W6c | Add the step-numeral device for process sections (frm) | merged | gist d1fb1c457a38cf16d80438e3dc78aa5f: luzia-like7 committed chip unforced, four chips in the rounded band (chips also counted, fixed); luzia-like7-6c rerun: five plain chips, mobile 390 | (see git) |
+| 35 | #482 | W1d | Add the spread-nav header archetype (frm) | merged | gist 18aecb4b807e2e55f96b7d96b9fa8038: spector-like7 forced HEADER_ARCHETYPE=spread-nav + panel-stage, links spread, active item follows scroll; align:full gutter fixed and replayed on spector-like7-1d; mobile 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -265,6 +266,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 33: PR-4h #478 merged. W4c built on `frm/rounded-band`: `BandGeometry` (square|rounded) direction token, band overlay kit (inset + panel radius on top-level contrast/band sections, hero and covers spared), finalize ship/prune, prompt text. luzia-like6 committed it unforced. Finding: luzia landed on a dark ground for a "Light page" brief because the stated-ground ration reads the refined prompt (meta.prompt), which dropped the phrase; filed PR-4i (read meta.original_prompt too). Merged as #479.
 - 2026-09-05 turn 34: W4c #479 merged. PR-4i on `frm/stated-ground-source`: `DesignDirectionStep::statedGroundFor` reads meta.original_prompt before the refined prompt; the refine prompt keeps a stated ground word for word. Evidence: luzia-like6 copy with the dark seed forced, rebuilt from theme-json, light page. Merged as #480.
 - 2026-09-05 turn 35: PR-4i #480 merged. W6c built on `frm/step-numeral`: `StepNumeral` (none|chip|ghost) direction token, numeral overlay kit, section prompt rule, boundary guard (committed + process section + first in a step item + digits only, renumbered 1..n), count-up marker and sanity step skip ordinals. luzia-like7 committed chip unforced; the chips also carried count-up (fixed, rerun as luzia-like7-6c). Trunk merge rechecked clean at 7fa2c663. Merged as #481.
+- 2026-09-05 turn 36: W6c #481 merged. W1d built on `frm/spread-nav`: archetype end to end (noir/brutalist/poster pool, noir leaves the centered bar; row class restorer; fallback; sticky-soft; driver scope; proven ink; kit grid with space-between links). The model authored the row align:full and the wordmark touched the viewport: prompt now says align:wide and the kit pads a full row. Merged as #482.
 
 ## 10. Parked / rejected
 
