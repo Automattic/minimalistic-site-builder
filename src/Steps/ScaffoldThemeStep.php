@@ -869,6 +869,35 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Project grid (the project-grid-2x2 archetype, frm W3h): every tile
+           is one cover at the same landscape proportion, rounded from the
+           committed media radius, its name and meta line pinned to the
+           bottom edge. Core's 430px cover floor is released so the ratio
+           owns the height. The picture eases larger under a pointer; the
+           reduced-motion query leaves it still. */
+        .section-composition--project-grid-2x2 .wp-block-cover {
+            aspect-ratio: 4 / 3;
+            min-height: 0;
+            border-radius: var(--shape-radius-media, 0);
+            overflow: hidden;
+            padding: var(--wp--preset--spacing--md, 1.5rem);
+        }
+        .section-composition--project-grid-2x2 .wp-block-cover .wp-block-heading {
+            margin-block: 0 0.25em;
+        }
+        .section-composition--project-grid-2x2 .wp-block-cover .project-meta {
+            margin: 0;
+            font-size: var(--wp--preset--font-size--small, 0.875rem);
+            opacity: 0.85;
+        }
+        .section-composition--project-grid-2x2 .wp-block-cover__image-background {
+            transition: scale 700ms ease;
+        }
+        @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+            .section-composition--project-grid-2x2 .wp-block-cover:hover .wp-block-cover__image-background {
+                scale: 1.04;
+            }
+        }
         /* Zigzag steps (the zigzag-steps archetype, frm W3g): rows center
            vertically; an empty step plate takes the media's shape; on phones
            every row stacks copy-first whichever side the copy authored. */

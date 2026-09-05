@@ -842,3 +842,45 @@ test('the statement-lines archetype checks one marked group of three to six head
     $plain = str_replace('section-composition--statement-lines', 'section-composition--centered-stack', $two);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'statement'));
 });
+
+test('the project-grid-2x2 archetype checks rows of two cover tiles, each naming its project once (frm W3h)', function () {
+    assert_true(in_array('project-grid-2x2', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('project-grid-2x2');
+    assert_eq('section-compositions/project-grid-2x2.md', $meta['prompt']);
+    assert_eq(2, $meta['min_images']);
+    assert_eq(4, $meta['max_images']);
+    assert_true($meta['requires_row']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'statement-lines, project-grid-2x2'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), '- project-grid-2x2 — '));
+    assert_eq([2, 4], SectionComposition::PROJECT_TILE_COUNTS);
+    assert_eq('project-meta', SectionComposition::PROJECT_META_CLASS);
+
+    $tile = static fn (string $name, int $headings = 1): string => '<!-- wp:column --><div class="wp-block-column"><!-- wp:cover {"url":"assets/x.jpg","dimRatio":40,"overlayColor":"contrast","contentPosition":"bottom left","textColor":"base"} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="assets/x.jpg" alt="AI_IMAGE: a studio | project tile | photorealistic | landscape"/><div class="wp-block-cover__inner-container">'
+        . str_repeat('<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $name . '</h3><!-- /wp:heading -->', $headings)
+        . '<!-- wp:paragraph {"className":"project-meta"} --><p class="project-meta">Identity · Web</p><!-- /wp:paragraph --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2"><!-- wp:heading --><h2 class="wp-block-heading">Selected work</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($tile('Atlas') . $tile('Berg')) . $row($tile('Cove') . $tile('Dune')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'project-grid-2x2', 'page-home--work'));
+    $pair = $band($row($tile('Atlas') . $tile('Berg')));
+    assert_eq([], SectionComposition::markupWarnings($pair, 'project-grid-2x2', 'page-home--work'), 'two tiles are a valid grid');
+
+    $three = $band($row($tile('A') . $tile('B') . $tile('C')));
+    $joined = implode("\n", SectionComposition::markupWarnings($three, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project grid tiles', $joined);
+    assert_contains('"columns_per_row":[3]', $joined);
+
+    $noCover = $band($row('<!-- wp:column --><div class="wp-block-column"><!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt=""/></figure><!-- /wp:image --></div><!-- /wp:column -->' . $tile('B')));
+    $joined = implode("\n", SectionComposition::markupWarnings($noCover, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project grid tiles', $joined);
+
+    $twoNames = $band($row($tile('Atlas', 2) . $tile('Berg')));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoNames, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project tile heading', $joined);
+    assert_contains('"headings_per_tile":[2,1]', $joined);
+
+    $plain = str_replace('section-composition--project-grid-2x2', 'section-composition--equal-card-grid', $three);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'project grid'));
+});

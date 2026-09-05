@@ -45,7 +45,14 @@ final class SectionComposition
         'feature-row-hairlines',
         'zigzag-steps',
         'statement-lines',
+        'project-grid-2x2',
     ];
+
+    /** The tile counts a project-grid-2x2 may carry (frm W3h). */
+    public const PROJECT_TILE_COUNTS = [2, 4];
+
+    /** The one meta line under a project tile's name (frm W3h). */
+    public const PROJECT_META_CLASS = 'project-meta';
 
     /** The line counts a statement-lines ledger may carry (frm W3e). */
     public const STATEMENT_LINE_COUNTS = [3, 4, 5, 6];
@@ -408,6 +415,21 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--statement-lines',
             'prompt' => 'section-compositions/statement-lines.md',
+        ],
+        // frm W3h: Spector's work grid. Two rows of two picture tiles, each a
+        // cover with the project's name and one meta line over the bottom of
+        // the image; the theme sizes every tile alike and rounds it.
+        'project-grid-2x2' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 2,
+            'max_images' => 4,
+            'copy_capacity' => 'compact',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--project-grid-2x2',
+            'prompt' => 'section-compositions/project-grid-2x2.md',
         ],
     ];
 
@@ -995,6 +1017,49 @@ TEXT;
             }
         }
 
+        if ($archetype === 'project-grid-2x2') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
+                    continue;
+                }
+                $rows[] = count(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+            }
+            $tiles = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'cover') {
+                    $tiles[] = self::countHeadings($document, $index);
+                }
+            }
+            $rowCount = count($rows);
+            $twoWide = count(array_filter($rows, static fn (int $n): bool => $n === 2));
+            if (
+                !in_array(count($tiles), self::PROJECT_TILE_COUNTS, true)
+                || $rowCount < 1
+                || $twoWide !== $rowCount
+                || count($tiles) !== 2 * $rowCount
+            ) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'project grid tiles',
+                    ['archetype' => $archetype, 'tiles' => self::PROJECT_TILE_COUNTS, 'columns_per_row' => 2, 'tile_block' => 'core/cover'],
+                    ['tiles' => count($tiles), 'rows' => $rowCount, 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a project grid is one or two rows of two cover tiles',
+                );
+            } elseif (array_filter($tiles, static fn (int $headings): bool => $headings !== 1) !== []) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'project tile heading',
+                    ['archetype' => $archetype, 'headings_per_tile' => 1],
+                    ['headings_per_tile' => $tiles],
+                    'safe parseable section was retained; every tile names its project with exactly one heading',
+                );
+            }
+        }
+
         if ($archetype === 'statement-lines') {
             $lists = [];
             foreach ($document->indices() as $index) {
@@ -1247,6 +1312,16 @@ TEXT;
     }
 
     /** True when a heading block sits anywhere inside the block (frm W3g). */
+    /** Headings at any depth below one block (frm W3h). */
+    private static function countHeadings(BlockMarkup $document, int $index): int
+    {
+        $count = 0;
+        foreach ($document->children($index) as $child) {
+            $count += ($document->name($child) === 'heading' ? 1 : 0) + self::countHeadings($document, $child);
+        }
+        return $count;
+    }
+
     private static function holdsHeading(BlockMarkup $document, int $index): bool
     {
         foreach ($document->children($index) as $child) {
