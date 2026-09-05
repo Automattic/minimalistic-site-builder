@@ -103,10 +103,57 @@
     }
     root.classList.add('motion-js');
 
+    // Build each `.marquee` paragraph into a track of two identical groups
+    // of repeated items (frm W8c): the CSS loop translates the track by
+    // half, so the clone makes the seam invisible. The first item keeps the
+    // readable text; every repeat is hidden from assistive tech. Runs before
+    // motion-ready and only under motion-js, so reduced motion and no-JS
+    // keep the plain static line.
+    function buildMarquees() {
+        var marquees = document.querySelectorAll('.marquee:not(.marquee--built)');
+        Array.prototype.forEach.call(marquees, function (marquee) {
+            var text = (marquee.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text === '') {
+                return;
+            }
+            var group = document.createElement('span');
+            group.className = 'marquee__group';
+            var makeItem = function (hidden) {
+                var item = document.createElement('span');
+                item.className = 'marquee__item';
+                item.textContent = text;
+                if (hidden) {
+                    item.setAttribute('aria-hidden', 'true');
+                }
+                return item;
+            };
+            group.appendChild(makeItem(false));
+            marquee.textContent = '';
+            marquee.appendChild(group);
+            var guard = 0;
+            while (group.scrollWidth < marquee.clientWidth && guard < 24) {
+                group.appendChild(makeItem(true));
+                guard++;
+            }
+            var clone = group.cloneNode(true);
+            clone.setAttribute('aria-hidden', 'true');
+            Array.prototype.forEach.call(clone.querySelectorAll('.marquee__item'), function (item) {
+                item.setAttribute('aria-hidden', 'true');
+            });
+            var track = document.createElement('span');
+            track.className = 'marquee__track';
+            track.appendChild(group);
+            track.appendChild(clone);
+            marquee.appendChild(track);
+            marquee.classList.add('marquee--built');
+        });
+    }
+
     function reveal() {
         var targets;
         try {
             splitWords();
+            buildMarquees();
             targets = Array.prototype.slice.call(document.querySelectorAll(ENTRANCE_SELECTOR));
             targets.forEach(function (target) {
                 target.classList.add('motion-target');

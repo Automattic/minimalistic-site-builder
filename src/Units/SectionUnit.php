@@ -186,6 +186,9 @@ final class SectionUnit extends AbstractPageSectionUnit
         );
         $markup = $label['markup'];
         array_push($warnings, ...$label['warnings']);
+        // A marquee painted in copy (the same phrase three times in one
+        // block) collapses to the phrase and the kit class (frm W8c).
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

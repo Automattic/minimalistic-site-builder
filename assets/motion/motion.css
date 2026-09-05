@@ -71,6 +71,7 @@
     --motion-hover-shadow-opacity: 0.18;
     --motion-word-keyframe: motion-kit-word;
     --motion-word-stagger: 70ms;
+    --motion-marquee-duration: 30s;
 }
 
 @media screen and (prefers-reduced-motion: no-preference) {
@@ -464,6 +465,38 @@
         to {
             transform: translateY(calc(var(--motion-ambient-distance) * -0.5));
         }
+    }
+
+    /* Marquee (frm W8c): the ONE lateral exception in the kit. motion.js
+       rebuilds the marked paragraph as a track of two identical groups of
+       repeated items, so a translate of half the track loops without a
+       seam. Without JS, or under reduced motion (this whole block is
+       inert there), the paragraph is a plain static line. Hover and
+       keyboard focus pause it. */
+    .marquee {
+        overflow: hidden;
+        white-space: nowrap;
+    }
+    .marquee .marquee__track {
+        display: inline-flex;
+        will-change: transform;
+        animation-name: motion-kit-marquee;
+        animation-duration: var(--motion-marquee-duration);
+        animation-timing-function: linear;
+        animation-iteration-count: infinite;
+    }
+    .marquee .marquee__group {
+        display: inline-flex;
+        gap: 2em;
+        padding-inline-end: 2em;
+    }
+    .marquee:hover .marquee__track,
+    .marquee:focus-within .marquee__track {
+        animation-play-state: paused;
+    }
+    @keyframes motion-kit-marquee {
+        from { transform: translateX(0); }
+        to { transform: translateX(-50%); }
     }
 
     /* One very slow zoom of the image inside a cover/figure, then rest. */
