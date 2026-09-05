@@ -296,6 +296,7 @@ final class DesignDirectionStep implements Step
                 $seedTypeRegister,
                 (string) ($specData['slug'] ?? $project->slug()),
                 $fontCatalog,
+                $seedRegister,
             ),
             'hero_composition' => $heroComposition,
         ]);
