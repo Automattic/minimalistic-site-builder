@@ -444,3 +444,22 @@ test('marquee-name is a one-image centered recipe whose objective check wants th
     $warnings = HeroComposition::markupWarnings($inside, 'marquee-name', 'page-home--hero');
     assert_eq(1, count(array_filter($warnings, fn (string $w): bool => str_contains($w, 'recipe marquee name'))), 'the name inside the copy region is the same failure');
 });
+
+test('the marquee paragraph is bound to the site name at the boundary (frm PR-2f)', function () {
+    $hero = static fn (string $text): string => '<!-- wp:group {"className":"hero-composition--marquee-name","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition--marquee-name">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Calm products</h1><!-- /wp:heading --></div><!-- /wp:group -->'
+        . '<!-- wp:paragraph {"className":"hero-composition__marquee"} --><p class="hero-composition__marquee" aria-hidden="true">' . $text . '</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $bound = HeroComposition::bindMarqueeName($hero('Designing calm products since 2014'), 'Ana Popescu', 'page-home--hero', $repairs);
+    assert_contains('<p class="hero-composition__marquee" aria-hidden="true">Ana Popescu</p>', $bound);
+    assert_eq(1, count($repairs));
+    assert_eq('marquee-name-bound', $repairs[0]['code']);
+    $same = HeroComposition::bindMarqueeName($hero('Ana Popescu'), 'Ana Popescu', 'page-home--hero', $repairs);
+    assert_eq($hero('Ana Popescu'), $same, 'the exact name is left alone');
+    assert_eq(1, count($repairs));
+    assert_eq($hero('Whatever'), HeroComposition::bindMarqueeName($hero('Whatever'), '', 'page-home--hero', $repairs), 'no name, no change');
+    $escaped = HeroComposition::bindMarqueeName($hero('x'), 'Marks & Co', 'page-home--hero', $repairs);
+    assert_contains('>Marks &amp; Co</p>', $escaped);
+});

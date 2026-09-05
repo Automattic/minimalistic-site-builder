@@ -105,6 +105,18 @@ final class HeroUnit extends AbstractPageSectionUnit
         $markup = $budget['markup'];
         array_push($warnings, ...$budget['warnings']);
         $markup = GeneratedMarkup::headlineFirstHeroCopy($markup, $key, $repairs, $warnings);
+        if ($context['recipe'] === 'marquee-name') {
+            $spec = $input['site_spec'] ?? null;
+            if (is_string($spec)) {
+                $spec = json_decode($spec, true);
+            }
+            $markup = HeroComposition::bindMarqueeName(
+                $markup,
+                is_array($spec) ? (string) ($spec['name'] ?? '') : '',
+                $key,
+                $repairs,
+            );
+        }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);

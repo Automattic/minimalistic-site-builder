@@ -808,4 +808,54 @@ final class HeroComposition
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
     }
+
+    /**
+     * Bind the marquee-name paragraph to the site name (frm PR-2f). The
+     * recipe asks the model to write the name exactly as the spec states it;
+     * a paraphrase, a tagline or a slogan in that slot becomes the page's
+     * scenery, so the boundary replaces whatever text the marked paragraph
+     * holds with the site name and records the repair. Only the one marked
+     * paragraph is touched; the objective check still decides whether the
+     * hero has it at all.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function bindMarqueeName(string $markup, string $siteName, string $part, array &$repairs = []): string
+    {
+        $siteName = trim($siteName);
+        if ($siteName === '') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(self::MARQUEE_CLASS, $classes, true)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<p\b[^>]*>)(.*)(<\/p>\s*)$/su', $own, $m) !== 1) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($text === $siteName) {
+                return $markup;
+            }
+            $document->spliceOwnHtml($index, 0, strlen($own), $m[1] . htmlspecialchars($siteName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . $m[3]);
+            $repairs[] = [
+                'code' => 'marquee-name-bound',
+                'part' => $part,
+                'block' => 'paragraph.' . self::MARQUEE_CLASS,
+                'authored' => $text,
+                'delivered' => $siteName,
+                'disposition' => 'repaired',
+                'note' => 'the marquee paragraph carries the site name exactly, never a paraphrase or a slogan',
+            ];
+            return $document->render();
+        }
+        return $markup;
+    }
 }
