@@ -4006,4 +4006,69 @@ final class GeneratedMarkup
             $text
         );
     }
+
+    /**
+     * Collapse a paragraph or heading whose text is one phrase written three
+     * or more times in a row ("MORE PROJECTS — MORE PROJECTS — MORE
+     * PROJECTS"): a model painting a marquee in copy (frm W8c / PR-8f). The
+     * block keeps the phrase once; a paragraph also takes the `marquee` kit
+     * class so the intent survives as the kit's loop (the motion budget still
+     * decides whether it runs). Only plain-text blocks are touched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function collapseRepeatedPhrase(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['paragraph', 'heading'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<(p|h[1-6])\b[^>]*>)(.*)(<\/\2>\s*)$/su', $own, $shell) !== 1) {
+                continue;
+            }
+            $inner = $shell[3];
+            if ($inner !== strip_tags($inner)) {
+                continue; // inline markup: not ours to rewrite
+            }
+            $text = html_entity_decode($inner, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $separator = '(?:\s*(?:—|–|-|·|•|\||\/|,|→)\s*|\s+)';
+            if (preg_match('/^\s*(\S(?:.{0,78}?\S)?)(?:' . $separator . '\1){2,}' . $separator . '?\s*$/siu', $text, $m) !== 1) {
+                continue;
+            }
+            $phrase = trim($m[1]);
+            if ($phrase === '' || mb_strlen($phrase, 'UTF-8') < 3) {
+                continue;
+            }
+            $escaped = htmlspecialchars($phrase, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $replacementInner = $escaped;
+            $open = $shell[1];
+            if ($name === 'paragraph' && preg_match('/\bmarquee\b/', $open) !== 1) {
+                $open = preg_match('/\sclass="/', $open) === 1
+                    ? preg_replace('/\sclass="/', ' class="marquee ', $open, 1)
+                    : preg_replace('/^(\s*<p)/', '$1 class="marquee"', $open, 1);
+                $attrs = $document->attrs($index) ?? [];
+                $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (!in_array('marquee', $tokens, true)) {
+                    array_unshift($tokens, 'marquee');
+                }
+                $attrs['className'] = implode(' ', $tokens);
+                $document->setAttrs($index, $attrs);
+            }
+            $document->spliceOwnHtml($index, 0, strlen($own), $open . $replacementInner . $shell[4]);
+            $repairs[] = [
+                'part' => $part,
+                'block' => $name,
+                'authored' => $text,
+                'delivered' => $phrase,
+                'note' => "collapsed a phrase repeated in copy to one {$name}"
+                    . ($name === 'paragraph' ? ' and handed it to the marquee kit class' : ''),
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
 }

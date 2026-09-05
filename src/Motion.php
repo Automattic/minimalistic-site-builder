@@ -38,7 +38,7 @@ final class Motion
     public const HERO_CLASSES = ['hero-entrance', 'word-reveal'];
 
     /** Ambient classes: signature effects, budgeted to ONE per page. */
-    public const AMBIENT_CLASSES = ['ken-burns', 'gradient-shift', 'ambient-drift'];
+    public const AMBIENT_CLASSES = ['ken-burns', 'gradient-shift', 'ambient-drift', 'marquee'];
 
     /** Hover classes implemented by the static kit and gated by the profile. */
     public const HOVER_CLASSES = ['hover-lift', 'hover-reveal'];
@@ -87,7 +87,7 @@ final class Motion
             return true;
         }
         return preg_match(
-            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
+            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
             $token
         ) === 1;
     }

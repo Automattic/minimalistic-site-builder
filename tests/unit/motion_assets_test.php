@@ -413,6 +413,10 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
 test('motion kit moves only vertically and never springs past rest', function () {
     $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
     $withoutComments = strtolower((string) preg_replace('~/\*.*?\*/~s', '', $css));
+    // The marquee loop (frm W8c) is the one documented lateral exception:
+    // its keyframe is removed before the vertical-only assertions.
+    $withoutComments = (string) preg_replace('~@keyframes motion-kit-marquee \{.*?\}\s*\}~s', '', $withoutComments);
+    assert_true(!str_contains($withoutComments, 'motion-kit-marquee {'), 'the marquee keyframe was isolated');
 
     // Team feedback (aug28test): sideways arrivals read as disorienting.
     // The kit may fade, rise, settle, mask, zoom, and sharpen — it may not
