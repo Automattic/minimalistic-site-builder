@@ -590,9 +590,9 @@ final class ScaffoldThemeStep implements Step
             overflow: hidden;
         }
         /* metadata-corners (frm W2c): one full-bleed cover at viewport
-           height; the inner container becomes a column that pushes the copy
-           to the bottom and the fact group to the top, where its flex row
-           spreads two or three short facts into the corners. The facts sit
+           height; the inner container becomes a column with the fact group
+           at the top, where its flex row spreads two or three short facts
+           into the corners, and the copy centered in the room below. The facts sit
            last in the DOM (the H1 stays the first text line); `order`
            lifts them. The copy keeps a reading measure on the leading side. */
         .hero-composition--metadata-corners > .wp-block-cover {
@@ -602,7 +602,7 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--metadata-corners > .wp-block-cover > .wp-block-cover__inner-container {
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
+            justify-content: flex-start;
             gap: var(--wp--preset--spacing--lg, 3rem);
             width: 100%;
             max-width: none;
@@ -626,9 +626,12 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--metadata-corners .hero-composition__meta > p:last-child:not(:first-child) {
             text-align: end;
         }
+        /* The copy centers in the room the fact row leaves: auto block
+           margins on the one flex child that is not the row. */
         .hero-composition--metadata-corners .hero-composition__copy {
-            margin-inline-start: 0;
-            max-width: min(100%, 44rem);
+            margin-block: auto;
+            margin-inline: auto;
+            max-width: min(100%, 48rem);
         }
         .hero-composition--metadata-corners .hero-composition__copy h1 {
             line-height: 0.95;

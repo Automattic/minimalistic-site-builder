@@ -492,7 +492,7 @@ test('the metadata-corners recipe is a cover recipe whose facts ride the corners
     assert_eq('full-bleed-cover', $meta['layout_archetype']);
     assert_eq('hero-compositions/metadata-corners.md', $meta['prompt']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_eq('bottom-start', $meta['defaults']['text_anchor']);
+    assert_eq('center-start', $meta['defaults']['text_anchor']);
     assert_eq('hero-composition__meta', HeroComposition::META_CLASS);
     assert_eq([2, 3], HeroComposition::META_FACT_COUNTS);
     assert_eq('metadata-corners', HeroComposition::statedInBrief('Dark hero with a full-bleed portrait, metadata in the corners, a stacked display headline'));
@@ -501,7 +501,7 @@ test('the metadata-corners recipe is a cover recipe whose facts ride the corners
     assert_eq('cover-image', $blueprint['media_mode']);
 
     $fact = static fn (string $t): string => '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">' . $t . '</p><!-- /wp:paragraph -->';
-    $copy = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","justifyContent":"left"}} --><div class="wp-block-group hero-composition__copy"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Drawn sharp,<br>built to last</h1><!-- /wp:heading --><!-- wp:paragraph --><p>A New York studio.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $copy = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Drawn sharp,<br>built to last</h1><!-- /wp:heading --><!-- wp:paragraph --><p>A New York studio.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
     $metaGroup = static fn (string $facts): string => '<!-- wp:group {"className":"hero-composition__meta","layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group hero-composition__meta">' . $facts . '</div><!-- /wp:group -->';
     $hero = static fn (string $inner): string => '<!-- wp:group {"align":"full","className":"hero-composition--metadata-corners"} --><div class="wp-block-group alignfull hero-composition--metadata-corners"><!-- wp:cover {"url":"assets/hero.jpg","align":"full","className":"hero-composition__media"} --><div class="wp-block-cover alignfull hero-composition__media"><img class="wp-block-cover__image-background" src="assets/hero.jpg" alt="AI_IMAGE: a portrait | hero | photorealistic | landscape"/><div class="wp-block-cover__inner-container">' . $inner . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
 

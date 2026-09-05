@@ -227,8 +227,8 @@ final class HeroComposition
             ],
         ],
         // frm W2c: Spector's opener. One full-bleed portrait cover, the copy
-        // pinned to the lower leading corner as a stack of short lines, and
-        // two or three small facts the build lifts to the top corners. The
+        // a start-aligned stack of short lines centered in the frame, and two
+        // or three small facts the build lifts to the top corners. The
         // facts sit LAST in the cover so the H1 stays the first text line and
         // the copy budget reads only the copy group.
         'metadata-corners' => [
@@ -252,9 +252,9 @@ final class HeroComposition
             'media_weights' => ['dominant'],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
-                'text_anchor' => 'bottom-start',
+                'text_anchor' => 'center-start',
                 'headline_line_target' => ['desktop' => [2, 3], 'mobile' => [2, 5]],
-                'focal_region' => 'end', 'text_safe_region' => 'start',
+                'focal_region' => 'end', 'text_safe_region' => 'center',
                 'height_profile' => 'immersive', 'cta_treatment' => 'quiet',
                 'mobile_transformation' => 'retain-media-overlay',
                 'media_aspect' => 'landscape', 'media_weight' => 'dominant',
