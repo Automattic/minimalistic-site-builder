@@ -524,6 +524,22 @@ final class MotionSanityStep implements Step
         if ($token === 'stagger-children' && count($doc->children($i)) < 2) {
             return 'stagger-children needs a container with at least two children';
         }
+        // The card stack (frm W8d) is scroll-driven layout: one per page, on
+        // a container of two to six children, never an entrance budget.
+        if (in_array($token, Motion::STACK_CLASSES, true)) {
+            $children = count($doc->children($i));
+            if ($children < 2 || $children > 6) {
+                return 'sticky-stack needs a container of two to six cards';
+            }
+            $budget['stack'] ??= 0;
+            if ($budget['stack'] >= 1) {
+                return 'sticky-stack budget: one stack per page';
+            }
+            $budget['stack']++;
+            $keptKitClass = $token;
+            $kitOnBlock++;
+            return null;
+        }
         // A count-up figure (frm W8b) is an entrance for observation only: a
         // stat row counts every figure, so it spends no section budget, and
         // it needs text to count.

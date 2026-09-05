@@ -47,6 +47,9 @@ final class Motion
     /** Hover classes implemented by the static kit and gated by the profile. */
     public const HOVER_CLASSES = ['hover-lift', 'hover-reveal'];
 
+    /** Scroll-driven layout, not an entrance: the cards of one container stack as the page scrolls (frm W8d). */
+    public const STACK_CLASSES = ['sticky-stack'];
+
     /** Hard cap promised by the section prompt; each part is one section. */
     public const MAX_ENTRANCES_PER_SECTION = 2;
 
@@ -56,7 +59,7 @@ final class Motion
     /** @return string[] every class the motion kit's CSS implements */
     public static function kitClasses(): array
     {
-        return array_merge(self::SCROLL_CLASSES, self::AMBIENT_CLASSES, self::HOVER_CLASSES);
+        return array_merge(self::SCROLL_CLASSES, self::AMBIENT_CLASSES, self::HOVER_CLASSES, self::STACK_CLASSES);
     }
 
     /**
@@ -91,7 +94,7 @@ final class Motion
             return true;
         }
         return preg_match(
-            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee|count-up)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
+            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee|count-up|sticky-stack)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
             $token
         ) === 1;
     }
