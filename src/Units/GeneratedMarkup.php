@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\StepNumeral;
@@ -3303,6 +3304,63 @@ final class GeneratedMarkup
      *
      * @param list<array<string,mixed>> $repairs
      */
+    /** The deepest dim a hero cover may paint over its picture (frm PR-2l). */
+    public const HERO_COVER_DIM_CEILING = 60;
+
+    /**
+     * Cap the dim of every hero cover that carries a picture (frm PR-2l).
+     * spector-like14 asked for "a full-bleed high-contrast portrait" and the
+     * author painted `dimRatio` 80 over it: the page opened on a near-solid
+     * slab with no portrait to see. The contrast pass keeps its floor of 40
+     * for the copy; this is the matching ceiling, so the picture the brief
+     * asked for stays visible behind the headline. The numbered dim class
+     * in the saved HTML is swapped with it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function capHeroCoverDim(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $capped = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if (trim((string) ($attrs['url'] ?? '')) === '' || !is_numeric($attrs['dimRatio'] ?? null)) {
+                continue;
+            }
+            $dim = (int) $attrs['dimRatio'];
+            if ($dim <= self::HERO_COVER_DIM_CEILING) {
+                continue;
+            }
+            $attrs['dimRatio'] = self::HERO_COVER_DIM_CEILING;
+            $document->setAttrs($index, $attrs);
+            ContrastFix::swapDimClass($document, $index, $dim, self::HERO_COVER_DIM_CEILING);
+            $capped[] = $dim;
+            $warnings[] = "file='theme/parts/{$part}.html'; block='cover'; authored=dimRatio {$dim}; delivered=dimRatio "
+                . self::HERO_COVER_DIM_CEILING
+                . '; disposition=a hero dim above the ceiling buries the picture the brief asked for; the copy keeps '
+                . 'the contrast floor of the contrast pass';
+        }
+        if ($capped === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-cover-dim-capped',
+            'part' => $part,
+            'authored' => 'dimRatio ' . implode(', ', $capped),
+            'delivered' => 'dimRatio ' . self::HERO_COVER_DIM_CEILING,
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
     public static function fullBleedCoverAlignment(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);
