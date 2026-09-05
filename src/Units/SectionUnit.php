@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -177,6 +178,14 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
+        $label = SectionLabel::normalize(
+            $markup,
+            is_string($input['section_label'] ?? null) ? $input['section_label'] : null,
+            $this->key($input),
+            (bool) ($input['is_opening'] ?? false),
+        );
+        $markup = $label['markup'];
+        array_push($warnings, ...$label['warnings']);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

@@ -167,12 +167,14 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | 1 | #448 | W0 | Add the frm cohort briefs (frm) | merged | baseline cohort, section 7 | 8bf3a9d1 |
 | 2 | #449 | W1a | Add the floating-pill header archetype (frm) | merged | gist c227b01f7ba99e8dd9b91e9afa93aa2c: zova-like2 + cohesion-like2 forced pill, glass/glass sticky, mobile 390 | 5a9f9783 |
 | 3 | #450 | W4a | Execute the committed shape as one radius scale on card shells (frm) | merged | gist 48d9a6f9049c9aa5578eae48174479fe: lumen7 round replay (square to 24px), naturaleza5 soft (20px to 12px) | 93469974 |
+| 4 | #451 | W5a | Add the heading_emphasis direction token (frm) | merged | gist 46f8ee8456d7d8a1da6d1ffe60e8c033: dreammotion-like2 + cohesion-like3 committed two-tone unforced, desktop + 390 | e3cdf689 |
 
 ## 9. Iteration log (one line per loop turn)
 
 - 2026-09-04 turn 1: setup (branch, worktree, baseline 61 failures = trunk), PR-0a #448 merged, baseline cohort built (images failed: WPCOM proxy read-only, retried once), references captured, section 7 filled. Started PR-1a `floating-pill` on branch `frm/floating-pill-header`.
 - 2026-09-05 turn 2: PR-1a #449 merged (CI green, no new unit failures). Evidence forced `HEADER_ARCHETYPE=floating-pill` because image-led heroes resolve overlay; `register` is now persisted on the direction. Images still failing (proxy read-only). Next: W4a as a shape-owned radius scale (no separate `radius_scale` token, see section 10).
 - 2026-09-05 turn 3: PR-4a #450 merged. Evidence was a replay (shape pass + block fixer + screenshot) because no cohort build carries card shells; PR-4e filed for that. Image proxy now times out (cURL 28) instead of read-only. Started W5a `heading_emphasis` (none / two-tone / italic-word / highlight; `gradient-fill` parked until the stops are palette-proven) on branch `frm/heading-emphasis`.
+- 2026-09-05 turn 4: PR-5a #451 merged (both evidence builds committed two-tone on their own). Background bash tasks die at turn end and at the 10-minute cap: long builds now run detached (`setsid nohup`) with a done marker. Started W6a `section_label` (`none` / `section-badge`; a new token, not a `device` value, because the badge is per section while `device` is one band) on branch `frm/section-badge`.
 
 ## 10. Parked / rejected
 

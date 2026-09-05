@@ -764,3 +764,23 @@ test('finalize-theme ships the heading-emphasis kit and prunes it for none (frm 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships the section-label kit and prunes it for none (frm W6a)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'section_label' => 'section-badge']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('p.section-badge', $project->readText('theme/assets/label/label.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains("wp_enqueue_style('forno-vero-label', get_theme_file_uri('assets/label/label.css'), ", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'section_label' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/label/label.css'), 'stale label kit pruned');
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'forno-vero-label'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

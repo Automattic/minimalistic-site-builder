@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\HeadingEmphasis;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -174,6 +175,13 @@ final class FinalizeThemeStep implements Step
             HeadingEmphasis::kitCss($headingEmphasis),
             $headerWarnings,
         );
+        $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
+        $labelShipped = self::writeOverlayKit(
+            $project,
+            self::labelKit(),
+            SectionLabel::kitCss($sectionLabel),
+            $headerWarnings,
+        );
         $overlays = [];
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
@@ -196,6 +204,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($emphasisShipped) {
             $overlays[] = self::emphasisKit();
+        }
+        if ($labelShipped) {
+            $overlays[] = self::labelKit();
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -227,6 +238,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($emphasisShipped
             ? "  heading emphasis: '{$headingEmphasis}' kit enqueued\n"
             : "  heading emphasis: {$headingEmphasis} (kit not shipped)\n");
+        Narrator::write($labelShipped
+            ? "  section label: '{$sectionLabel}' kit enqueued\n"
+            : "  section label: {$sectionLabel} (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
@@ -298,7 +312,17 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit(), self::labelKit()];
+    }
+
+    /** The committed section-label kit: paints the one badge above a section heading. */
+    public static function labelKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'label',
+            "// Committed section label (section-badge) above non-hero section\n"
+                . '// headings. Loads after generated style.css.',
+        );
     }
 
     /** The committed heading-emphasis kit: paints the `emph` clause inside headings. */
