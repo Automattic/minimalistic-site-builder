@@ -1110,6 +1110,57 @@ final class HeroComposition
         ],
     ];
 
+    /**
+     * The floating objects must be transparent cutouts, and the filename is
+     * the pipeline's transparency trigger (a `.png` placeholder is keyed
+     * after generation). cohesion-like15 authored its four objects as .jpg
+     * and shipped white plates over the marquee (frm PR-7e). The boundary
+     * renames every image source inside the object group to .png and
+     * records the repair; the collector then requests the keyed cutout.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function keyObjectFilenames(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'image' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            if (!self::hasAncestorClass($document, $index, self::OBJECTS_CLASS)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            $renamed = preg_replace_callback(
+                '~(<img\b[^>]*\bsrc\s*=\s*["\'])([^"\']*?)\.(?:jpe?g|webp|gif|avif)(["\'])~i',
+                static fn (array $m): string => $m[1] . $m[2] . '.png' . $m[3],
+                $own,
+                -1,
+                $count,
+            );
+            if (!is_string($renamed) || $count === 0) {
+                continue;
+            }
+            $document->spliceOwnHtml($index, 0, strlen($own), $renamed);
+            $attrs = $document->attrs($index) ?? [];
+            if (is_string($attrs['url'] ?? null)) {
+                $attrs['url'] = preg_replace('~\.(?:jpe?g|webp|gif|avif)$~i', '.png', $attrs['url']) ?? $attrs['url'];
+                $document->setAttrs($index, $attrs);
+            }
+            preg_match('~\bsrc\s*=\s*["\']([^"\']*)~i', $own, $before);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'image.floating-object',
+                'authored' => basename((string) ($before[1] ?? '')),
+                'delivered' => basename(preg_replace('~\.(?:jpe?g|webp|gif|avif)$~i', '.png', (string) ($before[1] ?? '')) ?? ''),
+                'note' => 'a floating object is a keyed cutout; its source must be a .png placeholder',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
     public static function statedInBrief(string $brief): ?string
     {
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');

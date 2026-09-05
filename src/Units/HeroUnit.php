@@ -116,6 +116,8 @@ final class HeroUnit extends AbstractPageSectionUnit
                 $key,
                 $repairs,
             );
+            // A floating object is a keyed cutout: its source is a .png (frm PR-7e).
+            $markup = HeroComposition::keyObjectFilenames($markup, $key, $repairs);
         }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
