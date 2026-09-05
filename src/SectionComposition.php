@@ -125,6 +125,18 @@ final class SectionComposition
      */
     public static function highlightAppliesTo(?string $clause, array $section): bool
     {
+        return self::clauseAppliesTo($clause, $section);
+    }
+
+    /**
+     * Whether a stated brief clause is about THIS section (frm PR-3w shares
+     * the PR-3s reader): the clause and the section's slug, title, type or
+     * purpose share a word stem of four letters or more.
+     *
+     * @param array<string,mixed> $section
+     */
+    public static function clauseAppliesTo(?string $clause, array $section): bool
+    {
         if ($clause === null || trim($clause) === '') {
             return false;
         }

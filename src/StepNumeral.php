@@ -47,6 +47,79 @@ final class StepNumeral
         };
     }
 
+    /**
+     * Bounded phrases a brief uses to ask for a numbered row outside a
+     * process (frm PR-3w): "services listed as a numbered stack". The
+     * numeral device is committed by the direction; the brief decides
+     * which extra section counts as ordered.
+     *
+     * @var list<string>
+     */
+    private const STATED_NUMBERED_PHRASES = [
+        'numbered stack', 'numbered list', 'numbered rows', 'numbered ledger', 'numbered items', 'numbered lines',
+        'numbered services', 'numbered cards', 'numbered columns', 'numbered',
+    ];
+
+    /**
+     * The clause of a brief that asks for a numbered row, or null: the
+     * comma-separated item that holds the phrase.
+     */
+    public static function statedNumbered(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (preg_split('/[,.;:]/u', $text) ?: [] as $clause) {
+            $clause = trim($clause);
+            if ($clause === '') {
+                continue;
+            }
+            foreach (self::STATED_NUMBERED_PHRASES as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $clause) === 1) {
+                    return $clause;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The stated numbered clause from a build's meta, the user's own words
+     * first and the refined brief second, or null.
+     *
+     * @param array<string,mixed> $meta
+     */
+    public static function statedNumberedFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $clause = self::statedNumbered($text);
+            if ($clause !== null) {
+                return $clause;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The authoring line for a section the brief numbers (frm PR-3w), or
+     * '' when the section is not stated or the direction committed no
+     * numeral. The section prompt's Step numerals rule stays process-only;
+     * this line names the one extra section it applies to.
+     */
+    public static function numberedDirective(?string $numeral, bool $stated): string
+    {
+        $committed = self::explicit($numeral);
+        if (!$stated || $committed === null || $committed === 'none') {
+            return '';
+        }
+        return '- Numbered row (the brief asks for a numbered stack here): this section counts as a process section for'
+            . ' the Step numerals rule. Each item opens with exactly ONE `wp:paragraph` carrying'
+            . ' `"className":"' . self::CLASS_NAME . '"`' . ($committed === 'chip' ? ' and `"fontSize":"caption"`' : '')
+            . ' whose whole text is the item\'s digit ("1", "2", "3"). Never "01", never words.';
+    }
+
     public static function isProcessSection(string $type, string $slug = ''): bool
     {
         $haystack = strtolower($type . ' ' . $slug);

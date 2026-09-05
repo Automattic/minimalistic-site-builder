@@ -15,6 +15,7 @@ use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\PageOpeningFallback;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
@@ -1119,6 +1120,11 @@ final class SectionsStep implements Step
             'form_placeholders' => self::formPlaceholders($project),
             // A highlighted card the brief states reaches every card row as a
             // committed device (frm PR-3s); bento and pricing carry their own.
+            // A numbered row the brief states reaches its section as the
+            // committed numeral device (frm PR-3w).
+            'stated_numbered'   => (string) StepNumeral::statedNumberedFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
             'stated_highlight'  => (string) SectionComposition::statedHighlightFor(
                 $project->exists('meta.json') ? $project->readJson('meta.json') : [],
             ),
