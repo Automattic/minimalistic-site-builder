@@ -1150,3 +1150,42 @@ test('fixHeader marks the bar-center-cta row after the single-row repair wraps b
     assert_contains('header-bar-center', (string) (($document->attrs($row) ?? [])['className'] ?? ''));
     assert_contains('header-archetype--bar-center-cta', $result['markup'], 'the root carries the archetype marker');
 });
+
+test('a kit-painted chrome makes its navigation and title inherit the proven foreground (frm PR-1g)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"},"textColor":"contrast"} -->'
+        . '<div class="wp-block-group has-contrast-color has-text-color">'
+        . '<!-- wp:group {"className":"header-pill","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}} -->'
+        . '<div class="wp-block-group header-pill">'
+        . '<!-- wp:site-title {"textColor":"primary"} /-->'
+        . '<!-- wp:navigation {"textColor":"secondary","style":{"color":{"text":"#5A6472"},"elements":{"link":{"color":{"text":"#5A6472"}}}}} -->'
+        . '<!-- wp:navigation-link {"label":"Services","url":"#services","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button {"textColor":"base"} --><div class="wp-block-button"><a class="wp-block-button__link has-base-color" href="/start/">Start</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderNav::inheritProvenInk($markup, 'contrast');
+    assert_eq(2, count($result['notes']), 'the navigation and the title each record a repair');
+    assert_true(!str_contains($result['markup'], '"textColor":"secondary"'), 'the nav token colour is gone');
+    assert_true(!str_contains($result['markup'], '"textColor":"primary"'), 'the title token colour is gone');
+    assert_true(!str_contains($result['markup'], '#5A6472'), 'inline nav text colours are gone');
+    assert_contains('"textColor":"base"', $result['markup'], 'the button keeps its own proven pair');
+    assert_contains('"textColor":"contrast"', $result['markup'], 'the root foreground is untouched');
+
+    $clean = HeaderNav::inheritProvenInk('<!-- wp:navigation {"textColor":"contrast"} --><!-- wp:navigation-link {"label":"A","url":"#a","kind":"custom"} /--><!-- /wp:navigation -->', 'contrast');
+    assert_eq([], $clean['notes'], 'a nav already in the proven ink is left alone');
+    assert_eq([], HeaderNav::inheritProvenInk($markup, '')['notes'], 'no proven foreground, no change');
+});
+
+test('fixHeader applies the proven ink on the pill and the centered bar only (frm PR-1g)', function () {
+    $header = static fn (): string => '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation {"textColor":"secondary"} -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    foreach (['floating-pill' => false, 'bar-center-cta' => false, 'standard-row' => true] as $archetype => $keeps) {
+        $result = HeaderHeroStep::fixHeader($header(), AboveFoldContract::MODE_STACKED, 'Northlight', ['Home', 'Menu'], false, $archetype, 'contrast', 'base', null, [], header_nav_pages());
+        assert_eq($keeps, str_contains($result['markup'], '"textColor":"secondary"'), $archetype);
+    }
+});
