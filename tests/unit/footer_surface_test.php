@@ -220,3 +220,22 @@ test('the page-plan closing rule rejects a non-surface value', function () {
     );
     assert_true($error instanceof InvalidArgumentException, get_class($error));
 });
+
+
+test('a footer the brief states in so many words is read as a bounded phrase (frm PR-3r)', function () {
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('Create a playful portfolio... two subscription plans, footer with a huge clipped wordmark.'));
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('a ghost wordmark footer'));
+    assert_eq('newsletter-columns', FooterComposition::statedInBrief('a 4-col footer with a newsletter row'));
+    assert_eq('cover-coda', FooterComposition::statedInBrief('a dark CTA plus footer band with a photo'));
+    assert_eq(null, FooterComposition::statedInBrief('Create a website for a Georgian restaurant.'), 'a silent brief decides nothing');
+    assert_eq(null, FooterComposition::statedInBrief('the wordmark sits in the header'), 'a wordmark elsewhere is not a footer');
+    foreach (['sunken-wordmark', 'newsletter-columns', 'contact-sheet', 'cover-coda', 'conversion-panel', 'color-field', 'repeat-rail'] as $archetype) {
+        assert_true(in_array($archetype, FooterComposition::ARCHETYPES, true), $archetype);
+    }
+    assert_eq('sunken-wordmark', FooterComposition::statedArchetypeFor([
+        'original_prompt' => 'Light page, footer with a huge clipped wordmark.',
+        'prompt' => 'A single-page portfolio with a marquee.',
+    ]), 'the user\'s words decide when the rewrite dropped the phrase');
+    assert_eq('cover-coda', FooterComposition::statedArchetypeFor(['prompt' => 'a footer band with a photo']));
+    assert_eq(null, FooterComposition::statedArchetypeFor([]));
+});
