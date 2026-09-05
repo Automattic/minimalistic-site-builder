@@ -622,8 +622,19 @@ test('scaffold-theme draws stat-ledger hairlines between figure columns and stac
     $css = $project->readText('theme/style.css');
     assert_contains('.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {', $css);
     assert_contains('font-size: min(var(--wp--preset--font-size--display), 7vw)', $css, 'a figure never runs out of its column');
-    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {', $css);
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,', $css);
     assert_contains('border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
     assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css, 'the phone hairline is horizontal');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme shares the hairline column rules with the feature row (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_featurerow_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {', $css);
+    assert_true(substr_count($css, 'border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)') >= 1, 'the hairline is shared');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

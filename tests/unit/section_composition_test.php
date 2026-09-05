@@ -676,7 +676,7 @@ test('the stat-ledger archetype checks one row of three or four figure-led colum
     assert_eq(true, $meta['requires_row']);
     assert_eq(0, $meta['max_images']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'pricing-tiers, stat-ledger"'), 'the page plan enum lists it');
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'pricing-tiers, stat-ledger'), 'the page plan enum lists it');
 
     $column = static fn (string $figure, string $label = 'projects shipped'): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">'
         . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $figure . '</h3><!-- /wp:heading -->'
@@ -712,4 +712,39 @@ test('the stat-ledger archetype checks one row of three or four figure-led colum
 
     $plain = str_replace('section-composition--stat-ledger', 'section-composition--equal-card-grid', $two);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'stat ledger'));
+});
+
+test('the feature-row-hairlines archetype checks one row of three or four heading-led text columns without cards (frm W3e)', function () {
+    assert_true(in_array('feature-row-hairlines', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('feature-row-hairlines');
+    assert_eq('section-compositions/feature-row-hairlines.md', $meta['prompt']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'stat-ledger, feature-row-hairlines"'));
+
+    $column = static fn (string $inner): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">' . $inner . '</div><!-- /wp:column -->';
+    $text = static fn (string $title): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One line of support.</p><!-- /wp:paragraph -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--feature-row-hairlines","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--feature-row-hairlines">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Four pillars</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $four = $band($row($column($text('Dashboards')) . $column($text('Reports')) . $column($text('Workspace')) . $column($text('Bank sync'))));
+    assert_eq([], SectionComposition::markupWarnings($four, 'feature-row-hairlines', 'page-home--features'));
+
+    $two = $band($row($column($text('A')) . $column($text('B'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row shape', $joined);
+
+    $noHeading = $band($row($column('<!-- wp:paragraph --><p>No heading.</p><!-- /wp:paragraph -->') . $column($text('B')) . $column($text('C'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHeading, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row headings', $joined);
+    assert_contains('"heading_led_columns":2', $joined);
+
+    $carded = $band($row($column('<!-- wp:group {"className":"card-style--flush"} --><div class="wp-block-group card-style--flush">' . $text('A') . '</div><!-- /wp:group -->') . $column($text('B')) . $column($text('C'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($carded, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row cards', $joined);
+    assert_contains('"card_columns":1', $joined);
 });

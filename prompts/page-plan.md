@@ -36,7 +36,7 @@ Return a single JSON object with this exact shape:
       "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
-      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid, faq-split, cta-panel, pricing-tiers, stat-ledger",
+      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid, faq-split, cta-panel, pricing-tiers, stat-ledger, feature-row-hairlines",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
       "item_pattern": null,
@@ -74,6 +74,7 @@ Layout archetypes (pick the one that best serves each section's content):
 - bento-grid — two card rows of unequal count (2 cards then 3, or 3 then 2) with exactly ONE card inverted as the highlight; for a set of four to six capabilities, features, proof points or awards that the brief wants scanned as tiles. Never for a flat set of equals (that is equal-card-grid) and never for long copy.
 - pricing-tiers — ONE row of two or three plan cards, every plan the same construction (name, price figure, one short feature list, its own action) and exactly ONE plan inverted as the recommended one (the middle of three, or the higher of two unless the brief says otherwise). For pricing, plans, memberships, packages and subscription sections. Never for a single price and never for more than three plans (fold extras into a line under the row). Give the section a `primary_action` for the recommended plan.
 - stat-ledger — ONE row of three or four figures, each a number with its unit or sign ("120+", "98%", "$4.2M", "1,200") over one short label, hairlines between them, no cards and no images. For proof by numbers: metrics, results, milestones, counters, "by the numbers" sections. The figures must come from the brief or the SITE SPEC; never invent a statistic. Never for fewer than three figures (fold them into the copy) and never with a paragraph per figure.
+- feature-row-hairlines — ONE row of three or four short text columns (a two-to-four-word heading over one or two lines each) separated by hairlines, no cards and no images. For a compact set of capabilities, principles, services or steps that should read as one quiet row under a hero or a panel. Never for long copy, never for fewer than three items (use asymmetric-split), and never when the set wants tiles (that is bento-grid).
 
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
