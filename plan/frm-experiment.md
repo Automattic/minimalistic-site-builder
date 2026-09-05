@@ -276,6 +276,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 57 | #504 | W7 (PR-7d) | Keep a 3d-object cutout's pale surfaces opaque (frm) | merged | gist c8d25d95b003831603b75a405e071e4c: cohesion-like13 objects regenerated on copies (7d: unmatte off, 7d2: + shadowless prompt); partial alpha 0.21/0.11/0.04/0.02 -> 0.00 on all four; composites over tinted and light grounds | c6c3b235 |
 | 58 | #505 | W3 (PR-3q) | Keep a section image band whole under a project grid (frm) | merged | gist df28683825f210b791ffbf6e31420242: dreammotion-like13 gallery band before/after (CSS mirrored), bottom row whole; cohort-3 mobile sheet | f53c8591 |
 | 59 | #506 | W3 (PR-3p) | Own a project tile's overlay and ink on every ground (frm) | merged | gist 1e4abdc94e72b6c4cf0a08739bdef689: dreammotion-like13 both grids before/after (helper mirrored into the seeded page), luzia-like10 light site unchanged in read | f2cbb3d5 |
+| 60 | #507 | W8 (PR-8i) | Wrap the marquee whole under reduced motion (frm) | merged | gist 126b587259ea911f756fd7f2ee407c1b: spector-like11 marquee before (ellipsis) / after (three balanced lines), 390 five lines; kit mirrored | 763c7500 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -342,6 +343,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 61: cohort-3 built with images (cohesion-like14, dreammotion-like13, zova-like14, luzia-like10, spector-like11; 80/80 images OK; every recipe from the image rows chosen unforced: marquee-name + objects, panel-stage + framed screens, metadata-corners, project-grid-2x2 on three sites). Fidelity 4 / 4 / 4.5 / 4 / 4 (section 7 cohort-3 rows). Critique found six new rows: PR-3q (P0, fixed this turn on frm/critique-3), PR-3p, PR-8i, PR-2h, PR-2i, PR-5f. Warning classes: none new (zova's 26 CTA drift rows already appear on zova-like12-3i).
 - 2026-09-05 turn 62: PR-3q #505 merged (tile rules scoped to covers inside columns). Next: PR-3p on branch frm/tile-ink: the build owns a project tile's overlay and ink (black at 50%, white text) on every ground; the fragment stops naming palette slugs for the tile.
 - 2026-09-05 turn 63: PR-3p #506 merged (black overlay at 50% + white text on every project tile; the band keeps its surface). Next: PR-8i on branch frm/marquee-wrap: under reduced motion or without the script the marquee wraps as a balanced centered statement instead of clipping to an ellipsis.
+- 2026-09-05 turn 64: PR-8i #507 merged (the marquee wraps whole under reduced motion and without the script). Next: PR-2h on branch frm/light-ground-hero: a stated light page with no stated hero drops the cover recipes from the pool inside the caller's constraints, so the site opens on its ground.
 
 ## 10. Parked / rejected
 
