@@ -196,7 +196,12 @@ final class AboveFoldContract
         );
         if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
-            $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
+            // The pill floats in either relation (frm PR-1e): over an
+            // image-led opening it keeps the overlay contract, painting the
+            // proven scrim on the pill alone.
+            $mode = $forced === 'minimal-overlay' || ($forced === 'floating-pill' && $overlaySupported)
+                ? self::MODE_OVERLAY
+                : self::MODE_STACKED;
         } elseif ($forced !== '') {
             $archetype = 'standard-row';
             $mode = self::MODE_STACKED;
@@ -640,10 +645,14 @@ final class AboveFoldContract
      */
     private static function headerPool(string $mode, string $register = '', string $canvas = ''): array
     {
+        $pillRegister = $canvas === 'full-bleed' && in_array($register, self::FLOATING_PILL_REGISTERS, true);
         if ($mode === self::MODE_OVERLAY) {
-            return ['minimal-overlay'];
+            // frm PR-1e: an image-led opening in a product/portfolio
+            // tradition still gets the pill; it floats over the cover with
+            // the overlay contract's scrim painted on the pill alone.
+            return $pillRegister ? ['floating-pill'] : ['minimal-overlay'];
         }
-        if ($canvas === 'full-bleed' && in_array($register, self::FLOATING_PILL_REGISTERS, true)) {
+        if ($pillRegister) {
             return ['floating-pill'];
         }
         // centered-masthead and split-nav are retired from auto-assignment

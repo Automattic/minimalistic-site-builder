@@ -320,6 +320,27 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill,
     box-shadow: none;
 }
 
+/* In overlay mode (frm PR-1e) the rail's scrim moves onto the pill: the
+ * overlay contract proved the foreground against the scrim, and the text
+ * sits inside the pill, so the proof holds. An earned clear resting state
+ * still keeps the scrim on the pill: a clear pill is not a pill. The rail's
+ * own blur band is dropped; the pill blurs behind itself instead. */
+.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill,
+html.header-state-js
+    .site-header-shell
+    .header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent
+    .header-pill {
+    --header-pill-surface: var(--header-start-surface, var(--header-overlay-scrim));
+}
+html.header-state-js
+    .site-header-shell
+    .header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent {
+    --header-start-surface: var(--header-overlay-scrim);
+}
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill {
+    --header-pill-surface: var(--header-scrolled-surface, var(--header-scrolled-solid));
+}
+
 /* A static root has no behavior variables; read the token off its core class. */
 .site-header-shell .header-archetype--floating-pill.has-base-background-color { --header-pill-solid: var(--wp--preset--color--base, #ffffff); }
 .site-header-shell .header-archetype--floating-pill.has-contrast-background-color { --header-pill-solid: var(--wp--preset--color--contrast, #111111); }
@@ -423,6 +444,43 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     html.header-state-js.header-is-scrolled
         .site-header-shell
         .header-archetype--floating-pill:not(.header-scrolled-glass)
+        .header-pill::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* Overlay pill (frm PR-1e): the rail never blurs; the pill does, and stops
+ * once the scrolled surface is opaque, like the overlay rail it replaces. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-is-scrolled
+        .site-header-shell
+        .header-archetype--floating-pill.header-behavior-overlay-to-solid
+        .header-pill::before,
+    .site-header-shell--force-solid
+        .header-archetype--floating-pill.header-behavior-overlay-to-solid
         .header-pill::before {
         -webkit-backdrop-filter: none;
         backdrop-filter: none;

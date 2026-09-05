@@ -308,3 +308,16 @@ test('header CSS paints the floating pill on the inner row and keeps the rail tr
     assert_contains('.header-pill::before', $css, 'glass blurs behind the pill via a non-ancestor pseudo-element');
     assert_contains('@media (max-width: 600px)', $css);
 });
+
+test('header CSS moves the overlay scrim and blur onto the pill in overlay mode (frm PR-1e)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $scrim = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill,');
+    assert_contains('var(--header-start-surface, var(--header-overlay-scrim))', $scrim);
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent', $css, 'an earned clear overlay keeps the scrim on the pill');
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay-to-solid::before {', $css);
+    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid::before');
+    assert_contains('content: none', $rail, 'the rail never blurs in overlay mode');
+    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill::before');
+    assert_contains('backdrop-filter: blur(14px) saturate(115%)', $pill);
+    assert_true(substr_count($css, 'position: fixed') === 1, 'still no fixed positioning of its own');
+});
