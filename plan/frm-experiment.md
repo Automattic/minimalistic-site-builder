@@ -196,6 +196,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 11 | #458 | W7a | Add the image_kind direction token (frm) | merged | gist acd236e9de388471fb4b145b8b8e84c0: cohesion-like5 3d-object (9/9 on 3d-render, kind clause in every request), zova-like6 ui-mockup (14/15 flat-design) | 66ab5b1c |
 | 12 | #459 | W2a | Add the panel-stage hero recipe (frm) | merged | gist 30438002a4531c2b9776be64572e7fed: zova-like8 + cohesion-like7 forced HERO_RECIPE=panel-stage; zova's header auto-resolved to the floating pill; mobile 390 | 8a6ddf4e |
 | 13 | #460 | W4 (PR-4f) | Honor a page ground the brief names explicitly (frm) | merged | gist b42867843e18b7b18f2049ef5979ffa9: zova-like7 dark -> light (#F6F9FD), dreammotion stays dark | a32834c8 |
+| 14 | #461 | W1 (PR-1e) | Float the pill over an image-led opening in a product tradition (frm) | merged | gist 4b90c2392ceb274a8b79c26c2ef26fb2: cohesion-like9 + dreammotion-like9 forced cover hero + pill, overlay mode kept, scrim on the pill | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -214,6 +215,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 13: PR-4f built on branch `frm/brief-ground`. Direction-step reruns: zova-like7 ground_key dark -> light (base #17130F -> #F6F9FD), dreammotion-like8 stays dark. Backlog continues after the definition of done because the loop's stop condition needs both.
 - 2026-09-05 turn 14: PR-4f #460 merged. PR-1e built on branch `frm/pill-overlay`: the pill floats in overlay mode for the pill traditions (rail clear, scrim on the pill, pill-only blur); evidence builds cohesion-like + zova-like running unforced.
 - 2026-09-05 turn 15: PR-1e unforced builds landed on `noir` and `editorial` seeds (no pill tradition), so evidence was forced with HERO_RECIPE=cinematic-safe-zone + HEADER_ARCHETYPE=floating-pill; the first attempt failed the delivery coherence check (overlay pinned to minimal-overlay), fixed in the same PR. Both forced builds: floating-pill in overlay mode, overlay-to-solid, earned clear rest with the scrim kept on the pill. New P0 filed: PR-2e mobile H1 clip.
+- 2026-09-05 turn 16: PR-1e #461 merged. PR-2e built on branch `frm/mobile-headline-fit`: HeroHeadlineFit takes a phone viewport (the step passes 390) and adds a vw term to the pin when the longest word would overflow it at the size the heading reaches there; a first replay still grazed the edge on cohesion's wide grotesk, so the phone bound assumes a wide face (0.82 safety).
 
 ## 10. Parked / rejected
 

@@ -450,6 +450,7 @@ final class HeaderHeroStep implements Step
                 $writes[$heroRel],
                 $theme,
                 is_array($lineTarget) ? array_values($lineTarget) : null,
+                HeroHeadlineFit::PHONE_VIEWPORT_PX,
             );
             $writes[$heroRel] = $fit['markup'];
             foreach ($fit['notes'] as $note) {
