@@ -218,3 +218,13 @@ test('the header fallback row is the pill when the contract floats (frm W1a)', f
     $plain = HeaderFallback::render([], test_above_fold_contract('foreground-split', 'standard-row'), 'bad header')->markup;
     assert_true(!str_contains($plain, 'header-pill'), 'a bar archetype gets no pill class');
 });
+
+test('the header fallback row is the centered bar when the contract commits bar-center-cta (frm W1b)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'bar-center-cta');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--bar-center-cta', $markup);
+    assert_contains('"className":"header-bar-center"', $markup);
+    assert_contains('class="wp-block-group alignwide header-bar-center"', $markup);
+    assert_true(!str_contains($markup, 'header-pill'), 'the bar gets no pill class');
+    assert_eq('bar-center-cta', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+});

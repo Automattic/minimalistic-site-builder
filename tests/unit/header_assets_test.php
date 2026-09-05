@@ -321,3 +321,27 @@ test('header CSS moves the overlay scrim and blur onto the pill in overlay mode 
     assert_contains('backdrop-filter: blur(14px) saturate(115%)', $pill);
     assert_true(substr_count($css, 'position: fixed') === 1, 'still no fixed positioning of its own');
 });
+
+test('header CSS lays the centered bar out as a three-column grid and collapses it under the hamburger (frm W1b)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    $row = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center {');
+    assert_contains('display: grid', $row);
+    assert_contains('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)', $row, 'equal flanks keep the nav on the center line');
+    assert_contains('align-items: center', $row);
+
+    $nav = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {');
+    assert_contains('justify-self: center', $nav);
+    $cta = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-buttons {');
+    assert_contains('justify-self: end', $cta);
+    $link = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-button__link {');
+    assert_contains('border-radius: 999px', $link);
+    assert_true(!preg_match('/\b(?:background|color)\s*:/', $link), 'the CTA fill and text stay with the direction');
+
+    $phone = substr($css, strpos($css, 'grid-template-columns: minmax(0, 1fr) auto auto'));
+    assert_true($phone !== false, 'the phone grid drops the centered column');
+    $start = (int) strpos($css, 'Centered bar (frm W1b)');
+    $end = (int) strpos($css, 'Glass blurs behind the pill', $start);
+    assert_true($start > 0 && $end > $start, 'the centered bar block sits before the pill glass block');
+    assert_true(!str_contains(substr($css, $start, $end - $start), '!important'), 'the centered bar fights nothing');
+});

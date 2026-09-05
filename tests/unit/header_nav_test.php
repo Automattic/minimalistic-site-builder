@@ -1096,3 +1096,57 @@ test('fixHeader marks the floating-pill row after the single-row repair wraps ba
     assert_contains('header-pill', (string) (($document->attrs($row) ?? [])['className'] ?? ''), 'then the pill class landed on the wrapped row');
     assert_contains('header-archetype--floating-pill', $result['markup'], 'the root carries the archetype marker');
 });
+
+test('HeaderNav restores the header-bar-center class on a bar-center-cta row the model left bare (frm W1b)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group alignwide">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Visit</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withBarCenterRow($markup);
+    assert_eq(['bar-center-cta: restored the header-bar-center class on the identity/navigation row'], $result['notes']);
+    assert_eq([], $result['warnings']);
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('header-bar-center', ($document->attrs($row) ?? [])['className'] ?? null);
+    assert_contains('class="wp-block-group header-bar-center alignwide"', $result['markup']);
+    assert_true(!str_contains($result['markup'], 'header-pill'), 'the bar never takes the pill class');
+    assert_eq($result['markup'], HeaderNav::withBarCenterRow($result['markup'])['markup'], 'a marked row is left alone');
+});
+
+test('fixHeader marks the bar-center-cta row after the single-row repair wraps bare root children (frm W1b)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Northlight',
+        ['Home', 'Menu'],
+        false,
+        'bar-center-cta',
+        'contrast',
+        'base',
+        null,
+        [],
+        header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null, 'the row repair ran first');
+    assert_contains('header-bar-center', (string) (($document->attrs($row) ?? [])['className'] ?? ''));
+    assert_contains('header-archetype--bar-center-cta', $result['markup'], 'the root carries the archetype marker');
+});

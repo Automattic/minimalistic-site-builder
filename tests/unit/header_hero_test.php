@@ -2947,3 +2947,12 @@ test('floating-pill asks for persistent chrome regardless of site depth (frm W1a
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $resolved['behavior']);
 });
+
+test('bar-center-cta asks for persistent chrome regardless of site depth (frm W1b)', function () {
+    $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
+    assert_eq(HeaderBehavior::STATIC, HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED));
+    assert_eq(
+        HeaderBehavior::STICKY_SOFT,
+        HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'bar-center-cta'),
+    );
+});

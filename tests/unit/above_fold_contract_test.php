@@ -1297,3 +1297,56 @@ test('the floating pill also floats over an image-led opening in a product tradi
     );
     assert_eq(AboveFoldContract::MODE_STACKED, $framed['header']['mode'], 'a framed canvas never overlays');
 });
+
+test('bar-center-cta is the stacked pool for a full-bleed sober tradition (frm W1b)', function () {
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $projection = HeroComposition::planProjection($blueprint);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'title' => 'Hero',
+            'layout_archetype' => $projection['layout_archetype'],
+            'background' => 'base',
+            'primary_action' => null,
+        ]],
+    ]];
+    $resolve = static fn (string $register, string $canvas): array => AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        $canvas,
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'bar', 'writing_direction' => 'ltr', 'page_count' => 1, 'register' => $register],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+
+    foreach (AboveFoldContract::BAR_CENTER_REGISTERS as $register) {
+        $bar = $resolve($register, 'full-bleed');
+        assert_eq('bar-center-cta', $bar['header']['archetype'], "{$register} on a full-bleed canvas takes the centered bar");
+        assert_eq(AboveFoldContract::MODE_STACKED, $bar['header']['mode']);
+        assert_eq(false, $bar['header']['displays_tagline'], 'the centered bar never carries a tagline');
+        assert_eq(1, $bar['header']['text_rows']);
+    }
+
+    // The pill traditions keep the pill; a framed canvas keeps the bar catalog.
+    assert_eq('floating-pill', $resolve('modernist', 'full-bleed')['header']['archetype']);
+    assert_true($resolve('archival', 'framed')['header']['archetype'] !== 'bar-center-cta', 'framed canvas keeps the bar catalog');
+    foreach (['heritage', 'craft', ''] as $register) {
+        assert_true($resolve($register, 'full-bleed')['header']['archetype'] !== 'bar-center-cta', "'{$register}' is not a centered-bar tradition");
+    }
+
+    // An image-led opening keeps the overlay contract: the centered bar is stacked chrome.
+    $overlay = AboveFoldContract::resolve(
+        above_fold_pages(),
+        HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'bar', 'writing_direction' => 'ltr', 'page_count' => 2, 'register' => 'archival'],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('minimal-overlay', $overlay['header']['archetype']);
+
+    // The operator override picks the centered bar on any stacked-compatible site.
+    $forced = above_fold_resolve(above_fold_pages(), recipe: 'foreground-split', forced: 'bar-center-cta');
+    assert_eq('bar-center-cta', $forced['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_STACKED, $forced['header']['mode']);
+});

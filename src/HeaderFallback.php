@@ -72,6 +72,9 @@ final class HeaderFallback
         if ($archetype === 'floating-pill') {
             $row['className'] = HeaderNav::PILL_ROW_CLASS;
             $rowClasses .= ' ' . HeaderNav::PILL_ROW_CLASS;
+        } elseif ($archetype === 'bar-center-cta') {
+            $row['className'] = HeaderNav::BAR_CENTER_ROW_CLASS;
+            $rowClasses .= ' ' . HeaderNav::BAR_CENTER_ROW_CLASS;
         }
         $markup = '<!-- wp:group ' . self::encode($attrs) . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '">'

@@ -37,10 +37,13 @@ final class HeaderNav
     private const GROUP_CLOSE = '</div><!-- /wp:group -->';
 
     /** Header archetypes whose contract is one identity/navigation row. */
-    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill'];
+    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill', 'bar-center-cta'];
 
     /** The class the trusted header kit styles as the detached pill. */
     public const PILL_ROW_CLASS = 'header-pill';
+
+    /** The kit hook for the centered bar's identity/navigation/CTA row (frm W1b). */
+    public const BAR_CENTER_ROW_CLASS = 'header-bar-center';
 
     /**
      * @param list<array<string,mixed>> $pages
@@ -320,7 +323,26 @@ final class HeaderNav
      */
     public static function withPillRow(string $markup): array
     {
-        if (preg_match('/(?:^|[\s"])' . self::PILL_ROW_CLASS . '(?:$|[\s"])/', $markup) === 1) {
+        return self::withRowClass($markup, self::PILL_ROW_CLASS, 'floating-pill', 'pill');
+    }
+
+    /**
+     * The centered bar's counterpart (frm W1b): the kit turns the marked row
+     * into a three-column grid (identity, navigation, CTA).
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withBarCenterRow(string $markup): array
+    {
+        return self::withRowClass($markup, self::BAR_CENTER_ROW_CLASS, 'bar-center-cta', 'centered bar');
+    }
+
+    /**
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    private static function withRowClass(string $markup, string $class, string $archetype, string $noun): array
+    {
+        if (preg_match('/(?:^|[\s"])' . $class . '(?:$|[\s"])/', $markup) === 1) {
             return ['markup' => $markup, 'notes' => [], 'warnings' => []];
         }
         $document = BlockMarkup::parse($markup);
@@ -334,8 +356,8 @@ final class HeaderNav
             return [
                 'markup' => $markup,
                 'notes' => [],
-                'warnings' => ["file='theme/parts/header.html'; block='floating-pill row'; authored=no provable"
-                    . ' identity/navigation row; delivered=unchanged; disposition=the pill class was not restored'
+                'warnings' => ["file='theme/parts/header.html'; block='{$archetype} row'; authored=no provable"
+                    . " identity/navigation row; delivered=unchanged; disposition=the {$noun} class was not restored"
                     . ' because the row could not be proven, so the header renders as a plain bar'],
             ];
         }
@@ -348,22 +370,22 @@ final class HeaderNav
             return [
                 'markup' => $markup,
                 'notes' => [],
-                'warnings' => ["file='theme/parts/header.html'; block='floating-pill row'; authored=identity"
-                    . ' and navigation share only the root group; delivered=unchanged; disposition=the pill'
-                    . ' class was not restored because the root cannot be the pill'],
+                'warnings' => ["file='theme/parts/header.html'; block='{$archetype} row'; authored=identity"
+                    . " and navigation share only the root group; delivered=unchanged; disposition=the {$noun}"
+                    . " class was not restored because the root cannot be the {$noun}"],
             ];
         }
         $attrs = $document->attrs($row) ?? [];
         $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $tokens[] = self::PILL_ROW_CLASS;
+        $tokens[] = $class;
         $attrs['className'] = implode(' ', array_values(array_unique($tokens)));
         $document->setAttrs($row, $attrs);
         if (preg_match('/^\s*<div class="wp-block-group(?=[" ])/', $document->ownHtml($row)) === 1) {
-            $document->replaceInOwnHtml($row, 'class="wp-block-group', 'class="wp-block-group ' . self::PILL_ROW_CLASS);
+            $document->replaceInOwnHtml($row, 'class="wp-block-group', 'class="wp-block-group ' . $class);
         }
         return [
             'markup' => $document->render(),
-            'notes' => ['floating-pill: restored the ' . self::PILL_ROW_CLASS . ' class on the identity/navigation row'],
+            'notes' => [$archetype . ': restored the ' . $class . ' class on the identity/navigation row'],
             'warnings' => [],
         ];
     }
