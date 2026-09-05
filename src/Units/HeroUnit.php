@@ -122,6 +122,8 @@ final class HeroUnit extends AbstractPageSectionUnit
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
+            // The picture stays visible behind the headline (frm PR-2l).
+            $markup = GeneratedMarkup::capHeroCoverDim($markup, $key, $repairs, $warnings);
         }
         $markup = GeneratedMarkup::centerHeroCopy(
             $markup,
