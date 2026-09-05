@@ -193,6 +193,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 10 | #457 | W8a | Add the word-reveal hero headline entrance to the motion kit (frm) | merged | gist d8886fe5a5d2f02191de839914de0801: in-page opacity samples + frames on dreammotion-like7; reduced motion whole | 47fa5b8a |
 | 11 | #458 | W7a | Add the image_kind direction token (frm) | merged | gist acd236e9de388471fb4b145b8b8e84c0: cohesion-like5 3d-object (9/9 on 3d-render, kind clause in every request), zova-like6 ui-mockup (14/15 flat-design) | 66ab5b1c |
 | 12 | #459 | W2a | Add the panel-stage hero recipe (frm) | merged | gist 30438002a4531c2b9776be64572e7fed: zova-like8 + cohesion-like7 forced HERO_RECIPE=panel-stage; zova's header auto-resolved to the floating pill; mobile 390 | 8a6ddf4e |
+| 13 | #461 | W1 (PR-1e) | Float the pill over an image-led opening in a product tradition (frm) | merged | gist 4b90c2392ceb274a8b79c26c2ef26fb2: cohesion-like9 + dreammotion-like9 forced cover hero + pill, overlay mode kept, scrim on the pill | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -209,6 +210,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 11: PR-7a #458 merged. Final 5-site cohort built on 66ab5b1c (all merged work except W2a) and scored in section 7. W2a `panel-stage` built afterwards on branch `frm/panel-stage` with its own forced evidence builds (HERO_RECIPE=panel-stage), because the ranked interleave never reached W2 before the final cohort.
 - 2026-09-05 turn 12: PR-2a #459 merged. Definition of done: every listed workstream (W0, W1a, W2a, W3a, W3b, W3d, W4a, W5a, W6a, W7a, W8a) is merged on `frm_experiment` at 8a6ddf4e with evidence; section 7 holds baseline and final scores (fidelity up on 4 of 5, zova explained with PR-4f); `git merge origin/trunk` on a throwaway worktree is clean. Not done tonight: images (proxy down all night), PR-4f, PR-1e, PR-5d, PR-5e, W1b-d, W2b-d, W3c/e-i, W4b-d, W5b-c, W6b-c, W7b-c, W8b-e. Next PR: PR-4f (honor an explicit ground), then PR-1e.
 - 2026-09-05 turn 13: PR-4f built on branch `frm/brief-ground`. Direction-step reruns: zova-like7 ground_key dark -> light (base #17130F -> #F6F9FD), dreammotion-like8 stays dark. Backlog continues after the definition of done because the loop's stop condition needs both.
+- 2026-09-05 turn 16: PR-1e #461 merged. PR-2e built on branch `frm/mobile-headline-fit`: HeroHeadlineFit takes a phone viewport (the step passes 390) and adds a vw term to the pin when the longest word would overflow it at the size the heading reaches there; a first replay still grazed the edge on cohesion's wide grotesk, so the phone bound assumes a wide face (0.82 safety).
 
 ## 10. Parked / rejected
 
