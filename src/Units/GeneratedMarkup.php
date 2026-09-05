@@ -2554,6 +2554,59 @@ final class GeneratedMarkup
     }
 
     /**
+     * Remove every authored image and gallery block from a section whose
+     * archetype plans no media (frm PR-3u). The statement-lines, hairline
+     * row, stat ledger, pricing and logo strip fragments all say "no
+     * images", and cohesion-like16 still shipped two card-media objects
+     * inside its statement-lines services row and two more inside its plans.
+     * The media count warning only named the mismatch; the picture is now
+     * removed at its complete block boundary before the card and band
+     * contracts run, so no asset is generated for a slot the recipe never
+     * draws. Advisory archetypes with a media budget are untouched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripMediaOffNoImageArchetype(
+        string $markup,
+        string $part,
+        ?string $archetype,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        if ($archetype === null
+            || !SectionComposition::isKnown($archetype)
+            || (int) SectionComposition::metadata($archetype)['max_images'] !== 0
+        ) {
+            return $markup;
+        }
+        $before = $markup;
+        $markup = self::stripBlocksNamed(
+            $markup,
+            $part,
+            ['image', 'gallery'],
+            'image',
+            "the {$archetype} archetype plans no media, so the authored picture was removed at its complete "
+                . 'block boundary and no asset is generated for it',
+            $warnings,
+        );
+        if ($markup === $before) {
+            return $markup;
+        }
+        $authored = preg_match_all('~<img\b~i', $before);
+        $delivered = preg_match_all('~<img\b~i', $markup);
+        $repairs[] = [
+            'code' => 'no-image-archetype-media-removed',
+            'part' => $part,
+            'block' => 'image',
+            'authored' => ((int) $authored) . ' authored image(s) on ' . $archetype,
+            'delivered' => ((int) $delivered) === 0 ? 'removed' : ((int) $delivered) . ' retained for later repair',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /**
      * Shared removal transaction for `wp:separator` blocks.
      *
      * @param list<string> $warnings
@@ -2564,10 +2617,29 @@ final class GeneratedMarkup
         string $safeDisposition,
         array &$warnings,
     ): string {
+        return self::stripBlocksNamed($markup, $part, ['separator'], 'separator', $safeDisposition, $warnings);
+    }
+
+    /**
+     * Shared removal transaction for whole blocks of the named kinds, at
+     * their complete block boundaries, with the nested-safety rules of the
+     * separator removal.
+     *
+     * @param list<string> $names block names to remove
+     * @param list<string> $warnings
+     */
+    private static function stripBlocksNamed(
+        string $markup,
+        string $part,
+        array $names,
+        string $label,
+        string $safeDisposition,
+        array &$warnings,
+    ): string {
         $document = BlockMarkup::parse($markup);
         $candidates = [];
         foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'separator') {
+            if (!in_array($document->name($index), $names, true)) {
                 continue;
             }
             $end = $document->endOffset($index);
@@ -2624,9 +2696,9 @@ final class GeneratedMarkup
                 'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
                     . self::heroRemovalWarningValue($authored)
                     . '; delivered=' . self::heroRemovalWarningValue($authored)
-                    . '; disposition=the generated separator boundary owns raw/non-block payload or a non-target '
+                    . "; disposition=the generated {$label} boundary owns raw/non-block payload or a non-target "
                     . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
-                    . 'and the residual separator was queued for later repair',
+                    . "and the residual {$label} was queued for later repair",
             ];
         }
         usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
@@ -3417,8 +3489,16 @@ final class GeneratedMarkup
         if (!preg_match_all('/<\s*\/?\s*([a-z][a-z0-9-]*)\b[^>]*>/i', $shell, $tags)) {
             return false;
         }
+        $allowed = self::HERO_REMOVAL_INLINE_TAGS;
+        if (in_array($document->name($index), ['image', 'gallery'], true)) {
+            // A picture block's own payload is its figure (frm PR-3u): the
+            // img, a caption or a link around it, and for a gallery the
+            // figure shell around its nested image blocks. That payload is
+            // the removal itself, never a survivor.
+            $allowed = [...$allowed, 'figure', 'figcaption', 'img', 'picture', 'source', 'a'];
+        }
         foreach ($tags[1] as $tag) {
-            if (!in_array(strtolower($tag), self::HERO_REMOVAL_INLINE_TAGS, true)) {
+            if (!in_array(strtolower($tag), $allowed, true)) {
                 return true;
             }
         }

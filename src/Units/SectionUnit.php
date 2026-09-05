@@ -186,6 +186,8 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
+        // An archetype that plans no media never ships an authored picture (frm PR-3u).
+        $markup = GeneratedMarkup::stripMediaOffNoImageArchetype($markup, $this->key($input), $archetype, $repairs, $warnings);
         $label = SectionLabel::normalize(
             $markup,
             is_string($input['section_label'] ?? null) ? $input['section_label'] : null,
