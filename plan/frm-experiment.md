@@ -127,6 +127,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-4i (P0 craft, luzia-like6): `GroundKey::statedInBrief` runs on `meta.prompt`, the refine-prompt rewrite, which dropped "Light page"; the direction went dark. Read `meta.original_prompt` (the user's words) first and the refined prompt second, and make the refine prompt keep a stated ground verbatim.
 - PR-4j (P0 craft, found while building W4d): every physical `surface` sheet (paper, concrete, film, fabric) has been invisible since it shipped: `mix-blend-mode: soft-light` at the kit's alphas changes no pixel on a light or a dark page. Fix: multiply on light pages, screen on dark ones, same alphas. Note for evidence: a fixed `body::before` sheet does not appear beyond the first viewport in bin/screenshot.php full-page captures; measure with a viewport shot.
 - PR-3j: when `side-label` is committed, the ledger (and any single-row archetype) sits inside the split's trailing column, so row-count checks see the label row too (spector-like6 `[2,4]`). Teach the row checks to look inside the trailing column of a proven side-label split.
+- PR-3k: a zigzag-steps row whose image was dropped (failed asset) leaves its media column empty; the boundary or the image collector should leave the `step-plate` group in its place so the ladder keeps its rhythm.
 
 - PR-4g: the stated-ground rule (PR-4f) is prompt-only and held on 1 of 2 zova reruns (light on the PR-4f rerun, dark again on the PR-5d rerun). Follow-up: a deterministic ration in `DesignDirectionStep::normalize` when the brief itself names a ground (a bounded phrase list: "white page", "light page", "dark ground", "black ground", "near-black"), applied to `ground_key` and `palette.base` the way the seed ground is applied today. This is a client instruction, not a category matcher.
 
@@ -236,6 +237,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 40 | #487 | W2 (PR-2f) | Bind the marquee-name paragraph to the site name (frm) | merged | pure replay on cohesion-like10's hero: the exact name untouched, a paraphrase bound to "Alexia Studio" with one repair; no build | (see git) |
 | 41 | #488 | W3 (PR-3j) | Let row checks look past a committed side-label split (frm) | merged | pure replay on spector-like6's stats pattern: the [2,4] row warning is gone, only the unit-word figure remains; no build | (see git) |
 | 42 | #489 | W8 (PR-8g) | Let the motion kit own the marquee scale (frm) | merged | gist 42984751fc3afa61d952304667da1afd: spector-like4-8g replay, caption -> display scale, loop probe built and moving, static clipped under reduce; 390 | (see git) |
+| 43 | #490 | W3g | Add the zigzag-steps section archetype (frm) | merged | gist 56e763a8a0b8843019b0dc816dd2838b: luzia-like8 planned zigzag-steps unforced, five numbered steps alternating in the rounded band, media empty (proxy); mobile 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -282,6 +284,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 41: PR-1f #486 merged (audit of #462-#486 commit lists: only #465 had lost a commit). PR-2f on `frm/marquee-name-bind`: `HeroComposition::bindMarqueeName` replaces the marquee paragraph's text with the spec's site name at the hero boundary and records the repair. Merged as #487.
 - 2026-09-05 turn 42: PR-2f #487 merged. PR-3j on `frm/side-label-rows`: `isSideLabelSplit` lets the bento, pricing, ledger and feature-row row counts skip the split whose first column holds only the side label. Merged as #488.
 - 2026-09-05 turn 43: PR-3j #488 merged. PR-8g on `frm/marquee-scale`: a base `.marquee` rule (heading face, display size, clipped) outside the reduced-motion guard, and `GeneratedMarkup::ownMarqueeScale` drops an authored size, face or typography style at the boundary. Merged as #489.
+- 2026-09-05 turn 44: PR-8g #489 merged. W3g built on `frm/zigzag-steps`: archetype (3-5 two-column rows, alternating copy side, step-plate fallback), checks, CSS (centered rows, plate, copy-first on phones), page-plan text. luzia-like8 planned it unforced with chips; the alternation check first missed headings wrapped in card groups (fixed: heading at any depth). Follow-up: insert an empty step-plate when the media image is dropped. Merged as #490.
 
 ## 10. Parked / rejected
 
