@@ -295,6 +295,29 @@ final class MotionSanityStep implements Step
             $customTarget = in_array(CustomMotionStep::CLASS_NAME, $jsonTokens, true)
                 || in_array(CustomMotionStep::CLASS_NAME, $htmlTokens, true);
 
+            // A kit device on that block IS the explicit request (frm PR-8j):
+            // spector-like14 tagged its "MORE PROJECTS" marquee paragraph and
+            // its stat figures `custom-motion`, the eviction below dropped the
+            // kit `marquee` and `count-up`, and the custom step then wrote
+            // one keyframe for all three blocks. The reviewed kit device
+            // stays and the custom tag leaves the block instead.
+            if ($customTarget) {
+                $device = self::kitDeviceOnBlock($jsonTokens, $htmlTokens, $allowed);
+                if ($device !== null) {
+                    $customTarget = false;
+                    $jsonTokens = array_values(array_diff($jsonTokens, [CustomMotionStep::CLASS_NAME]));
+                    if ($jsonTokens === []) {
+                        unset($attrs['className']);
+                    } else {
+                        $attrs['className'] = implode(' ', $jsonTokens);
+                    }
+                    $doc->setAttrs($i, $attrs);
+                    $doc->removeClassTokenInOwnHtml($i, CustomMotionStep::CLASS_NAME);
+                    $notes[] = "{$doc->name($i)}: dropped '" . CustomMotionStep::CLASS_NAME
+                        . "' (the kit device '{$device}' on the block already implements the request)";
+                }
+            }
+
             $droppedJson = [];
             $droppedHtml = [];
             $kitOnBlock = 0;
@@ -465,6 +488,35 @@ final class MotionSanityStep implements Step
             }
         }
         return $tokens;
+    }
+
+    /**
+     * The kit classes that are devices in their own right, not entrance
+     * presets (frm PR-8j): a marquee and a counting figure. A custom-motion
+     * tag beside one of them asks for what the kit already ships.
+     *
+     * @var list<string>
+     */
+    private const KIT_DEVICE_CLASSES = ['marquee', 'count-up'];
+
+    /**
+     * The first kit device the profile allows on a block, or null.
+     *
+     * @param string[] $jsonTokens
+     * @param string[] $htmlTokens
+     * @param string[] $allowed
+     */
+    private static function kitDeviceOnBlock(array $jsonTokens, array $htmlTokens, array $allowed): ?string
+    {
+        foreach (self::KIT_DEVICE_CLASSES as $device) {
+            if (!in_array($device, $allowed, true)) {
+                continue;
+            }
+            if (in_array($device, $jsonTokens, true) || in_array($device, $htmlTokens, true)) {
+                return $device;
+            }
+        }
+        return null;
     }
 
     /**
