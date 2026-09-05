@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\SectionLabel;
@@ -453,6 +454,7 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'heading_emphasis' => HeadingEmphasis::DEFAULT,
+            'band_geometry'    => BandGeometry::DEFAULT,
             'section_label'    => SectionLabel::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
@@ -927,6 +929,7 @@ final class DesignDirectionStep implements Step
             $warnings,
         );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
+        $bandGeometry = self::normalizeBandGeometry($raw['band_geometry'] ?? null, $warnings);
         $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
         $imageKind = BoundedChoice::normalize(
             $raw['image_kind'] ?? null,
@@ -1040,6 +1043,7 @@ final class DesignDirectionStep implements Step
             // One clause per heading set apart by tone, face or highlighter;
             // the model marks it with the `emph` hook and a kit paints it.
             'heading_emphasis' => $headingEmphasis,
+            'band_geometry'    => $bandGeometry,
             // The one committed form in which a small label above a section
             // heading may return; eyebrows stay banned otherwise.
             'section_label'    => $sectionLabel,
@@ -1244,6 +1248,18 @@ final class DesignDirectionStep implements Step
             'section_label',
             $warnings,
             'unsupported section label replaced by none',
+        );
+    }
+
+    public static function normalizeBandGeometry(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            BandGeometry::ALL,
+            BandGeometry::DEFAULT,
+            'band_geometry',
+            $warnings,
+            'unsupported band geometry replaced by square',
         );
     }
 
@@ -1746,6 +1762,11 @@ final class DesignDirectionStep implements Step
                 . ' ("Use cases", "Pricing"), never repeats the heading.';
         }
 
+        $bandGeometry = BandGeometry::explicit($direction['band_geometry'] ?? null);
+        if ($bandGeometry !== null && $bandGeometry !== BandGeometry::DEFAULT) {
+            $facts[] = "- **Band geometry**: {$bandGeometry} — " . BandGeometry::meaning($bandGeometry) . '.';
+        }
+
         $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
         if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
             $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
@@ -2161,6 +2182,15 @@ final class DesignDirectionStep implements Step
             return SectionLabel::DEFAULT;
         }
         return self::normalizeSectionLabel($project->readJson(self::FILE)['section_label'] ?? null);
+    }
+
+    /** The committed band geometry, or `square`. */
+    public static function bandGeometryFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return BandGeometry::DEFAULT;
+        }
+        return self::normalizeBandGeometry($project->readJson(self::FILE)['band_geometry'] ?? null);
     }
 
     /** The committed heading emphasis, or `none`. */

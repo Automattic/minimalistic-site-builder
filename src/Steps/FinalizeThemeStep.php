@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Device;
@@ -175,6 +176,13 @@ final class FinalizeThemeStep implements Step
             HeadingEmphasis::kitCss($headingEmphasis),
             $headerWarnings,
         );
+        $bandGeometry = DesignDirectionStep::bandGeometryFor($project);
+        $bandShipped = self::writeOverlayKit(
+            $project,
+            self::bandKit(),
+            BandGeometry::kitCss($bandGeometry),
+            $headerWarnings,
+        );
         $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
         $labelShipped = self::writeOverlayKit(
             $project,
@@ -204,6 +212,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($emphasisShipped) {
             $overlays[] = self::emphasisKit();
+        }
+        if ($bandShipped) {
+            $overlays[] = self::bandKit();
         }
         if ($labelShipped) {
             $overlays[] = self::labelKit();
@@ -326,6 +337,15 @@ final class FinalizeThemeStep implements Step
     }
 
     /** The committed heading-emphasis kit: paints the `emph` clause inside headings. */
+    public static function bandKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'band',
+            "// Committed band geometry (rounded): contrast and band-coloured section\n"
+                . '// bands sit inset with the panel radius. Loads after generated style.css.',
+        );
+    }
+
     public static function emphasisKit(): OverlayKit
     {
         return new OverlayKit(
