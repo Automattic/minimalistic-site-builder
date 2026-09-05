@@ -373,3 +373,19 @@ test('header CSS spreads the navigation across the spread bar and the driver mar
     assert_contains('.header-archetype--spread-nav', (string) file_get_contents(repo_path('assets/header/header.js')));
     assert_eq(\Automattic\SiteBuild\HeaderBehavior::STICKY_SOFT, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
 });
+
+
+test('header CSS keeps the phone pill on one row: nowrap caption CTA, shrinking title, tight gap (frm PR-1x)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $at = (int) strpos($css, '@media (max-width: 600px) {' . "\n" . '    .site-header-shell .header-archetype--floating-pill .header-pill {');
+    assert_true($at > 0, 'the phone pill block exists');
+    $block = substr($css, $at, 1400);
+    assert_contains('gap: var(--wp--preset--spacing--sm, 0.75rem);', $block);
+    assert_contains('.header-pill > .wp-block-site-title {', $block);
+    assert_contains('flex: 1 1 auto;', $block, 'the title shrinks first');
+    assert_contains('.header-pill > .wp-block-buttons {', $block);
+    assert_contains('flex: 0 0 auto;', $block);
+    assert_contains('.header-pill .wp-block-button__link {', $block);
+    assert_contains('white-space: nowrap;', $block, 'the CTA never wraps');
+    assert_contains('font-size: var(--wp--preset--font-size--caption, 0.875rem);', $block);
+});
