@@ -126,3 +126,36 @@ test('finalize-theme ships the screen kit for ui-mockup and prunes it for photo 
     assert_true(!str_contains($project->readText('theme/functions.php'), 'zova-screen'), 'stale screen enqueue pruned');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the screen frame skips portraits and transparent assets, and only the first tilt per page stands (frm W7b)', function () {
+    $screen = ['filename' => 'clarity-dashboard.jpg', 'subject' => 'An abstract financial dashboard seen straight on', 'pageContext' => 'foreground product screen'];
+    $portrait = ['filename' => 'customer-priya-portrait.jpg', 'subject' => 'A calm head-and-shoulders portrait of a woman seated at a desk', 'pageContext' => 'single customer portrait card beside a testimonial quote'];
+    $logo = ['filename' => 'site-logo.png', 'subject' => 'simple geometric brand mark', 'pageContext' => 'site logo'];
+    assert_true(ImageKind::isScreen($screen));
+    assert_true(!ImageKind::isScreen($portrait), 'a person is never a screen');
+    assert_true(!ImageKind::isScreen($logo), 'a transparent asset is never a screen');
+    assert_true(!ImageKind::isScreen(['filename' => 'team.jpg', 'subject' => 'x', 'pageContext' => 'the founders at a table']), 'the slot text counts too');
+    assert_eq(['customer-priya-portrait.jpg'], ImageKind::offKindFiles([$screen, $portrait, $logo, 'junk']), 'only jpg portraits are listed');
+
+    $css = (string) ImageKind::kitCss('ui-mockup', ['customer-priya-portrait.jpg']);
+    assert_eq(3, substr_count($css, ':not(:has(> img[src$="/customer-priya-portrait.jpg"]))'), 'frame, bar and image rule all skip the portrait');
+    assert_true(!str_contains((string) ImageKind::kitCss('ui-mockup'), 'priya'));
+    assert_contains(':is(:has(.screen-frame--tilt), .screen-frame--tilt) ~ * .screen-frame--tilt', $css, 'a later tilt lies flat');
+    assert_contains('a"b', str_replace('\\"', '"', ImageKind::kitCss('ui-mockup', ['a"b.jpg']) ?? ''), 'a quote in a filename is escaped');
+});
+
+test('finalize-theme reads images.json to exempt portraits from the screen frame (frm W7b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_screen2_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'ui-mockup']);
+    $project->writeJson('images.json', [
+        ['filename' => 'dash.jpg', 'subject' => 'an abstract dashboard', 'pageContext' => 'product screen'],
+        ['filename' => 'priya.jpg', 'subject' => 'portrait of a woman', 'pageContext' => 'testimonial card'],
+    ]);
+    finalize_static_header($project);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    $css = $project->readText('theme/assets/screen/screen.css');
+    assert_contains('img[src$="/priya.jpg"]', $css);
+    assert_true(!str_contains($css, 'dash.jpg'), 'a screen is framed');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

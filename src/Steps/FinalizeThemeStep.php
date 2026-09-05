@@ -94,6 +94,8 @@ final class FinalizeThemeStep implements Step
             label: $this->label(),
             reads: [
                 'designDirection.json',
+                // Only when it exists: which delivered pictures are not screens.
+                'images.json',
                 'headerBehavior.json',
                 'theme/theme.json',
                 'theme/style.css',
@@ -172,7 +174,7 @@ final class FinalizeThemeStep implements Step
         $screenShipped = self::writeOverlayKit(
             $project,
             self::screenKit(),
-            ImageKind::kitCss(DesignDirectionStep::imageKindFor($project)),
+            ImageKind::kitCss(DesignDirectionStep::imageKindFor($project), self::offKindImageFiles($project)),
             $headerWarnings,
         );
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
@@ -447,6 +449,22 @@ final class FinalizeThemeStep implements Step
     }
 
     /** Site-wide card, thumbnail, and feature-media proportion system. */
+    /**
+     * Delivered pictures the screen frame must skip (frm W7b): portraits and
+     * other off-kind rows of images.json. No images.json, nothing to skip.
+     *
+     * @return list<string>
+     */
+    private static function offKindImageFiles(Project $project): array
+    {
+        if (!$project->exists('images.json')) {
+            return [];
+        }
+        $data = $project->readJson('images.json');
+        $rows = is_array($data['images'] ?? null) ? $data['images'] : $data;
+        return ImageKind::offKindFiles(is_array($rows) ? array_values($rows) : []);
+    }
+
     /** The framed-screen kit for a committed `ui-mockup` imagery kind (frm W7b). */
     public static function screenKit(): OverlayKit
     {
