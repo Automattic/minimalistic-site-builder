@@ -329,6 +329,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 76 | #524 | W2 (PR-2l) | Cap the hero cover dim so the stated picture stays visible (frm) | merged | gist 760a23628c5c5d6bdd8f99148458b7d2: spector-like14 hero before (dim 80, near-solid slab) / after mirror (dim 60) on desktop and at 390; residual: the generated studio picture itself keeps its figure tiny at the far right (PR-7h) | ea1b8deb |
 | 77 | #525 | W8 (PR-8j) | Keep a kit device on a custom-motion target (frm) | merged | gist dd7062ff479ed682edd1d8bc7499e6f6: the recorded spector-like14 marquee-loop response replayed through the sanity pass (marquee stays, custom-motion leaves the block, one note); the metrics figures get count-up from the figure marker later, so the raw replay shows the marquee case only; no build | c6111bb0 |
 | 78 | #526 | W3 (PR-3w) | Let a stated numbered stack carry the committed numeral (frm) | merged | gist ec5d05670c35643bd169f980b95891c4: cohesion-like17 services before crop (no numbers) + reader replay on the five cohort-6 plans (only the cohesion services row is a stated row; purpose prose excluded after the first replay matched pricing and a CTA); no build | b2367585 |
+| 79 | #527 | W5 (PR-5h) | Teach the headline fit the wide display faces (frm) | merged | gist f9ae0ba97dfcc597c38c69fc8b7a1beb: spector-like14 at 390 before (16.3vw, ENOUGH past the edge) / after (fit re-derived with the Unbounded factor: 12.4vw, mirrored, headline inside the viewport) + fit replay | 3b85b57d |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -417,6 +418,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 83: PR-2l #524 merged (hero cover dim ceiling 60). Phone shots of cohort-6 reviewed: new rows PR-5h (metadata-corners H1 word overflows at 390) and PR-7h (portrait subject keeps the figure tiny). Next: PR-8j on branch frm/kit-device-custom-target: a kit device (marquee, count-up) on a custom-motion target stays and the custom tag leaves the block.
 - 2026-09-05 turn 84: PR-8j #525 merged (a kit device on a custom-motion target stays; the custom tag leaves the block). Next: PR-3w on branch frm/stated-numbered-stack: a stated numbered stack counts as a process section for the numeral rule on its own row (StepNumeral::statedNumbered + numberedDirective, SectionComposition::clauseAppliesTo shared with PR-3s).
 - 2026-09-05 turn 85: PR-3w #526 merged (a stated numbered stack counts as a process section for the numeral rule on its own row). Next: PR-5h on branch frm/wide-face-headline-fit: the headline fit reads the theme's heading family and uses a wider per-character em for the wide display faces (Unbounded and kin), so the phone bound bites before the word overflows.
+- 2026-09-05 turn 86: PR-5h #527 merged (the headline fit reads the heading family; wide display faces get a wider per-character em). Next: PR-1x on branch frm/phone-pill-row: the phone pill keeps one row (tight gap, nowrap caption CTA, shrinking title); probe on cohesion-like17 already made.
 
 ## 10. Parked / rejected
 

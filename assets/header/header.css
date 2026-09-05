@@ -417,6 +417,27 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     .site-header-shell .header-archetype--floating-pill .header-pill {
         inline-size: 100%;
         padding-inline: 1rem 0.5rem;
+        /* frm PR-1x: at 390px the authored md gap plus a body-size CTA left
+         * cohesion-like17 with "Alexia Stu..." and a two-line button. The
+         * row keeps its three controls on one line: a tight gap, a CTA that
+         * never wraps and drops to the caption size, and a title that
+         * shrinks first (the ellipsis rule above already owns its overflow). */
+        gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-site-title {
+        flex: 1 1 auto;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-navigation,
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-buttons {
+        flex: 0 0 auto;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill .wp-block-button__link {
+        white-space: nowrap;
+        font-size: var(--wp--preset--font-size--caption, 0.875rem);
+        padding: 0.6em 1em;
     }
 }
 
