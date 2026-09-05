@@ -30,6 +30,7 @@ final class AboveFoldContract
         'split-nav',
         'floating-pill',
         'bar-center-cta',
+        'spread-nav',
     ];
 
     /**
@@ -48,7 +49,15 @@ final class AboveFoldContract
      * sticky. Dreammotion and Luzia read this way; the cohort briefs for
      * both resolve `archival`, Spector's resolves `noir`.
      */
-    public const BAR_CENTER_REGISTERS = ['archival', 'noir', 'editorial'];
+    public const BAR_CENTER_REGISTERS = ['archival', 'editorial'];
+
+    /**
+     * Traditions whose stacked header on a full-bleed canvas is the spread
+     * bar (frm W1d): wordmark at the start, the navigation items spread
+     * across the rest of the width with space between, no CTA. Spector's
+     * header; its cohort brief resolves `noir`.
+     */
+    public const SPREAD_NAV_REGISTERS = ['noir', 'brutalist', 'poster'];
 
     /**
      * Reject an operator override only when caller-owned facts already prove
@@ -672,6 +681,9 @@ final class AboveFoldContract
         if ($canvas === 'full-bleed' && in_array($register, self::BAR_CENTER_REGISTERS, true)) {
             return ['bar-center-cta'];
         }
+        if ($canvas === 'full-bleed' && in_array($register, self::SPREAD_NAV_REGISTERS, true)) {
+            return ['spread-nav'];
+        }
         // centered-masthead and split-nav are retired from auto-assignment
         // (BIGR-872). Forced HEADER_ARCHETYPE can still pick them through
         // forcedHeaderCompatible().
@@ -682,6 +694,7 @@ final class AboveFoldContract
             'split-nav',
             'floating-pill',
             'bar-center-cta',
+            'spread-nav',
         ];
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }

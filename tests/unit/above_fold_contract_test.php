@@ -1350,3 +1350,36 @@ test('bar-center-cta is the stacked pool for a full-bleed sober tradition (frm W
     assert_eq('bar-center-cta', $forced['header']['archetype']);
     assert_eq(AboveFoldContract::MODE_STACKED, $forced['header']['mode']);
 });
+
+test('spread-nav is the stacked pool for a full-bleed noir, brutalist or poster tradition (frm W1d)', function () {
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $projection = HeroComposition::planProjection($blueprint);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'title' => 'Hero',
+            'layout_archetype' => $projection['layout_archetype'],
+            'background' => 'base',
+            'primary_action' => null,
+        ]],
+    ]];
+    $resolve = static fn (string $register, string $canvas): array => AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        $canvas,
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'spread', 'writing_direction' => 'ltr', 'page_count' => 1, 'register' => $register],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    foreach (AboveFoldContract::SPREAD_NAV_REGISTERS as $register) {
+        $bar = $resolve($register, 'full-bleed');
+        assert_eq('spread-nav', $bar['header']['archetype'], "{$register} on a full-bleed canvas spreads");
+        assert_eq(AboveFoldContract::MODE_STACKED, $bar['header']['mode']);
+        assert_eq(false, $bar['header']['displays_tagline']);
+    }
+    assert_eq('bar-center-cta', $resolve('archival', 'full-bleed')['header']['archetype'], 'archival keeps the centered bar');
+    assert_true(!in_array('noir', AboveFoldContract::BAR_CENTER_REGISTERS, true), 'noir moved to the spread bar');
+    assert_true($resolve('noir', 'framed')['header']['archetype'] !== 'spread-nav', 'framed canvas keeps the bar catalog');
+    $forced = above_fold_resolve(above_fold_pages(), recipe: 'foreground-split', forced: 'spread-nav');
+    assert_eq('spread-nav', $forced['header']['archetype']);
+});

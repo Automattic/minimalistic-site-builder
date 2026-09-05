@@ -1189,3 +1189,23 @@ test('fixHeader applies the proven ink on the pill and the centered bar only (fr
         assert_eq($keeps, str_contains($result['markup'], '"textColor":"secondary"'), $archetype);
     }
 });
+
+test('HeaderNav restores the header-spread class and fixHeader applies the proven ink on the spread bar (frm W1d)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"full","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group alignfull">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation {"textColor":"secondary"} -->'
+        . '<!-- wp:navigation-link {"label":"Work","url":"#work","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderNav::withSpreadRow($markup);
+    assert_eq(['spread-nav: restored the header-spread class on the identity/navigation row'], $result['notes']);
+    assert_contains('class="wp-block-group header-spread alignfull"', $result['markup']);
+    $fixed = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Northlight', ['Home', 'Work'], false, 'spread-nav', 'contrast', 'base', null, [], header_nav_pages());
+    assert_contains('header-archetype--spread-nav', $fixed['markup']);
+    assert_contains('header-spread', $fixed['markup']);
+    assert_true(!str_contains($fixed['markup'], '"textColor":"secondary"'), 'the spread bar inherits the proven ink');
+});

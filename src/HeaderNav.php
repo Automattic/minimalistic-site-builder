@@ -37,13 +37,16 @@ final class HeaderNav
     private const GROUP_CLOSE = '</div><!-- /wp:group -->';
 
     /** Header archetypes whose contract is one identity/navigation row. */
-    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill', 'bar-center-cta'];
+    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill', 'bar-center-cta', 'spread-nav'];
 
     /** The class the trusted header kit styles as the detached pill. */
     public const PILL_ROW_CLASS = 'header-pill';
 
     /** The kit hook for the centered bar's identity/navigation/CTA row (frm W1b). */
     public const BAR_CENTER_ROW_CLASS = 'header-bar-center';
+
+    /** The kit hook for the spread bar's identity/navigation row (frm W1d). */
+    public const SPREAD_ROW_CLASS = 'header-spread';
 
     /**
      * @param list<array<string,mixed>> $pages
@@ -335,6 +338,17 @@ final class HeaderNav
     public static function withBarCenterRow(string $markup): array
     {
         return self::withRowClass($markup, self::BAR_CENTER_ROW_CLASS, 'bar-center-cta', 'centered bar');
+    }
+
+    /**
+     * The spread bar's counterpart (frm W1d): the kit stretches the marked
+     * row so the navigation items spread across the width after the wordmark.
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withSpreadRow(string $markup): array
+    {
+        return self::withRowClass($markup, self::SPREAD_ROW_CLASS, 'spread-nav', 'spread bar');
     }
 
     /**

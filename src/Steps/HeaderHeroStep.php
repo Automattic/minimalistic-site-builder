@@ -743,10 +743,12 @@ final class HeaderHeroStep implements Step
 
         // The pill class is the only hook the trusted kit styles; a row the
         // model forgot to mark would ship as a plain bar (rung 1: fix).
-        if ($archetype === 'floating-pill' || $archetype === 'bar-center-cta') {
-            $marked = $archetype === 'floating-pill'
-                ? HeaderNav::withPillRow($markup)
-                : HeaderNav::withBarCenterRow($markup);
+        if (in_array($archetype, ['floating-pill', 'bar-center-cta', 'spread-nav'], true)) {
+            $marked = match ($archetype) {
+                'floating-pill' => HeaderNav::withPillRow($markup),
+                'bar-center-cta' => HeaderNav::withBarCenterRow($markup),
+                default => HeaderNav::withSpreadRow($markup),
+            };
             $markup = $marked['markup'];
             array_push($notes, ...$marked['notes']);
             array_push($warnings, ...$marked['warnings']);

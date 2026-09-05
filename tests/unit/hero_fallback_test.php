@@ -228,3 +228,11 @@ test('the header fallback row is the centered bar when the contract commits bar-
     assert_true(!str_contains($markup, 'header-pill'), 'the bar gets no pill class');
     assert_eq('bar-center-cta', AboveFoldPartFacts::headerFacts($markup)['archetype']);
 });
+
+test('the header fallback row is the spread bar when the contract commits spread-nav (frm W1d)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'spread-nav');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--spread-nav', $markup);
+    assert_contains('"className":"header-spread"', $markup);
+    assert_eq('spread-nav', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+});

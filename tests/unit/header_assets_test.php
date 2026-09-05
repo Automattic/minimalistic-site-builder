@@ -360,3 +360,14 @@ test('header driver marks the in-view section on pill and centered-bar navigatio
     assert_contains('color-mix(in srgb, currentColor 12%, transparent)', $rule, 'a tint of the proven ink, no new colour pair');
     assert_contains('border-radius: 999px', $rule);
 });
+
+test('header CSS spreads the navigation across the spread bar and the driver marks its sections (frm W1d)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $row = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread {');
+    assert_contains('grid-template-columns: auto minmax(0, 1fr)', $row);
+    $list = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation .wp-block-navigation__container {');
+    assert_contains('justify-content: space-between', $list);
+    assert_contains('inline-size: 100%', $list);
+    assert_contains('.header-archetype--spread-nav', (string) file_get_contents(repo_path('assets/header/header.js')));
+    assert_eq(\Automattic\SiteBuild\HeaderBehavior::STICKY_SOFT, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
+});
