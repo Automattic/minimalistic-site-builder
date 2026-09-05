@@ -4275,4 +4275,71 @@ final class GeneratedMarkup
         }
         return $changed ? $document->render() : $markup;
     }
+
+    /** The tile overlay and ink a project grid always delivers (frm PR-3p). */
+    public const PROJECT_TILE_OVERLAY = '#0b0b0d';
+    public const PROJECT_TILE_DIM = 50;
+    public const PROJECT_TILE_INK = '#ffffff';
+
+    /**
+     * The build owns a project tile's ink (frm PR-3p): the fragment used to
+     * name palette slugs (`overlayColor: contrast`, `textColor: base`), a
+     * light-site recipe that on a dark ground painted a light haze at 70%
+     * over the picture with dark text (dreammotion-like13). Every tile now
+     * takes one black overlay at half strength and white text, the way the
+     * references set type over photographs on light and dark pages alike.
+     * Only covers inside a project-grid column change; the section's own
+     * band keeps its authored surface.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function ownProjectTileInk(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'project-grid-2x2') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $parent = $document->parent($index);
+            if ($parent === null || $document->name($parent) !== 'column') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $authored = [];
+            foreach (['overlayColor', 'customOverlayColor', 'isUserOverlayColor', 'gradient', 'customGradient', 'textColor'] as $key) {
+                if (array_key_exists($key, $attrs)) {
+                    $authored[] = $key . ' ' . json_encode($attrs[$key]);
+                    unset($attrs[$key]);
+                }
+            }
+            if (isset($attrs['dimRatio']) && (int) $attrs['dimRatio'] !== self::PROJECT_TILE_DIM) {
+                $authored[] = 'dimRatio ' . json_encode($attrs['dimRatio']);
+            }
+            if (isset($attrs['style']['color']['text'])) {
+                $authored[] = 'style.color.text ' . json_encode($attrs['style']['color']['text']);
+            }
+            $attrs['customOverlayColor'] = self::PROJECT_TILE_OVERLAY;
+            $attrs['isUserOverlayColor'] = true;
+            $attrs['dimRatio'] = self::PROJECT_TILE_DIM;
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $color = is_array($style['color'] ?? null) ? $style['color'] : [];
+            $color['text'] = self::PROJECT_TILE_INK;
+            $style['color'] = $color;
+            $attrs['style'] = $style;
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'cover.project-tile',
+                'authored' => $authored === [] ? 'no tile ink' : implode(', ', $authored),
+                'delivered' => 'overlay ' . self::PROJECT_TILE_OVERLAY . ' at ' . self::PROJECT_TILE_DIM . '%, text ' . self::PROJECT_TILE_INK,
+                'note' => 'the build owns a project tile\'s overlay and ink so a photo tile reads the same on every ground',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
 }

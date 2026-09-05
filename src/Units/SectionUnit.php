@@ -216,6 +216,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         // The theme caps a ledger figure to its column; an authored size
         // on the figure heading would overrun it (frm PR-3m).
         $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
+        // A project tile's overlay and ink are the build's on every ground (frm PR-3p).
+        $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

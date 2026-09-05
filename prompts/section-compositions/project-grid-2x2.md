@@ -7,11 +7,12 @@ and sit inside the tile, never under it.
 
 - Structure: ONE or TWO `wp:columns` at `"align":"wide"`, each holding exactly
   two `wp:column` of equal width. Every column holds exactly ONE `wp:cover`
-  with `"dimRatio":40`, `"overlayColor":"contrast"`, `"isUserOverlayColor":true`,
-  `"contentPosition":"bottom left"` and `"textColor":"base"`, carrying the
-  tile's generated image as its background (the same asset path on the
-  block's `url` and on the inner `<img>`, the `AI_IMAGE` spec in that img's
-  alt). The cover's inner blocks are ONE level-3 `wp:heading` (the project's
+  with `"contentPosition":"bottom left"`, carrying the tile's generated
+  image as its background (the same asset path on the block's `url` and on
+  the inner `<img>`, the `AI_IMAGE` spec in that img's alt). Author no
+  overlay color, dim ratio, gradient or text color on a tile: the build
+  lays one dark overlay at half strength and white text on every tile so a
+  photo reads the same on a light or a dark page. The cover's inner blocks are ONE level-3 `wp:heading` (the project's
   name, two to five words) and ONE `wp:paragraph` with
   `"className":"project-meta"` of two or three short tags joined by " · "
   (for example "Identity · Web · 2025"). Nothing else inside a tile.
