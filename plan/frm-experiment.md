@@ -116,6 +116,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 ### W5 follow-up found 2026-09-05 (turn 6)
 - PR-5d: `heading_emphasis` monoculture. In the PR-4e direction reruns all 5 cohort directions committed `two-tone` (Spector and Cohesion included); `italic-word` and `highlight` were never chosen. Trace: the field text ranks two-tone first and calls it "the product-landing and portfolio voice"; the seeds carry no letterform hint the expansion could read an italic word off. Fix in the prompt fragment: tie `italic-word` to seeds whose type_register is display-serif/didone/script or whose brief names an italic or serif word, `highlight` to friendly product/fintech briefs, and say two-tone is not a default.
 
+- PR-5e: emphasis span whitespace. zova-like4's H1 rendered "Real numbers , read at a glance": the model closed the `emph` span before the comma and left a space inside it. Deterministic fix at the section/hero delivery boundary: trim whitespace just inside `<span class="emph">` boundaries and pull punctuation that directly follows the span back against it.
+
 ### W6 — Opt-in devices (taste rules relaxed as devices, not as free choice)
 - PR-6a: `section-badge` device (pill with dot, caption size, one per section, never above the hero H1). Direction commits `device: section-badge`; page plan assigns it per section; the eyebrow stripper in HeaderHeroStep and section rules keep the hero clean.
 - PR-6b: `side-label` device (split label column).
@@ -172,6 +174,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | 3 | #450 | W4a | Execute the committed shape as one radius scale on card shells (frm) | merged | gist 48d9a6f9049c9aa5578eae48174479fe: lumen7 round replay (square to 24px), naturaleza5 soft (20px to 12px) | 93469974 |
 | 4 | #451 | W5a | Add the heading_emphasis direction token (frm) | merged | gist 46f8ee8456d7d8a1da6d1ffe60e8c033: dreammotion-like2 + cohesion-like3 committed two-tone unforced, desktop + 390 | e3cdf689 |
 | 5 | #452 | W6a | Add the section_label direction token with the section-badge device (frm) | merged | gist ab73adbab27ac572fe43b241000677f8: zova-like3 + dreammotion-like3 committed section-badge unforced, one badge per section, desktop + 390 | 0ce85d1b |
+| 6 | #453 | W4 (PR-4e) | Make the direction honor a brief that names cards, pills or a product landing (frm) | merged | gist 8166f7f623ecd0e8de0277a7bc9724bd: 5/5 direction reruns moved to card/flush/soft-round/ring (spector kept brutalist); zova-like4 + luzia-like2 renders | 08583ee6 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -180,6 +183,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 - 2026-09-05 turn 3: PR-4a #450 merged. Evidence was a replay (shape pass + block fixer + screenshot) because no cohort build carries card shells; PR-4e filed for that. Image proxy now times out (cURL 28) instead of read-only. Started W5a `heading_emphasis` (none / two-tone / italic-word / highlight; `gradient-fill` parked until the stops are palette-proven) on branch `frm/heading-emphasis`.
 - 2026-09-05 turn 4: PR-5a #451 merged (both evidence builds committed two-tone on their own). Background bash tasks die at turn end and at the 10-minute cap: long builds now run detached (`setsid nohup`) with a done marker. Started W6a `section_label` (`none` / `section-badge`; a new token, not a `device` value, because the badge is per section while `device` is one band) on branch `frm/section-badge`.
 - 2026-09-05 turn 5: PR-6a #452 merged (both builds committed section-badge unforced; W4a + W5a visibly compound on dreammotion-like3). Next: PR-4e, the direction under-commits to the brief's surface vocabulary (branch `frm/direction-brief-surface`), before W3a bento so cards exist for it.
+- 2026-09-05 turn 6: PR-4e #453 merged. luzia-like2 (built with the W3a code on disk) auto-assigned the floating pill, badges, two-tone, ring card shells and one bento with a highlight tile: the kits compound. W3a `bento-grid` moved to branch `frm/bento-grid` by cherry-pick after landing on the PR-4e branch by mistake. New craft defect PR-5e filed. Never `pkill -f` a pattern that also matches the calling shell.
 
 ## 10. Parked / rejected
 

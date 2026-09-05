@@ -137,6 +137,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'equal-card-grid',
         'asymmetric-split',
         'list-with-thumbnails',
+        'bento-grid',
     ];
 
     /** Whitespace-led pauses are accents, not a page's default cadence. */

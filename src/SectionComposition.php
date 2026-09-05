@@ -37,7 +37,11 @@ final class SectionComposition
         'offset-grid',
         'equal-card-grid',
         'list-with-thumbnails',
+        'bento-grid',
     ];
+
+    /** The one card in a bento that is set apart by an inverted surface. */
+    public const BENTO_HIGHLIGHT_CLASS = 'card-highlight';
 
     /** Background treatments a planned section may carry. */
     public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
@@ -235,6 +239,22 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--list-with-thumbnails',
             'prompt' => 'section-compositions/list-with-thumbnails.md',
+        ],
+        // frm W3a: the reference corpus' feature/proof composition. Two card
+        // rows of unequal count (2 then 3, or 3 then 2) so the grid reads as
+        // a bento rather than a ledger, and exactly one card inverted as the
+        // highlight. Both facts are checked in markupWarnings().
+        'bento-grid' => [
+            'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 6,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--bento-grid',
+            'prompt' => 'section-compositions/bento-grid.md',
         ],
     ];
 
@@ -544,6 +564,37 @@ TEXT;
                 ['image_count' => $imageCount],
                 'safe parseable section was retained for later archetype repair; no media or copy was invented',
             );
+        }
+
+        if ($archetype === 'bento-grid') {
+            $columnRows = 0;
+            $highlights = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'columns') {
+                    $columnRows++;
+                }
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+            }
+            if ($columnRows < 2) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'bento row count',
+                    ['archetype' => $archetype, 'minimum_column_rows' => 2],
+                    ['column_row_count' => $columnRows],
+                    'safe parseable section was retained; a bento is two card rows of unequal count, not one row',
+                );
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'bento highlight',
+                    ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_cards' => $highlights],
+                    'safe parseable section was retained; exactly one card carries the inverted highlight',
+                );
+            }
         }
 
         if (($meta['requires_row'] ?? false) === true && $rows < 1) {
