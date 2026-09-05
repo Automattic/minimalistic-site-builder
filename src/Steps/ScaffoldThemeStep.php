@@ -887,7 +887,7 @@ final class ScaffoldThemeStep implements Step
         }
         .section-composition--project-grid-2x2 .wp-block-cover .project-meta {
             margin: 0;
-            font-size: var(--wp--preset--font-size--small, 0.875rem);
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
             opacity: 0.85;
         }
         .section-composition--project-grid-2x2 .wp-block-cover__image-background {
