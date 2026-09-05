@@ -1035,7 +1035,12 @@ final class ScaffoldThemeStep implements Step
             container-type: inline-size;
             min-width: 0;
         }
-        .section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {
+        /* Level-3 only (frm PR-3z): the recipe sets every figure as a level-3
+           heading. spector-like15 opened the band with a side-label split
+           whose 75% column started with the section H2, and this rule
+           set that H2 at display scale on one unwrapped line: the page
+           scrolled sideways to 3065px. */
+        .section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {
             font-family: var(--wp--preset--font-family--heading, inherit);
             /* Capped by the column: 26cqi keeps a five-glyph figure
                ("$4.2M", "1,200") inside a four-up column at every width and
