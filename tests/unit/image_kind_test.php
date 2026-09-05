@@ -174,3 +174,11 @@ test('a 3d-object cutout keeps its pale surfaces opaque; other kinds unmatte the
     assert_true(!ImageKind::keepsSolidCutout('line-illustration'));
     assert_true(!ImageKind::keepsSolidCutout(null));
 });
+
+
+test('a transparent 3d-object request asks for a floating, shadowless object (frm PR-7d)', function () {
+    assert_contains('no contact shadow', ImageKind::promptClause('3d-object', true));
+    assert_contains('floating', ImageKind::promptClause('3d-object', true));
+    assert_contains('plain seamless backdrop', ImageKind::promptClause('3d-object'));
+    assert_eq(ImageKind::promptClause('ui-mockup'), ImageKind::promptClause('ui-mockup', true), 'other kinds ignore the flag');
+});

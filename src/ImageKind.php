@@ -62,9 +62,17 @@ final class ImageKind
      * The render instruction the composer appends to every request. Empty for
      * photographs: the grade already says everything about a photo.
      */
-    public static function promptClause(?string $raw): string
+    public static function promptClause(?string $raw, bool $transparent = false): string
     {
         $kind = self::explicit($raw) ?? self::DEFAULT;
+        // A transparent 3d-object asset (frm PR-7d) must not carry the
+        // studio backdrop's contact shadow: the key-out keeps a solid cutout's
+        // greys opaque, so a painted shadow would ride along as a pale blob.
+        if ($kind === '3d-object' && $transparent) {
+            return 'Imagery kind for all site imagery: one smooth matte clay-like 3D object floating in even,'
+                . ' shadowless light, no ground plane, no contact shadow, no cast shadow, no reflection,'
+                . ' no people and no environment.';
+        }
         return match ($kind) {
             '3d-object'         => 'Imagery kind for all site imagery: smooth matte clay-like 3D objects and simple geometric'
                 . ' forms in soft studio light on a plain seamless backdrop, no people and no environment.',
