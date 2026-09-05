@@ -36,6 +36,17 @@ final class HeroComposition
     public const MARQUEE_CLASS = 'hero-composition__marquee';
 
     /**
+     * The floating objects of a 3d-object site's marquee-name hero (frm W7c):
+     * one aria-hidden group, last in the root, of two to four transparent
+     * object cutouts the theme pins around the copy and drifts. Decorative,
+     * so they never count as hero media.
+     */
+    public const OBJECTS_CLASS = 'hero-composition__objects';
+
+    /** The object counts the floating group may hold (frm W7c). */
+    public const OBJECT_COUNTS = [2, 3, 4];
+
+    /**
      * The shape of the media slot, and how much of the composition it takes.
      *
      * Both were recipe identities until BIGR-912. `editorial-split`,
@@ -622,7 +633,26 @@ final class HeroComposition
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
-        $imageCount = preg_match_all('~<img\b~i', $markup, $unused);
+        // frm W7c: the floating-object group is scenery. It is cut out of
+        // the markup the media checks read, so its cutouts never count as
+        // hero media; its own shape is checked further down.
+        $objectGroups = [];
+        foreach ($document->indices() as $index) {
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array(self::OBJECTS_CLASS, $classes, true)) {
+                $objectGroups[] = $index;
+            }
+        }
+        $mediaMarkup = $markup;
+        if ($objectGroups !== []) {
+            $start = $document->openingOffset($objectGroups[0]);
+            $end = $document->endOffset($objectGroups[0]);
+            if ($end !== null && $end > $start) {
+                $mediaMarkup = substr($markup, 0, $start) . substr($markup, $end);
+            }
+        }
+        $imageCount = preg_match_all('~<img\b~i', $mediaMarkup, $unused);
         $imageCount = is_int($imageCount) ? $imageCount : 0;
         $copyRegions = 0;
         $mediaRegions = 0;
@@ -811,6 +841,31 @@ final class HeroComposition
                 );
             }
         }
+        // frm W7c: the floating objects are optional scenery. When the group
+        // is present it is exactly one, a group outside the copy region,
+        // holding two to four transparent (.png) images and nothing else.
+        if ($objectGroups !== []) {
+            $objects = [];
+            $sound = count($objectGroups) === 1
+                && $document->name($objectGroups[0]) === 'group'
+                && !self::hasAncestorClass($document, $objectGroups[0], 'hero-composition__copy');
+            if ($sound) {
+                foreach ($document->children($objectGroups[0]) as $child) {
+                    $objects[] = $document->name($child) === 'image'
+                        && preg_match('~<img\b[^>]*\bsrc\s*=\s*["\'][^"\']*\.png["\']~i', $document->innerHtml($child)) === 1;
+                }
+                $sound = in_array(count($objects), self::OBJECT_COUNTS, true) && !in_array(false, $objects, true);
+            }
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe floating objects',
+                    ['required_class' => self::OBJECTS_CLASS, 'count' => 1, 'block' => 'group', 'outside' => 'hero-composition__copy', 'objects' => self::OBJECT_COUNTS, 'object' => 'wp:image with a .png src'],
+                    ['matching_groups' => count($objectGroups), 'objects' => count($objects)],
+                    'safe parseable hero was retained; restore the one marked object group of two to four transparent images outside the copy region',
+                );
+            }
+        }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
         // bodies read as clutter even inside the old standard budget).
@@ -851,7 +906,7 @@ final class HeroComposition
             }
         }
 
-        $images = self::imageFacts($markup);
+        $images = self::imageFacts($mediaMarkup);
         // The aspect a recipe can serve is catalog metadata, not a name: a
         // recipe pinned to one aspect checks against that, and a recipe whose
         // slot can take several (foreground-split, BIGR-912) checks against the

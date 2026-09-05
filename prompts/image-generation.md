@@ -52,7 +52,7 @@ When creating multiple images that will be displayed together in a row or grid (
 - `watercolor` — Watercolor painting style
 
 **No decorative or transparent images:**
-Generated imagery is for CONTENT — covers, feature/gallery/card images, photographic bands. Never emit a decorative image: no drawn ornaments, flourishes, motif marks, sprigs, crests, rosettes, stamps, emblems, icons, or tick/rule strips as AI imagery, and never a `.png` or any "transparent background" asset. Generated ornaments come out off-palette (the model cannot match the theme's hexes) and geometrically wobbly, and small raster icons turn to mush at display size — a mismatched ornament reads as a stain on the design, far worse than no ornament at all.
+Generated imagery is for CONTENT — covers, feature/gallery/card images, photographic bands. Never emit a decorative image: no drawn ornaments, flourishes, motif marks, sprigs, crests, rosettes, stamps, emblems, icons, or tick/rule strips as AI imagery, and never a `.png` or any "transparent background" asset. The one exception is the floating-object group a hero recipe asks for on a `3d-object` site: those `.png` objects are the recipe's device, not decoration you add. Generated ornaments come out off-palette (the model cannot match the theme's hexes) and geometrically wobbly, and small raster icons turn to mush at display size — a mismatched ornament reads as a stain on the design, far worse than no ornament at all.
 
 Decoration, when a section needs any at all, comes from theme primitives — they inherit the palette exactly and stay crisp at any size:
 - Rules, hairlines, underlines, tick strips and dividers: `wp:separator`, border styles, or spacing — never imagery.
