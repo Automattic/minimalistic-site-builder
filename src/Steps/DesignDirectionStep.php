@@ -229,7 +229,7 @@ final class DesignDirectionStep implements Step
         ] = $this->chooseSeed($prompt, $spec, $warnings);
         // A ground the brief states in so many words outranks the seed's
         // (frm PR-4g): the prompt rule alone held on one rerun in two.
-        $statedGround = GroundKey::statedInBrief($prompt);
+        $statedGround = self::statedGroundFor($meta);
         $groundRepair = null;
         if ($statedGround !== null && $seedGround !== $statedGround) {
             $groundRepair = 'designDirection.json: field ground_key seed committed '
@@ -2182,6 +2182,29 @@ final class DesignDirectionStep implements Step
             return SectionLabel::DEFAULT;
         }
         return self::normalizeSectionLabel($project->readJson(self::FILE)['section_label'] ?? null);
+    }
+
+    /**
+     * The page ground the client stated, read from the user's own words
+     * first (`original_prompt`) and the refined brief second (frm PR-4i).
+     * The refine step rewrites the brief and dropped "Light page" on
+     * luzia-like6, so the refined text alone let a stated ground vanish.
+     *
+     * @param array<mixed> $meta
+     */
+    public static function statedGroundFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = GroundKey::statedInBrief($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
     }
 
     /** The committed band geometry, or `square`. */
