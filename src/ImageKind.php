@@ -80,6 +80,17 @@ final class ImageKind
     }
 
     /**
+     * Whether a keyed cutout of this kind is a rendered solid whose pale
+     * surfaces are paint (frm PR-7d): the key-out then keeps them opaque
+     * instead of unmatting them into translucency, which suits line art and
+     * logo marks but ghosts a clay object's highlights on a tinted ground.
+     */
+    public static function keepsSolidCutout(?string $raw): bool
+    {
+        return self::explicit($raw) === '3d-object';
+    }
+
+    /**
      * Whether every delivered picture of this kind goes through the vision
      * check (frm W7b). A product screen is where painted words hurt most:
      * a fake wordmark or a legible menu in a dashboard mockup reads as the

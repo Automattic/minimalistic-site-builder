@@ -728,6 +728,7 @@ final class GenerateImagesStep implements Step
             ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                 (string) $result['bytes'],
                 $genSpec['mime'],
+                ImageKind::keepsSolidCutout((string) ($specs[$i]['image_kind'] ?? '')) && ($specs[$i]['role'] ?? '') !== 'site-logo',
             );
             if ($genSpec['mime'] === 'image/png' && ($specs[$i]['role'] ?? '') === 'site-logo') {
                 if (!ImageTransparency::isKeyed($bytes)) {
@@ -797,7 +798,7 @@ final class GenerateImagesStep implements Step
      *
      * @return array{bytes:string,borderTrimmed:int}
      */
-    private function deliverableBytes(string $bytes, string $mime): array
+    private function deliverableBytes(string $bytes, string $mime, bool $solidCutout = false): array
     {
         // Defense in depth: ImageClient implementations are replaceable.
         // WpcomImageClient already requested and, only if needed, locally
@@ -809,7 +810,7 @@ final class GenerateImagesStep implements Step
             // The image model cannot render real alpha: the prompt asked for a flat
             // solid white background instead, keyed out here so the asset
             // gets the transparency its .png promises.
-            $bytes = ImageTransparency::keyOutBackground($bytes);
+            $bytes = ImageTransparency::keyOutBackground($bytes, !$solidCutout);
         } else {
             // Opaque images sometimes arrive as a printed photograph with
             // a flat white border painted into the pixels (BIGR-956);
@@ -970,6 +971,7 @@ final class GenerateImagesStep implements Step
                 ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                     (string) $result['bytes'],
                     $genSpec['mime'],
+                    ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
                 );
             } catch (\Throwable $e) {
                 $error = $e->getMessage();

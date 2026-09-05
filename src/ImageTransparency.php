@@ -97,7 +97,15 @@ final class ImageTransparency
      * itself matched), the input bytes are returned unchanged — a decorative
      * asset with a baked background is still better than a broken one.
      */
-    public static function keyOutBackground(string $pngBytes): string
+    /**
+     * @param bool $unmatteEdges turn white-blended edge pixels into
+     *        translucency (line art, logo marks). A rendered solid object
+     *        (frm PR-7d: the clay objects of a 3d-object site) keeps its
+     *        pale highlights opaque instead: its light surfaces are paint,
+     *        not anti-aliasing, and unmatting them ghosts the object on any
+     *        tinted ground.
+     */
+    public static function keyOutBackground(string $pngBytes, bool $unmatteEdges = true): string
     {
         if (!self::available()) {
             return $pngBytes;
@@ -152,7 +160,9 @@ final class ImageTransparency
                 $im->transparentPaintImage($seed, 0.0, $fuzz, false);
             }
 
-            self::unmatteEdges($im);
+            if ($unmatteEdges) {
+                self::unmatteEdges($im);
+            }
             self::trimToInk($im);
 
             $im->setImageFormat('png');
