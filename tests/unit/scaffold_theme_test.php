@@ -688,3 +688,22 @@ test('scaffold-theme keys the project-grid tile rules on covers inside columns, 
     assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover {'), 'a section-level image band is a cover too and must keep its height');
     assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover__image-background {'), 'the band backdrop keeps its own scale');
 });
+
+test('scaffold-theme deepens the metadata-corners cover dim under the phone copy region (frm PR-2k)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_phone_dim_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $phone = substr($css, (int) strpos($css, '@media (max-width: 781.98px)'));
+    $rule = '.hero-composition--metadata-corners.hero-mobile--retain-media-overlay';
+    assert_contains($rule, $phone, 'the rule sits in the phone media query');
+    $at = (int) strpos($phone, $rule);
+    $body = substr($phone, $at, 900);
+    assert_contains('> .wp-block-cover__background.has-background-dim', $body, 'the overlay layer keeps its authored colour');
+    assert_contains('opacity: 0.82', $body);
+    assert_contains('mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%', $body, 'the dim fades in from the top');
+    assert_contains('#000 48%, #000 100%)', $body, 'the copy region sits on the full dim');
+    $desktop = substr($css, 0, (int) strpos($css, '@media (max-width: 781.98px)'));
+    assert_true(!str_contains($desktop, 'mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55)'), 'desktop covers keep their authored dim');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

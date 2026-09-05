@@ -948,6 +948,21 @@ final class ScaffoldThemeStep implements Step
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
             }
+            /* frm PR-2k: on a phone the copy of metadata-corners sits over
+               whatever part of the picture the narrow crop leaves under it,
+               and spector-like13 landed its paragraph on the lit half of
+               the portrait. The overlay layer keeps its authored colour and
+               deepens toward the copy region: a mask fades the dim in from
+               the top, so the picture stays readable above the headline
+               and the copy sits on a fuller dim below. Colour-agnostic: the
+               mask shapes the overlay the cover already paints. */
+            .hero-composition--metadata-corners.hero-mobile--retain-media-overlay
+                > .wp-block-cover
+                > .wp-block-cover__background.has-background-dim {
+                opacity: 0.82;
+                -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.55) 22%, #000 48%, #000 100%);
+                mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.55) 22%, #000 48%, #000 100%);
+            }
         }
 
         /* Native accordion rows (the faq-split archetype builds them from
