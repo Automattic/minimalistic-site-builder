@@ -290,3 +290,22 @@ test('motion-sanity treats word-reveal as a hero-only entrance with its own once
     assert_true(!str_contains($later['markup'], 'word-reveal'), 'a later section cannot claim the headline reveal');
     assert_contains('word-reveal is allowed only in the first section', implode(' ', $later['notes'] ?? []) . implode(' ', $later['warnings'] ?? []));
 });
+
+test('the marquee keeps its own one-per-page slot beside the ambient budget and runs on a paragraph only (frm W8c)', function () {
+    $paragraph = static fn (string $text): string => '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">' . $text . '</p><!-- /wp:paragraph -->';
+    $budget = MotionSanityStep::newBudget();
+    $cover = MotionSanityStep::sanitize(motion_group('ken-burns'), 'dramatic', $budget);
+    assert_contains('ken-burns', $cover['markup'], 'the hero ambient takes the ambient slot');
+    $first = MotionSanityStep::sanitize($paragraph('Identity systems'), 'dramatic', $budget);
+    assert_contains('class="marquee"', $first['markup'], 'the marquee still runs: it does not spend the ambient slot');
+    $second = MotionSanityStep::sanitize($paragraph('Again'), 'dramatic', $budget);
+    assert_true(!str_contains($second['markup'], 'marquee'), 'one loop per page');
+    $heading = MotionSanityStep::sanitize(
+        '<!-- wp:heading {"className":"marquee"} --><h2 class="wp-block-heading marquee">Loop</h2><!-- /wp:heading -->',
+        'dramatic',
+        MotionSanityStep::newBudget(),
+    );
+    assert_true(!str_contains($heading['markup'], 'marquee'), 'a heading never loops');
+    $minimal = MotionSanityStep::sanitize($paragraph('Quiet'), 'minimal', MotionSanityStep::newBudget());
+    assert_true(!str_contains($minimal['markup'], 'marquee'), 'the minimal profile allows hover only');
+});

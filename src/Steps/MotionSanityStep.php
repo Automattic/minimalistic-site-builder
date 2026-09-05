@@ -523,8 +523,16 @@ final class MotionSanityStep implements Step
             return 'stagger-children needs a container with at least two children';
         }
         $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
-        $isAmbient = in_array($token, Motion::AMBIENT_CLASSES, true);
+        // The marquee (frm W8c) is a band, not image motion: it keeps its own
+        // one-per-page slot so a hero ken-burns does not silence the brief's
+        // marquee, and it runs on a paragraph only.
+        $isMarquee = $token === 'marquee';
+        $isAmbient = !$isMarquee && in_array($token, Motion::AMBIENT_CLASSES, true);
         $isHero = in_array($token, Motion::HERO_CLASSES, true);
+        $budget['marquee'] ??= 0;
+        if ($isMarquee && $doc->name($i) !== 'paragraph') {
+            return 'marquee runs on a paragraph only';
+        }
         // hero-entrance and word-reveal budget separately: the copy group
         // may fade in while the headline's words arrive one at a time.
         $heroKey = $token === 'hero-entrance' ? 'hero' : 'word';
@@ -541,6 +549,9 @@ final class MotionSanityStep implements Step
         if ($isAmbient && $budget['ambient'] >= 1) {
             return 'ambient budget: one signature effect per page';
         }
+        if ($isMarquee && $budget['marquee'] >= 1) {
+            return 'marquee budget: one loop per page';
+        }
         if ($isHero && $budget[$heroKey] >= 1) {
             return "{$token} budget: once per page";
         }
@@ -550,6 +561,9 @@ final class MotionSanityStep implements Step
         }
         if ($isAmbient) {
             $budget['ambient']++;
+        }
+        if ($isMarquee) {
+            $budget['marquee']++;
         }
         if ($isHero) {
             $budget[$heroKey]++;
