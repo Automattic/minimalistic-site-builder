@@ -92,6 +92,8 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
    - Framed rows (the inset variant, for print/scrapbook moods): the row `wp:columns` carries the border, `sm` padding on all sides, and `"verticalAlignment":"center"`; the thumb sits inside the padding.
    - Optionally a `wp:separator` between rows for an index/menu feel.
 
+5. `bento` — ONLY in a section whose assigned archetype is `bento-grid` (the recipe directive below spells it out): two `equal-cards` rows of unequal count with one inverted highlight card.
+
 For a prominent contained image or image-led feature band that is NOT an image card, add `"className":"feature-media"` to its `wp:image` and wrapper. The build maps that hook to the **Image crop** fact (including 21:9 for `panoramic`). Do not put it on a full-bleed hero/Cover background: viewport-spanning media keeps the hero blueprint's wide crop.
 
 Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:

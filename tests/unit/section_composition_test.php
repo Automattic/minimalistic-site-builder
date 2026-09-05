@@ -506,3 +506,46 @@ test('the section catalog advisory check never throws on hostile markup', functi
         assert_true(is_array($rows), 'the advisory check always returns rows, never an exception');
     }
 });
+
+test('the bento-grid archetype checks two unequal card rows and one highlight (frm W3a)', function () {
+    assert_true(in_array('bento-grid', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('bento-grid');
+    assert_eq('section-compositions/bento-grid.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq('.section-composition--bento-grid', $meta['root_hook']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+
+    $card = static fn (string $extra = ''): string => '<!-- wp:column {"width":"50%","verticalAlignment":"stretch"} --><div class="wp-block-column">'
+        . '<!-- wp:group {"className":"card-style--flush card-flush' . $extra . '"} --><div class="wp-block-group card-style--flush card-flush' . $extra . '">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Tile</h3><!-- /wp:heading -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (string $cards): string => '<!-- wp:columns {"className":"equal-cards","align":"wide"} --><div class="wp-block-columns alignwide equal-cards">'
+        . $cards . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--bento-grid","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--bento-grid">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Capabilities</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($card(' card-highlight') . $card()) . $row($card() . $card() . $card()));
+    assert_eq([], SectionComposition::markupWarnings($good, 'bento-grid', 'page-home--capabilities'));
+
+    $oneRow = $band($row($card(' card-highlight') . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($oneRow, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('bento row count', $joined);
+    assert_contains('"column_row_count":1', $joined);
+
+    $noHighlight = $band($row($card() . $card()) . $row($card() . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHighlight, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('bento highlight', $joined);
+    assert_contains('"highlighted_cards":0', $joined);
+
+    $twoHighlights = $band($row($card(' card-highlight') . $card(' card-highlight')) . $row($card() . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoHighlights, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('"highlighted_cards":2', $joined);
+
+    // Other archetypes never see the bento checks.
+    $plain = str_replace('section-composition--bento-grid', 'section-composition--equal-card-grid', $oneRow);
+    assert_true(
+        !str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'bento'),
+    );
+});
