@@ -644,7 +644,7 @@ final class DesignFloor
         // freelance eyebrow by the time the floor reads it.
         if ($name === 'paragraph'
             && is_string($attrs['className'] ?? null)
-            && in_array(\Automattic\SiteBuild\SectionLabel::BADGE_CLASS, preg_split('/\s+/', trim($attrs['className'])) ?: [], true)) {
+            && in_array(SectionLabel::BADGE_CLASS, preg_split('/\s+/', trim($attrs['className'])) ?: [], true)) {
             return false;
         }
         $text = self::readingText($document->innerHtml($index));
