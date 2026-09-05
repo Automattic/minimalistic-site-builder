@@ -105,6 +105,9 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-4c: `rounded-band` canvas option (full-bleed band with corners and gutter).
 - PR-4d: `noise` and `dot-grid` surfaces.
 
+### W4 follow-ups found 2026-09-05 (turn 2)
+- PR-4e: the direction step under-commits to the reference register's surface vocabulary. Cohort directions: cohesion `rule-row/borderless/sharp`, zova `rule-row/borderless/sharp`, spector `rule-row/borderless/sharp`, dreammotion `card/borderless/round`, luzia `tag-cluster/flush/soft`. Across 49 older builds `item_pattern=card` was chosen 2 times and `shape=sharp` dominates. The references are card- and radius-heavy. Root cause to trace: `prompts/design-direction.md` guidance for `item_pattern`, `card_style` and `shape` steers away from cards/rounding for product and portfolio briefs even when the brief names cards, glass and pills. Fix in the prompt fragment (bounded vocabulary unchanged), evidence = cohort direction facts before/after.
+
 ### W5 — Typography
 - PR-5a: `heading_emphasis` token: `none`, `two-tone`, `italic-word`, `highlight-underline`, `gradient-fill`; section prompt teaches `<span class="emph">`; theme CSS executes it; contrast check aware.
 - PR-5b: medium-weight display option and `tight` tracking defaults for the product/portfolio register; reference family shortlist in FontShortlist for `grotesque`/`geometric`/`display-serif` registers.
