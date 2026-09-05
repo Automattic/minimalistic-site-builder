@@ -567,5 +567,7 @@ test('scaffold-theme rounds and clips the closing cta-panel from the shape scale
     assert_contains('.wp-block-group.cta-panel {', $css);
     assert_contains('border-radius: var(--shape-radius-panel, 0)', $css);
     assert_contains('overflow: hidden', $css);
+    assert_contains('.wp-block-group.cta-panel :is(h1, h2, h3)', $css, 'a clipped panel never clips its headline');
+    assert_contains('overflow-wrap: anywhere', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

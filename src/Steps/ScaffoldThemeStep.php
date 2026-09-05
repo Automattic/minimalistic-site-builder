@@ -745,6 +745,18 @@ final class ScaffoldThemeStep implements Step
         .wp-block-group.cta-panel > .wp-block-columns {
             align-items: center;
         }
+        /* A clipped panel must never clip its own headline: a display-size
+           word wider than the narrow panel breaks rather than vanishing, and
+           below the hamburger breakpoint the authored side padding gives way
+           to a phone-scale inset so the measure stays usable. */
+        .wp-block-group.cta-panel :is(h1, h2, h3) {
+            overflow-wrap: anywhere;
+        }
+        @media (max-width: 600px) {
+            .wp-block-group.cta-panel {
+                padding-inline: 1.25rem !important;
+            }
+        }
 
         CSS;
 
