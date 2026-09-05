@@ -98,3 +98,15 @@ test('the direction persists, formats and reads step_numeral and finalize ships 
     assert_true(!$project->exists('theme/assets/numeral/numeral.css'), 'stale numeral kit pruned');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('a step numeral is never a count-up figure (frm W6c)', function () {
+    $section = step_numeral_section(step_numeral_item('1') . step_numeral_item('2', true, 'Strategy') . step_numeral_item('3', true, 'Launch'));
+    $repairs = [];
+    $marked = \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($section, 'page-home--process', 'calm', $repairs);
+    assert_true(!str_contains($marked, 'count-up'), 'the marker leaves ordinals alone');
+    $authored = '<!-- wp:paragraph {"className":"step-numeral count-up"} --><p class="step-numeral count-up">1</p><!-- /wp:paragraph -->';
+    $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+    $sane = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($authored, 'calm', $budget);
+    assert_true(!str_contains($sane['markup'], 'count-up'), 'the sanity step drops a model-authored count on an ordinal');
+    assert_contains('step-numeral', $sane['markup']);
+});

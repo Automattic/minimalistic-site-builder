@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
@@ -4115,6 +4116,9 @@ final class GeneratedMarkup
             }
             $attrs = $document->attrs($index) ?? [];
             $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array(StepNumeral::CLASS_NAME, $tokens, true)) {
+                continue; // an ordinal is a label, not a count (frm W6c)
+            }
             $hasKitMotion = false;
             foreach ($tokens as $token) {
                 if (in_array($token, Motion::kitClasses(), true) && !in_array($token, Motion::HOVER_CLASSES, true)) {
