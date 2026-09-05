@@ -105,6 +105,13 @@ final class HeroHeadlineFit
     private const PHONE_GUTTER_PX = 32.0;
 
     /**
+     * Stricter than MEASURE_SAFETY: the mixed-case em estimate is a median,
+     * and the wide grotesques product heroes favour run nearer 0.7em. On a
+     * phone the word has nowhere to go, so the bound assumes the wide face.
+     */
+    private const PHONE_SAFETY = 0.82;
+
+    /**
      * Per-character advance for the LINE-COUNT estimate, in em.
      *
      * Separate from the two constants above on purpose. Those are deliberately
@@ -781,7 +788,7 @@ final class HeroHeadlineFit
             return null;
         }
         $phoneSize = (float) min($sizes);
-        $available = ($viewportPx - 2 * self::PHONE_GUTTER_PX) * self::MEASURE_SAFETY;
+        $available = ($viewportPx - 2 * self::PHONE_GUTTER_PX) * self::PHONE_SAFETY;
         if ($phoneSize * $wordEm <= $available) {
             return null;
         }

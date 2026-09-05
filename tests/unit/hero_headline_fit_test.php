@@ -600,12 +600,12 @@ test('the line target bounds only the masthead, never a lower display heading', 
 
 test('a phone viewport adds a vw bound only for a word that would overflow it (frm PR-2e)', function () {
     // ELECTRONIC is 7.36em (see above). At 390px the display preset resolves to
-    // its clamp minimum, 48px: 48 × 7.36 = 353px > (390 − 64) × 0.96 = 313px, so a
-    // phone bound joins the pin: (313 ÷ 390 × 100) ÷ 7.36 = 10.9vw. On a 1366px
+    // its clamp minimum, 48px: 48 × 7.36 = 353px > (390 − 64) × 0.82 = 267px, so a
+    // phone bound joins the pin: (267 ÷ 390 × 100) ÷ 7.36 = 9.3vw. On a 1366px
     // desktop that term resolves to 149px, above the 83px cap, so nothing changes there.
     $r = HeroHeadlineFit::apply(hhf_hero('Two Nights of Electronic Immersion'), hhf_theme(), null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
     assert_contains(
-        '"fontSize":"min(var(\u002d\u002dwp\u002d\u002dpreset\u002d\u002dfont-size\u002d\u002ddisplay), 83px, 10.9vw)"',
+        '"fontSize":"min(var(\u002d\u002dwp\u002d\u002dpreset\u002d\u002dfont-size\u002d\u002ddisplay), 83px, 9.3vw)"',
         $r['markup'],
     );
     assert_contains("phone-fit: 'Electronic' (~7.36em) would overflow a 390px viewport", implode("\n", $r['notes']));
@@ -623,7 +623,7 @@ test('a phone viewport adds a vw bound only for a word that would overflow it (f
     // A heading with no desktop cap can still need the phone bound alone.
     $wide = hhf_hero('Two Nights of Electronic Immersion', '"layout":{"type":"constrained","contentSize":"1400px"}');
     $onlyPhone = HeroHeadlineFit::apply($wide, hhf_theme(['settings' => ['layout' => ['contentSize' => '1400px']]]), null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
-    assert_contains('display), 10.9vw)"', $onlyPhone['markup'], 'the phone term stands alone when the desktop measure is wide enough');
+    assert_contains('display), 9.3vw)"', $onlyPhone['markup'], 'the phone term stands alone when the desktop measure is wide enough');
     $again = HeroHeadlineFit::apply($onlyPhone['markup'], hhf_theme(), null, HeroHeadlineFit::PHONE_VIEWPORT_PX);
     assert_eq($onlyPhone['markup'], $again['markup'], 'idempotent');
 });
