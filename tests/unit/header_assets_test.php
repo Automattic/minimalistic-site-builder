@@ -345,3 +345,18 @@ test('header CSS lays the centered bar out as a three-column grid and collapses 
     assert_true($start > 0 && $end > $start, 'the centered bar block sits before the pill glass block');
     assert_true(!str_contains(substr($css, $start, $end - $start), '!important'), 'the centered bar fights nothing');
 });
+
+test('header driver marks the in-view section on pill and centered-bar navigation and the kit paints it (frm W1c)', function () {
+    $js = (string) file_get_contents(repo_path('assets/header/header.js'));
+    assert_contains("'is-current-section'", $js);
+    assert_contains('function watchSectionNavigation()', $js);
+    assert_contains(".header-archetype--floating-pill, .header-archetype--bar-center-cta", $js, 'only the two single-page chromes mark sections');
+    assert_contains("a[href^=\"#\"]", $js, 'only in-page links take part');
+    assert_contains("'location'", $js, 'the link says aria-current=location, never page');
+    assert_true(strpos($js, 'watchSectionNavigation();') > strpos($js, 'function setup()'), 'the observer starts in setup');
+    assert_contains('sectionObserver.disconnect()', $js, 'stop releases the observer');
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $rule = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,');
+    assert_contains('color-mix(in srgb, currentColor 12%, transparent)', $rule, 'a tint of the proven ink, no new colour pair');
+    assert_contains('border-radius: 999px', $rule);
+});
