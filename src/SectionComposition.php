@@ -43,7 +43,11 @@ final class SectionComposition
         'pricing-tiers',
         'stat-ledger',
         'feature-row-hairlines',
+        'zigzag-steps',
     ];
+
+    /** The step counts a zigzag-steps ladder may carry (frm W3g). */
+    public const ZIGZAG_STEP_COUNTS = [3, 4, 5];
 
     /** The column counts a feature-row-hairlines row may carry (frm W3e). */
     public const FEATURE_ROW_COUNTS = [3, 4];
@@ -363,6 +367,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--feature-row-hairlines',
             'prompt' => 'section-compositions/feature-row-hairlines.md',
+        ],
+        // frm W3g: the reference corpus' process ladder (Luzia). Three to
+        // five two-column rows, each one step, the media and the copy
+        // swapping sides row by row; the step-numeral device (W6c) leads
+        // each copy column when committed. Row shape and alternation are
+        // checked in markupWarnings().
+        'zigzag-steps' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 5,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--zigzag-steps',
+            'prompt' => 'section-compositions/zigzag-steps.md',
         ],
     ];
 
@@ -899,6 +920,57 @@ TEXT;
             }
         }
 
+        if ($archetype === 'zigzag-steps') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+                // The copy side is the column that holds the step's heading,
+                // at any depth: the card contract wraps copy in a group.
+                $copySide = null;
+                foreach ($columns as $position => $column) {
+                    if (self::holdsHeading($document, $column)) {
+                        $copySide = $position;
+                        break;
+                    }
+                }
+                $rows[] = ['columns' => count($columns), 'copy' => $copySide];
+            }
+            $count = count($rows);
+            $twoColumns = array_values(array_filter($rows, static fn (array $row): bool => $row['columns'] === 2));
+            if (!in_array($count, self::ZIGZAG_STEP_COUNTS, true) || count($twoColumns) !== $count) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'zigzag step rows',
+                    ['archetype' => $archetype, 'rows' => self::ZIGZAG_STEP_COUNTS, 'columns_per_row' => 2],
+                    ['rows' => $count, 'columns_per_row' => array_column($rows, 'columns')],
+                    'safe parseable section was retained; a zigzag is three to five two-column step rows',
+                );
+            } elseif ($count >= 2) {
+                $alternates = true;
+                for ($i = 1; $i < $count; $i++) {
+                    if ($rows[$i]['copy'] === null || $rows[$i - 1]['copy'] === null || $rows[$i]['copy'] === $rows[$i - 1]['copy']) {
+                        $alternates = false;
+                        break;
+                    }
+                }
+                if (!$alternates) {
+                    $warnings[] = self::markupWarning(
+                        $part,
+                        'zigzag alternation',
+                        ['archetype' => $archetype, 'copy_column' => 'alternates row by row'],
+                        ['copy_column_per_row' => array_column($rows, 'copy')],
+                        'safe parseable section was retained; consecutive steps put the copy on opposite sides',
+                    );
+                }
+            }
+        }
+
         if ($archetype === 'faq-split') {
             $items = 0;
             foreach ($document->indices() as $index) {
@@ -1116,5 +1188,16 @@ TEXT;
             return false;
         }
         return in_array(SectionLabel::SIDE_CLASS, self::classTokens($document, $leading[0]), true);
+    }
+
+    /** True when a heading block sits anywhere inside the block (frm W3g). */
+    private static function holdsHeading(BlockMarkup $document, int $index): bool
+    {
+        foreach ($document->children($index) as $child) {
+            if ($document->name($child) === 'heading' || self::holdsHeading($document, $child)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
