@@ -463,3 +463,24 @@ test('the marquee paragraph is bound to the site name at the boundary (frm PR-2f
     $escaped = HeroComposition::bindMarqueeName($hero('x'), 'Marks & Co', 'page-home--hero', $repairs);
     assert_contains('>Marks &amp; Co</p>', $escaped);
 });
+
+test('a hero the brief states in so many words outranks the stable pick inside the caller constraints (frm PR-2g)', function () {
+    assert_eq('marquee-name', HeroComposition::statedInBrief('A playful portfolio with one giant marquee of my name behind the hero.'));
+    assert_eq('panel-stage', HeroComposition::statedInBrief('White page with a pale blue gradient panel hero and a dashboard mockup.'));
+    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('Dark hero with a full-bleed high-contrast portrait, metadata in the corners.'));
+    assert_eq(null, HeroComposition::statedInBrief('Create a website for a Georgian restaurant in Tbilisi.'));
+    assert_eq(null, HeroComposition::statedInBrief('a photo-heavy gallery'), 'a phrase must match at word boundaries');
+
+    $warnings = [];
+    $note = null;
+    $meta = ['original_prompt' => 'Create a portfolio with one giant marquee of my name behind the hero.', 'prompt' => 'A portfolio site for a designer.'];
+    assert_eq('marquee-name', \Automattic\SiteBuild\Steps\DesignDirectionStep::selectHeroRecipe($meta, 'stated-site', 'A seed', $warnings, $note));
+    assert_true(is_string($note) && str_contains($note, 'the brief names its hero'), 'the override is a recorded repair');
+    assert_eq([], $warnings);
+
+    $note = null;
+    $constrained = $meta + ['design_constraints' => ['allowed_hero_media_modes' => ['cover-image']]];
+    $picked = \Automattic\SiteBuild\Steps\DesignDirectionStep::selectHeroRecipe($constrained, 'stated-site', 'A seed', $warnings, $note);
+    assert_true(in_array($picked, HeroComposition::compatible(['allowed_hero_media_modes' => ['cover-image']]), true), 'an incompatible stated hero falls back to the pool');
+    assert_eq(null, $note);
+});

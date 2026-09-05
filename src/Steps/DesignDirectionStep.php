@@ -238,11 +238,13 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedGround) . '; disposition the brief names its ground, so the seed yields to it';
             $seedGround = $statedGround;
         }
+        $heroRepair = null;
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
             $seed,
             $warnings,
+            $heroRepair,
         );
         // The recipe is code-owned and seeded, and so are its media axes
         // (BIGR-912). The prompt below tells the model to preserve the defaults
@@ -314,7 +316,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = $groundRepair === null ? [] : [$groundRepair];
+        $repairs = array_values(array_filter([$groundRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
@@ -627,6 +629,7 @@ final class DesignDirectionStep implements Step
         string $stableIdentifier,
         string $conceptSeed,
         array &$warnings = [],
+        ?string &$statedNote = null,
     ): string {
         $callerConstraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
         if (HeroComposition::compatible($callerConstraints) === []) {
@@ -644,6 +647,27 @@ final class DesignDirectionStep implements Step
                 );
             }
             return $forced;
+        }
+
+        // A hero the brief states in so many words outranks the stable hash
+        // pick (frm PR-2g), inside the caller's constraints: the user's own
+        // words first (original_prompt), the refined brief second.
+        $stated = null;
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $stated = HeroComposition::statedInBrief($text);
+                if ($stated !== null) {
+                    break;
+                }
+            }
+        }
+        if ($stated !== null && in_array($stated, $pool, true)) {
+            $statedNote = 'designDirection.json: hero recipe stable pick '
+                . self::describe(HeroComposition::select($stableIdentifier, $conceptSeed, $constraints))
+                . ' delivered ' . self::describe($stated)
+                . '; disposition the brief names its hero, so the stable pick yields to it';
+            return $stated;
         }
 
         if (!array_key_exists('hero_assignment', $meta)) {

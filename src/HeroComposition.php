@@ -858,4 +858,45 @@ final class HeroComposition
         }
         return $markup;
     }
+
+    /**
+     * The hero the brief states in so many words, or null when it is silent
+     * (frm PR-2g). The same bounded-phrase shape as GroundKey::statedInBrief:
+     * these are the client's own instructions about the opening, and the
+     * stable hash pick never outranks them. First match in list order wins.
+     *
+     * @var array<string,list<string>>
+     */
+    private const STATED_PHRASES = [
+        'marquee-name' => [
+            'marquee of my name', 'marquee of the name', 'name behind the hero', 'giant name behind',
+            'giant marquee', 'wordmark behind the hero', 'name marquee',
+        ],
+        'panel-stage' => [
+            'gradient panel hero', 'panel hero', 'rounded panel hero', 'hero panel',
+            'gradient hero panel', 'dashboard mockup', 'product mockup below',
+        ],
+        'cinematic-safe-zone' => [
+            'full-bleed photo', 'full-bleed portrait', 'full-bleed image', 'cinematic photo',
+            'cinematic hero', 'full-bleed hero', 'hero photo', 'portrait hero',
+            'full-bleed high-contrast portrait', 'high-contrast portrait', 'metadata in the corners',
+            'photo hero', 'cinematic dusk photo', 'full-bleed cover',
+        ],
+        'foreground-split' => [
+            'split hero', 'copy left, image right', 'image right', 'photo on the right', 'hero split',
+        ],
+    ];
+
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_PHRASES as $recipe => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $recipe;
+                }
+            }
+        }
+        return null;
+    }
 }
