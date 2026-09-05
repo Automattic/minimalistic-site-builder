@@ -2608,6 +2608,63 @@ final class GeneratedMarkup
     }
 
     /**
+     * Keep only as many image blocks as the archetype budgets (frm PR-3y).
+     * zova-like18 stacked three framed screens in a centered-stack band
+     * whose budget is two, and two more in the next band: the page read as
+     * a wall of mockups. The media count check only named the excess; the
+     * pictures past the budget are now removed at their block boundary, in
+     * document order, so the first ones the author placed survive and no
+     * asset is generated for the rest. An archetype with no budget at all
+     * is handled by stripMediaOffNoImageArchetype().
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripMediaOverBudget(
+        string $markup,
+        string $part,
+        ?string $archetype,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        if ($archetype === null || !SectionComposition::isKnown($archetype)) {
+            return $markup;
+        }
+        $max = (int) SectionComposition::metadata($archetype)['max_images'];
+        if ($max <= 0) {
+            return $markup;
+        }
+        $authored = (int) preg_match_all('~<img\b~i', $markup);
+        if ($authored <= $max) {
+            return $markup;
+        }
+        $before = $markup;
+        $markup = self::stripBlocksNamed(
+            $markup,
+            $part,
+            ['image'],
+            'image',
+            "the {$archetype} archetype budgets {$max} picture(s) and this section authored {$authored}; the picture "
+                . 'past the budget was removed at its complete block boundary and no asset is generated for it',
+            $warnings,
+            $max,
+        );
+        if ($markup === $before) {
+            return $markup;
+        }
+        $delivered = (int) preg_match_all('~<img\b~i', $markup);
+        $repairs[] = [
+            'code' => 'media-over-budget-removed',
+            'part' => $part,
+            'block' => 'image',
+            'authored' => "{$authored} authored image(s) on {$archetype} (budget {$max})",
+            'delivered' => "{$delivered} kept",
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /**
      * Shared removal transaction for `wp:separator` blocks.
      *
      * @param list<string> $warnings
@@ -2628,6 +2685,7 @@ final class GeneratedMarkup
      *
      * @param list<string> $names block names to remove
      * @param list<string> $warnings
+     * @param int $keepFirst how many named blocks, in document order, stay (frm PR-3y)
      */
     private static function stripBlocksNamed(
         string $markup,
@@ -2636,6 +2694,7 @@ final class GeneratedMarkup
         string $label,
         string $safeDisposition,
         array &$warnings,
+        int $keepFirst = 0,
     ): string {
         $document = BlockMarkup::parse($markup);
         $candidates = [];
@@ -2654,6 +2713,9 @@ final class GeneratedMarkup
                 'end' => $end,
                 'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
             ];
+        }
+        if ($keepFirst > 0) {
+            $candidates = array_slice($candidates, $keepFirst);
         }
         if ($candidates === []) {
             return $markup;

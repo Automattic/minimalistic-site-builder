@@ -198,6 +198,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         }
         // An archetype that plans no media never ships an authored picture (frm PR-3u).
         $markup = GeneratedMarkup::stripMediaOffNoImageArchetype($markup, $this->key($input), $archetype, $repairs, $warnings);
+        // A section keeps only as many pictures as its archetype budgets (frm PR-3y).
+        $markup = GeneratedMarkup::stripMediaOverBudget($markup, $this->key($input), $archetype, $repairs, $warnings);
         $label = SectionLabel::normalize(
             $markup,
             is_string($input['section_label'] ?? null) ? $input['section_label'] : null,
