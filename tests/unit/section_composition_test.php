@@ -757,3 +757,25 @@ test('the ruled-idiom cleanup keeps a composition marker that names hairlines (f
     assert_contains('section-composition--feature-row-hairlines', $out, 'the archetype marker survives');
     assert_true(!str_contains($out, 'is-style-rule-row'), 'the authored rule class still goes');
 });
+
+test('row checks look past a committed side-label split (frm PR-3j)', function () {
+    $column = static fn (string $figure): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $figure . '</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">label</p><!-- /wp:paragraph --></div><!-- /wp:column -->';
+    $ledger = '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $column('120+') . $column('18') . $column('12') . $column('4') . '</div><!-- /wp:columns -->';
+    $split = '<!-- wp:group {"className":"section-composition--stat-ledger","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--stat-ledger">'
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"25%"} --><div class="wp-block-column"><!-- wp:paragraph {"className":"side-label","fontSize":"caption"} --><p class="side-label has-caption-font-size">Scale</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"75%"} --><div class="wp-block-column">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Measured</h2><!-- /wp:heading -->' . $ledger
+        . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+    assert_eq([], SectionComposition::markupWarnings($split, 'stat-ledger', 'page-home--stats'), 'the split is not a second ledger row');
+    $plain = str_replace('section-composition--stat-ledger', 'section-composition--feature-row-hairlines', $split);
+    $joined = implode("\n", SectionComposition::markupWarnings($plain, 'feature-row-hairlines', 'page-home--stats'));
+    assert_true(!str_contains($joined, 'feature row shape'), 'the feature row check skips the split too');
+    // A split whose leading column holds more than the label is a real row and still counts.
+    $notSplit = str_replace('<p class="side-label has-caption-font-size">Scale</p><!-- /wp:paragraph -->', '<p class="side-label has-caption-font-size">Scale</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>More</p><!-- /wp:paragraph -->', $split);
+    $joined = implode("\n", SectionComposition::markupWarnings($notSplit, 'stat-ledger', 'page-home--stats'));
+    assert_contains('"column_rows":2', $joined);
+});

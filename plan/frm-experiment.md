@@ -233,6 +233,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 37 | #484 | W4d | Add the noise and dot-grid page surfaces (frm) | merged | gist 3f564a4fc594b1508846bbabd0668eed: zova-like12-4d dot-grid (margin min 198 vs 239.7 flat), dreammotion-like11-4d noise (up to 51 on an 11 base); finalize replays, viewport shots | (see git) |
 | 38 | #485 | W8d | Add the sticky-stack kit class for a card stack (frm) | merged | gist 2e016a8f9758bf525b0e22444f018879: cohesion-like10-8d replay, cards pinned at 80/96px under the pill, static under reduce; cohesion-like12 unforced did not use it | (see git) |
 | 39 | #486 | W1 (PR-1f) | Keep the pill's and the centered bar's CTA against the hero action (frm) | merged | pure replay on cohesion-like10: standard-row drops the button, floating-pill keeps "Start project"; no build | (see git) |
+| 40 | #487 | W2 (PR-2f) | Bind the marquee-name paragraph to the site name (frm) | merged | pure replay on cohesion-like10's hero: the exact name untouched, a paraphrase bound to "Alexia Studio" with one repair; no build | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -276,6 +277,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 38: PR-4j #483 merged. W4d resumed on `frm/surface-noise-dotgrid` (merged frm_experiment in): noise (three speckle layers, both inks) and dot-grid (one dot per 24px in the page ink, background-size on the shared sheet), prompt text, tests. Evidence: finalize replays on a light and a dark copy with viewport measurements. Note: CSS gradients form a lattice at 4x zoom; random grain needs a generated tile. Merged as #484.
 - 2026-09-05 turn 39: W4d #484 merged. W8d built on `frm/sticky-stack`: STACK_CLASSES bucket (one per page, container of 2-6, no entrance budget), pure-CSS sticky pile with growing offsets and 60vh cards (the first version pinned nothing: a short container scrolls away), prompt bullet, tests. Evidence: replay on a cohesion copy with a Playwright scroll probe; the unforced cohesion-like12 did not reach for the class. Ops lesson: keep-alive servers linger unless the whole process group is killed (`kill -- -$KA`); about forty stale Playground servers were found and stopped. Merged as #485.
 - 2026-09-05 turn 40: W8d #485 merged. PR-1f on `frm/pill-keeps-cta`: the keeps-action commit of W1b had never reached PR #465 (only two of three commits were pushed), so the flag was absent on frm_experiment; landed the parameter, a `keepsHeaderAction` helper for floating-pill and bar-center-cta, the run-time call and the tests. Lesson: after `git push`, confirm the PR's commit list with `gh pr view <n> --json commits` before merging. Merged as #486.
+- 2026-09-05 turn 41: PR-1f #486 merged (audit of #462-#486 commit lists: only #465 had lost a commit). PR-2f on `frm/marquee-name-bind`: `HeroComposition::bindMarqueeName` replaces the marquee paragraph's text with the spec's site name at the hero boundary and records the repair. Merged as #487.
 
 ## 10. Parked / rejected
 
