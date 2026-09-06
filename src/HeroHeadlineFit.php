@@ -207,6 +207,120 @@ final class HeroHeadlineFit
      */
     private const DISPLAY_SLUG = 'display';
 
+    /** The heading levels a section author writes (frm PR-5i). */
+    public const SECTION_HEADING_LEVELS = [2, 3];
+
+    /** The preset a section heading falls back to per level when the theme names none (frm PR-5i). */
+    private const SECTION_LEVEL_SLUGS = [2 => 'section-title', 3 => 'heading'];
+
+    /**
+     * Phone-fit the section headings of one part (frm PR-5i). Headings may
+     * not break mid-word (the word-wrap policy), and nothing measured them:
+     * dasstudio-like2's "conversation" at the section-title minimum ran a
+     * 390px page 65px wide. For each level-2 or level-3 heading without an
+     * explicit size, the longest word is measured at the size its preset
+     * reaches on a phone; when it would overflow the phone measure, one
+     * viewport-relative term joins the preset in a min(), the way the hero
+     * masthead is bounded. On a wide viewport the term resolves far above
+     * the preset and never bites. An explicit size is left alone, which
+     * makes the pass idempotent.
+     *
+     * @return array{markup:string, notes:list<string>}
+     */
+    public static function fitSectionHeadings(
+        string $markup,
+        array $theme,
+        float $phoneViewportPx = self::PHONE_VIEWPORT_PX,
+    ): array {
+        $doc = BlockMarkup::parse($markup);
+        if ($doc->hasMismatchedDelimiters() || $doc->hasMalformedDelimiters()) {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $notes = [];
+        $changed = false;
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'heading' || !$doc->isStructurallySafe($i)) {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
+            if (!in_array($level, self::SECTION_HEADING_LEVELS, true)) {
+                continue;
+            }
+            if (isset($attrs['style']['typography']['fontSize'])) {
+                continue;
+            }
+            $slug = is_string($attrs['fontSize'] ?? null) && trim($attrs['fontSize']) !== ''
+                ? trim($attrs['fontSize'])
+                : self::sectionLevelSlug($theme, $level);
+            $phoneSize = self::presetMinPx($theme, $slug);
+            if ($phoneSize === null || $phoneSize <= 0) {
+                continue;
+            }
+            $word = self::longestWord($doc->innerHtml($i));
+            if ($word === null) {
+                continue;
+            }
+            $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
+            $chars = mb_strlen($word);
+            $wordEm = $chars * self::characterEm($theme, $uppercase)
+                + max(0, $chars - 1) * self::effectiveLetterSpacingEm($attrs, $theme, $level);
+            if ($wordEm <= 0 || $phoneViewportPx <= 2 * self::PHONE_GUTTER_PX) {
+                continue;
+            }
+            $available = ($phoneViewportPx - 2 * self::PHONE_GUTTER_PX) * self::PHONE_SAFETY;
+            if ($phoneSize * $wordEm <= $available) {
+                continue;
+            }
+            $vw = floor(($available / $phoneViewportPx * 100) / $wordEm * 10) / 10;
+            if ($vw <= 0) {
+                continue;
+            }
+            $size = 'min(var(--wp--preset--font-size--' . $slug . '), ' . $vw . 'vw)';
+            unset($attrs['fontSize']);
+            $attrs = self::withPinnedFontSize($attrs, $size);
+            $doc->setAttrs($i, $attrs);
+            $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
+            $changed = true;
+            $notes[] = sprintf(
+                "section heading phone-fit: h%d '%s' (~%.2fem) would overflow a %dpx viewport at the %s minimum; %svw joins the preset",
+                $level,
+                $word,
+                $wordEm,
+                (int) $phoneViewportPx,
+                $slug,
+                $vw,
+            );
+        }
+        return ['markup' => $changed ? $doc->render() : $markup, 'notes' => $notes];
+    }
+
+    /** The preset slug the theme gives a heading level, or the level's fallback. */
+    private static function sectionLevelSlug(array $theme, int $level): string
+    {
+        $size = $theme['styles']['elements']['h' . $level]['typography']['fontSize'] ?? null;
+        if (is_string($size) && preg_match('/^var:preset\|font-size\|([a-z0-9-]+)$/', trim($size), $m) === 1) {
+            return $m[1];
+        }
+        if (is_string($size) && preg_match('/^var\(--wp--preset--font-size--([a-z0-9-]+)\)$/', trim($size), $m) === 1) {
+            return $m[1];
+        }
+        return self::SECTION_LEVEL_SLUGS[$level] ?? 'heading';
+    }
+
+    /** A preset's smallest resolvable size in px, or null. */
+    private static function presetMinPx(array $theme, string $slug): ?float
+    {
+        foreach ((array) ($theme['settings']['typography']['fontSizes'] ?? []) as $preset) {
+            if (!is_array($preset) || ($preset['slug'] ?? null) !== $slug) {
+                continue;
+            }
+            $size = $preset['size'] ?? null;
+            return is_string($size) ? self::cssMinPx($size) : null;
+        }
+        return null;
+    }
+
     /**
      * @param list<int>|null $desktopLineTarget the blueprint's desktop
      *        [min, max] headline line target; without it only the word-fit
