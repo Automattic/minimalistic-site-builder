@@ -230,13 +230,38 @@ final class SiteSpecStep implements Step
         'new site', 'my site', 'my website', 'my portfolio', 'design portfolio', 'developer portfolio',
     ];
 
+    /**
+     * Words that name a category, not a brand (frm PR-0e): a name made only
+     * of these ("Studio Portfolio", "Creative Design Agency") is generic.
+     *
+     * @var list<string>
+     */
+    private const GENERIC_WORDS = [
+        'studio', 'portfolio', 'design', 'designer', 'designs', 'web', 'website', 'site', 'agency', 'creative',
+        'digital', 'brand', 'branding', 'company', 'business', 'shop', 'store', 'blog', 'home', 'page', 'freelance',
+        'freelancer', 'consultant', 'consulting', 'services', 'solutions', 'group', 'collective', 'works', 'lab',
+        'labs', 'media', 'marketing', 'personal', 'professional', 'online', 'and', 'of', 'the',
+    ];
+
     /** Whether a site name is a generic category word rather than a name. */
     public static function genericName(string $name): bool
     {
         $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $name)), 'UTF-8');
         $text = (string) preg_replace('/^(?:the|my|a|an|our)\s+/u', '', $text);
         $text = trim((string) preg_replace('/[^\p{L}\p{N} ]+/u', '', $text));
-        return $text !== '' && in_array($text, self::GENERIC_NAMES, true);
+        if ($text === '') {
+            return false;
+        }
+        if (in_array($text, self::GENERIC_NAMES, true)) {
+            return true;
+        }
+        $words = preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($words as $word) {
+            if (!in_array($word, self::GENERIC_WORDS, true)) {
+                return false;
+            }
+        }
+        return $words !== [];
     }
 
     /**
