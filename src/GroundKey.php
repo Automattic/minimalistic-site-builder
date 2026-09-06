@@ -48,15 +48,53 @@ final class GroundKey
         'light' => [
             'white page', 'white ground', 'white background', 'light page', 'light ground',
             'light background', 'pale page', 'pale ground', 'cream page', 'cream ground',
-            'off-white page', 'on white', 'on a white', 'on a light',
+            'off-white page', 'light grey page', 'light gray page', 'grey page', 'gray page',
+            'light grey ground', 'light gray ground', 'off-white ground', 'off-white background',
+            'on white', 'on a white', 'on a light',
         ],
     ];
+
+    /**
+     * Whether a phrase names the page itself (frm PR-4m): "light grey page",
+     * "dark ground". Such a phrase outranks a loose colour word ("near-black",
+     * "on black") that names a panel or a band later in the same brief;
+     * fabrica's "Light grey page with rounded near-black panels" read dark.
+     */
+    private static function namesThePage(string $phrase): bool
+    {
+        return preg_match('/(?:page|ground|background|site|landing|mode)$/', $phrase) === 1;
+    }
 
     public static function statedInBrief(string $brief): ?string
     {
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        // Two passes (frm PR-4m): the phrases that name the page itself
+        // first, the earliest in the text winning when both keys appear,
+        // then the loose colour words in the reviewed order (dark first).
+        $pagePick = null;
+        $pageAt = null;
         foreach (self::STATED_PHRASES as $key => $phrases) {
             foreach ($phrases as $phrase) {
+                if (!self::namesThePage($phrase)) {
+                    continue;
+                }
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $text, $m, PREG_OFFSET_CAPTURE) === 1) {
+                    $at = (int) $m[0][1];
+                    if ($pageAt === null || $at < $pageAt) {
+                        $pagePick = $key;
+                        $pageAt = $at;
+                    }
+                }
+            }
+        }
+        if ($pagePick !== null) {
+            return $pagePick;
+        }
+        foreach (self::STATED_PHRASES as $key => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (self::namesThePage($phrase)) {
+                    continue;
+                }
                 if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $text) === 1) {
                     return $key;
                 }
