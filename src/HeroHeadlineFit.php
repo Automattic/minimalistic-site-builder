@@ -109,6 +109,9 @@ final class HeroHeadlineFit
         'bricolage grotesque' => [0.72, 0.60],
         'krona one' => [0.92, 0.82],
         'righteous' => [0.76, 0.64],
+        // Measured from the shipped instances (frm PR-5n): the 900 weight
+        // averages 0.73em per capital and ARGUMENT runs 0.77em per glyph.
+        'anybody' => [0.76, 0.68],
     ];
 
     /**
@@ -296,14 +299,19 @@ final class HeroHeadlineFit
             // row overran a 307px column and gave the page a horizontal
             // scroll. The phone term never bites on a wide viewport, so a
             // fixed pixel term from the wide width and the column count does.
-            $column = self::columnWordBoundPx($doc, $i, $theme, $slug, $wordEm);
+            // A long heading in a narrow column also keeps its two widest
+            // neighbouring words on one line (frm PR-5n): dasstudio-like20's
+            // ten-word about heading fit its longest word and still stacked
+            // one word per line at 85px. A short label may wrap word by word.
+            $pair = self::widestPair($doc->innerHtml($i), $theme, $attrs, $level, $uppercase);
+            $column = self::columnWordBoundPx($doc, $i, $theme, $slug, $word, $wordEm, $pair);
             if ($column !== null) {
                 $terms[] = $column['px'] . 'px';
                 $notes[] = sprintf(
                     "section heading column-fit: h%d '%s' (~%.2fem) would overflow a %dpx column at the %s maximum; %dpx joins the preset",
                     $level,
-                    $word,
-                    $wordEm,
+                    $column['text'],
+                    $column['em'],
                     $column['column'],
                     $slug,
                     $column['px'],
@@ -323,6 +331,12 @@ final class HeroHeadlineFit
     }
 
     private const COLUMN_GAP_PX = 24.0;
+    /** A word space in em, near the space glyph of the wide faces (Anybody 900: 0.26). */
+    private const SPACE_EM = 0.28;
+    /** Headings with this many words or more keep their widest neighbouring pair on one line in a narrow column. */
+    private const COLUMN_PAIR_MIN_WORDS = 4;
+    /** A column narrower than this share of the wide width is narrow: at the preset it holds about one word per line. */
+    private const COLUMN_PAIR_MAX_SHARE = 0.5;
     private const COLUMN_SAFETY = 0.92;
     private const WIDE_FALLBACK_PX = 1280.0;
     /** The desktop reference viewport; a wide row never exceeds it minus the root gutters. */
@@ -334,27 +348,41 @@ final class HeroHeadlineFit
      * it sits in on a wide viewport, or null when the preset's maximum
      * already fits or the heading is not inside a column row (frm PR-5m).
      *
-     * @return array{px:int,column:int}|null
+     * In a narrow column (under half the wide width) a heading of four or
+     * more words fits its widest neighbouring pair instead, so it wraps at
+     * two words per line rather than one (frm PR-5n); a wide column already
+     * holds two or three words per line at the preset and keeps the word.
+     *
+     * @param array{text:string, em:float}|null $pair the widest neighbouring
+     *        pair of a long heading, or null for a short one
+     * @return array{px:int,column:int,text:string,em:float}|null
      */
-    private static function columnWordBoundPx(BlockMarkup $doc, int $index, array $theme, string $slug, float $wordEm): ?array
+    private static function columnWordBoundPx(BlockMarkup $doc, int $index, array $theme, string $slug, string $word, float $wordEm, ?array $pair = null): ?array
     {
-        $column = null;
+        // Every column row on the way up narrows the heading (frm PR-5n): the
+        // dasstudio-like20 about heading sat in a 40% column of a 75% column,
+        // so its column was 379px, not the 518px a single share gives.
+        $shares = [];
         for ($node = $doc->parent($index); $node !== null; $node = $doc->parent($node)) {
-            if ($doc->name($node) === 'column') {
-                $column = $node;
-                break;
+            if ($doc->name($node) !== 'column') {
+                continue;
             }
+            $row = $doc->parent($node);
+            if ($row === null || $doc->name($row) !== 'columns') {
+                continue;
+            }
+            $siblings = array_values(array_filter($doc->children($row), static fn (int $c): bool => $doc->name($c) === 'column'));
+            $count = count($siblings);
+            if ($count < 2) {
+                continue;
+            }
+            $width = $doc->attrs($node)['width'] ?? null;
+            $share = is_string($width) && preg_match('/^\s*([0-9.]+)%\s*$/', $width, $m) === 1
+                ? max(0.05, min(1.0, (float) $m[1] / 100))
+                : 1 / $count;
+            $shares[] = ['count' => $count, 'share' => $share];
         }
-        if ($column === null) {
-            return null;
-        }
-        $row = $doc->parent($column);
-        if ($row === null || $doc->name($row) !== 'columns') {
-            return null;
-        }
-        $siblings = array_values(array_filter($doc->children($row), static fn (int $c): bool => $doc->name($c) === 'column'));
-        $count = count($siblings);
-        if ($count < 2) {
+        if ($shares === []) {
             return null;
         }
         $wide = self::WIDE_FALLBACK_PX;
@@ -363,19 +391,23 @@ final class HeroHeadlineFit
             $wide = (float) $m[1];
         }
         $wide = min($wide, self::DESKTOP_VIEWPORT_PX - 2 * self::DESKTOP_GUTTER_PX);
-        $inner = $wide - ($count - 1) * self::COLUMN_GAP_PX;
-        $width = $doc->attrs($column)['width'] ?? null;
-        $share = is_string($width) && preg_match('/^\s*([0-9.]+)%\s*$/', $width, $m) === 1
-            ? max(0.05, min(1.0, (float) $m[1] / 100))
-            : 1 / $count;
-        $columnPx = $inner * $share;
+        $columnPx = $wide;
+        foreach (array_reverse($shares) as $level) {
+            $columnPx = ($columnPx - ($level['count'] - 1) * self::COLUMN_GAP_PX) * $level['share'];
+        }
+        $text = $word;
+        $em = $wordEm;
+        if ($pair !== null && $pair['em'] > $wordEm && $columnPx < $wide * self::COLUMN_PAIR_MAX_SHARE) {
+            $text = $pair['text'];
+            $em = $pair['em'];
+        }
         $available = $columnPx * self::COLUMN_SAFETY;
         $max = self::presetMaxPx($theme, $slug);
-        if ($max === null || $max <= 0 || $wordEm <= 0 || $max * $wordEm <= $available) {
+        if ($max === null || $max <= 0 || $em <= 0 || $max * $em <= $available) {
             return null;
         }
-        $px = (int) floor($available / $wordEm);
-        return $px > 0 ? ['px' => $px, 'column' => (int) round($columnPx)] : null;
+        $px = (int) floor($available / $em);
+        return $px > 0 ? ['px' => $px, 'column' => (int) round($columnPx), 'text' => $text, 'em' => $em] : null;
     }
 
     /** The preset slug the theme gives a heading level, or the level's fallback. */
@@ -964,17 +996,53 @@ final class HeroHeadlineFit
     /** The heading's longest word, or null when it has no text. */
     private static function longestWord(string $innerHtml): ?string
     {
-        // A line break is a word boundary: stripping it bare would fuse the
-        // words on either side into one impossibly long token.
-        $text = preg_replace('/<br\s*\/?>/i', ' ', $innerHtml) ?? $innerHtml;
-        $text = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5));
         $longest = null;
-        foreach (preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+        foreach (self::words($innerHtml) as $word) {
             if ($longest === null || mb_strlen($word) > mb_strlen($longest)) {
                 $longest = $word;
             }
         }
         return $longest;
+    }
+
+    /**
+     * The heading's words in order, with tags and entities resolved.
+     *
+     * @return list<string>
+     */
+    private static function words(string $innerHtml): array
+    {
+        // A line break is a word boundary: stripping it bare would fuse the
+        // words on either side into one impossibly long token.
+        $text = preg_replace('/<br\s*\/?>/i', ' ', $innerHtml) ?? $innerHtml;
+        $text = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5));
+        return preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /**
+     * The widest pair of neighbouring words in a heading of at least
+     * COLUMN_PAIR_MIN_WORDS words, with its estimated width in em, or null
+     * for a shorter heading (frm PR-5n).
+     *
+     * @return array{text:string, em:float}|null
+     */
+    private static function widestPair(string $innerHtml, array $theme, array $attrs, int $level, bool $uppercase): ?array
+    {
+        $words = self::words($innerHtml);
+        if (count($words) < self::COLUMN_PAIR_MIN_WORDS) {
+            return null;
+        }
+        $charEm = self::characterEm($theme, $uppercase);
+        $spacing = self::effectiveLetterSpacingEm($attrs, $theme, $level);
+        $widest = null;
+        for ($i = 1, $n = count($words); $i < $n; $i++) {
+            $chars = mb_strlen($words[$i - 1]) + mb_strlen($words[$i]);
+            $em = $chars * $charEm + self::SPACE_EM + $chars * $spacing;
+            if ($widest === null || $em > $widest['em']) {
+                $widest = ['text' => $words[$i - 1] . ' ' . $words[$i], 'em' => $em];
+            }
+        }
+        return $widest;
     }
 
     /** The display preset's largest resolvable size in px, or null. */

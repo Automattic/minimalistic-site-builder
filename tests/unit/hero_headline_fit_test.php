@@ -732,3 +732,61 @@ test('a section heading word that would overflow its column on a wide viewport g
     $r = HeroHeadlineFit::fitSectionHeadings($wideCol, $theme);
     assert_true(!str_contains(implode("\n", $r['notes']), 'column-fit'), 'a 70% column is wide enough for the word');
 });
+
+test('a long heading in a nested column keeps its widest word pair on one line (frm PR-5n)', function () {
+    $theme = [
+        'settings' => ['layout' => ['wideSize' => '1400px'], 'typography' => [
+            'fontFamilies' => [['slug' => 'heading', 'fontFamily' => '"Anybody", "Arial Narrow", sans-serif']],
+            'fontSizes' => [
+                ['slug' => 'heading', 'size' => '3.464rem'],
+                ['slug' => 'section-title', 'size' => 'clamp(4.33rem, 6vw, 6.447rem)'],
+            ],
+        ]],
+        'styles' => ['elements' => [
+            'heading' => ['typography' => ['textTransform' => 'uppercase', 'letterSpacing' => '-0.03em']],
+            'h2' => ['typography' => ['fontSize' => 'var:preset|font-size|section-title']],
+        ]],
+    ];
+    // The cohort-28 miss: a ten-word about heading in a 40% column of a 75%
+    // column, set in Anybody 900 uppercase. One share of the wide width read
+    // the column as 518px and pinned 85px; the heading stacked one word per
+    // line and ARGUMENT still ran under the photo.
+    $heading = static fn (string $text): string => '<!-- wp:heading --><h2 class="wp-block-heading">' . $text . '</h2><!-- /wp:heading -->';
+    $inner = '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column" style="flex-basis:40%">' . $heading('Form follows <span class="emph">the argument a brand is trying to win</span>') . '</div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column" style="flex-basis:60%"><!-- wp:paragraph --><p>Copy</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    $outer = '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"25%"} --><div class="wp-block-column" style="flex-basis:25%"><!-- wp:paragraph --><p class="side-label">About</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"75%"} --><div class="wp-block-column" style="flex-basis:75%">' . $inner . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . $outer . '</div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($markup, $theme);
+    $notes = implode("\n", $r['notes']);
+    // Wide 1400 caps at 1366 − 48 = 1318; (1318 − 24) × 0.75 = 970.5; (970.5 − 24) × 0.4 = 378.6px.
+    // The widest pair "Form follows" / "the argument" is 11 chars × 0.76em (Anybody) + 0.28em = 8.64em;
+    // 378.6 × 0.92 = 348.3 ÷ 8.64 = 40px.
+    assert_contains("section heading column-fit: h2 'Form follows' (~8.64em) would overflow a 379px column at the section-title maximum; 40px joins the preset", $notes);
+    assert_contains(', 40px)"', $r['markup'], 'the pair bound replaces the single-word bound');
+    $again = HeroHeadlineFit::fitSectionHeadings($r['markup'], $theme);
+    assert_eq($r['markup'], $again['markup'], 'idempotent');
+
+    // A two-word label in the same column keeps the single-word bound: it may wrap word by word.
+    $label = str_replace('Form follows <span class="emph">the argument a brand is trying to win</span>', 'Brand argument', $markup);
+    $r = HeroHeadlineFit::fitSectionHeadings($label, $theme);
+    // ARGUMENT: 8 × 0.76em = 6.08em; 348.3 ÷ 6.08 = 57px.
+    assert_contains("column-fit: h2 'argument' (~6.08em) would overflow a 379px column", implode("\n", $r['notes']), 'a short heading fits its longest word only');
+
+    // The same heading in a single 40% column of the wide width reads 518px: the nesting narrowed it.
+    $flat = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . str_replace('<!-- wp:columns -->', '<!-- wp:columns {"align":"wide"} -->', $inner) . '</div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($flat, $theme);
+    assert_contains("would overflow a 518px column", implode("\n", $r['notes']), 'one column row reads one share');
+
+    // In a wide column (75% of the wide width, 971px) the heading already wraps two or three words per line, so the pair rule stays out and the longest word bounds it.
+    $wideCol = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"><!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"25%"} --><div class="wp-block-column"><!-- wp:paragraph --><p>About</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"75%"} --><div class="wp-block-column">' . $heading('Four disciplines and one long argument to win') . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($wideCol, $theme);
+    assert_true(!str_contains(implode("\n", $r['notes']), 'column-fit'), 'a wide column keeps the preset when its longest word fits');
+});

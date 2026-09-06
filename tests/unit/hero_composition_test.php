@@ -710,7 +710,8 @@ test('the wordmark-stage recipe sets the site name giant as the one headline, wi
     $upper = ['settings' => ['typography' => ['fontFamilies' => [['slug' => 'heading', 'name' => 'Anybody', 'fontFamily' => 'Anybody']]]], 'styles' => ['elements' => ['heading' => ['typography' => ['textTransform' => 'uppercase']]]]];
     assert_true(HeroComposition::headingsUppercase($upper));
     assert_true(!HeroComposition::headingsUppercase($wide));
-    assert_eq(7.4, HeroComposition::wordmarkEm('Studio Blank', $upper), 'an uppercase theme measures the name as STUDIO BLANK (frm PR-2x)');
+    // Anybody joined the wide-face table at 0.76em per capital (frm PR-5n), so the uppercase name measures wider than the generic 0.70em gave.
+    assert_eq(8.01, HeroComposition::wordmarkEm('Studio Blank', $upper), 'an uppercase theme measures the name as STUDIO BLANK (frm PR-2x)');
     assert_eq(HeroComposition::wordmarkEm('STUDIO BLANK', $upper), HeroComposition::wordmarkEm('Studio Blank', $upper));
     assert_contains('"fontSize":"min(18rem, max(calc(90cqi / 5.24), min(calc(90cqi / 3.08), 3rem)))"', $bound, 'the whole name on one line, or the longest word at up to 3rem on a phone (frm PR-2r, PR-2v)');
     assert_contains('style="font-size:min(18rem, max(calc(90cqi / 5.24), min(calc(90cqi / 3.08), 3rem)))"', $bound);
