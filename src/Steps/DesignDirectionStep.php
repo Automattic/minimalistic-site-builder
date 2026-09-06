@@ -721,8 +721,31 @@ final class DesignDirectionStep implements Step
             }
         }
 
+        // frm PR-2m: a stated-only recipe (the giant name behind the hero)
+        // never comes from the hash. Only such a stable pick yields, to the
+        // same-seeded pick from the pool without it, so every other site
+        // keeps its seat.
+        $select = static fn (): string => HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        $stablePick = $select();
+        if ($stated === null && in_array($stablePick, HeroComposition::STATED_ONLY_RECIPES, true)) {
+            $quietPick = HeroComposition::selectExcluding(
+                $stableIdentifier,
+                $conceptSeed,
+                $constraints,
+                HeroComposition::STATED_ONLY_RECIPES,
+            );
+            if (!in_array($quietPick, HeroComposition::STATED_ONLY_RECIPES, true)) {
+                $note = 'designDirection.json: hero recipe stable pick ' . self::describe($stablePick)
+                    . ' delivered ' . self::describe($quietPick)
+                    . '; disposition the giant name behind the hero is a stated device and this brief names none,'
+                    . ' so the stable pick yields';
+                $statedNote = $statedNote === null ? $note : $statedNote . ' | ' . $note;
+                $select = static fn (): string => $quietPick;
+            }
+        }
+
         if (!array_key_exists('hero_assignment', $meta)) {
-            return HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            return $select();
         }
         $assignment = $meta['hero_assignment'];
         if (is_array($assignment)) {
@@ -739,7 +762,7 @@ final class DesignDirectionStep implements Step
                 return $requested;
             }
 
-            $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            $delivered = $select();
             $reason = $source !== 'batch'
                 ? 'assignment source was not the supported fallible batch channel'
                 : ($requested === ''
@@ -754,7 +777,7 @@ final class DesignDirectionStep implements Step
             return $delivered;
         }
 
-        $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        $delivered = $select();
         $warnings[] = "file='meta.json'; path=\"hero_assignment\"; authored="
             . self::describe($assignment)
             . '; delivered=' . self::describe($delivered)
