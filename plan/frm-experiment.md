@@ -664,7 +664,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 131 | PR-5n | #582 | merged | a long heading in a narrow nested column keeps its widest word pair on one line; nested column shares; Anybody width | https://gist.github.com/matiasbenedetto/0d04676cbc6199a9878c0fff8a2b645d |
 | 132 | PR-5o | #583 | merged | a stated serif or sans name, headline or wordmark names the letterform tradition | https://gist.github.com/matiasbenedetto/ab515fafd365c7547ae8ea55b6fe23b8 |
 | 133 | PR-4v | #584 | merged | a hue budget the brief states outranks the seed economy; monochrome keeps the cobalt accent | https://gist.github.com/matiasbenedetto/8949d4f087f0efe0b7326afafdf268ec |
-| 134 | PR-0k | | in PR | an invented persona that is not a full name is re-asked once; the site name follows the person | (gist after the evidence build) |
+| 134 | PR-0k | | in PR | an invented persona that is not a full name is re-asked once; the site name follows the person | https://gist.github.com/matiasbenedetto/871a47e917b28a95e372ab082970b7d4 |
 
 ## 9. Iteration log (one line per loop turn)
 
