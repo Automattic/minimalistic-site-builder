@@ -2710,3 +2710,29 @@ test('a phrase that names the page outranks a loose colour word named later (frm
     assert_eq('light', GroundKey::statedInBrief('Light page, then a dark page later in the story'), 'the earliest page phrase wins when both appear');
     assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant.'));
 });
+
+
+test('a canvas the brief states outranks the model commitment, never a caller constraint (frm PR-2p)', function () {
+    assert_eq('framed', DesignDirectionStep::statedCanvas('Warm off-white page, one painted desert-sky cover hero in a rounded frame.'));
+    assert_eq('framed', DesignDirectionStep::statedCanvas('a framed hero on a white page'));
+    assert_eq(null, DesignDirectionStep::statedCanvas('Create a website for a Georgian restaurant.'));
+    assert_eq(null, DesignDirectionStep::statedCanvas('Light grey page with rounded near-black panels'), 'rounded panels are band geometry, not the canvas');
+    assert_eq('framed', DesignDirectionStep::statedCanvasFor(['original_prompt' => 'hero in a rounded frame', 'prompt' => 'a landing page']));
+    assert_eq(null, DesignDirectionStep::statedCanvasFor([]));
+
+    $meta = ['prompt' => 'one painted cover hero in a rounded frame'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'measure' => 'standard'], $meta, false, $repairs);
+    assert_eq('framed', $out['canvas']);
+    assert_eq('standard', $out['measure']);
+    assert_eq(1, count($repairs));
+    assert_contains('field canvas authored "full-bleed" delivered "framed"', $repairs[0]);
+    assert_contains('the brief names its canvas', $repairs[0]);
+
+    $repairs = [];
+    assert_eq(['canvas' => 'full-bleed'], DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed'], $meta, true, $repairs), 'a caller-pinned canvas stands');
+    assert_eq([], $repairs);
+    assert_eq(['canvas' => 'framed'], DesignDirectionStep::withStatedDirection(['canvas' => 'framed'], $meta, false, $repairs), 'already framed: no repair');
+    assert_eq([], $repairs);
+    assert_eq(['canvas' => 'full-bleed'], DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed'], ['prompt' => 'a dark landing page'], false, $repairs), 'a silent brief changes nothing');
+});
