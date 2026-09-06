@@ -15,9 +15,9 @@ eye walks down a zigzag. Every row is built the same way; only the side changes.
   at most two lines each. Nothing else.
 - Media column: ONE `wp:image` with `"className":"card-media"` in the
   blueprint's landscape crop, or, when the plan supplies no image for that
-  step, ONE empty `wp:group` with `"className":"step-plate"` and
-  `"backgroundColor":"band"` that the theme sizes as a plate. Never text in
-  the media column.
+  step, ONE empty `wp:group` with `"className":"step-plate"` and no
+  background of its own: the theme sizes and tints the plate from the band
+  it sits on. Never text in the media column.
 - Copy budget: one heading and at most one lead line for the band, then the
   ladder. No footnote after the ladder.
 - Identity: the one top-level group carries the assigned root marker class.

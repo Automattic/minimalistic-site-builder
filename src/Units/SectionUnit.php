@@ -177,6 +177,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
         // A heading never carries its own paint (frm PR-5j).
         $markup = GeneratedMarkup::stripHeadingPaint($markup, $this->key($input), $repairs, $warnings);
+        // An empty step plate takes the theme's tint, not a preset (frm PR-3ad).
+        $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
         if ($archetype !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
                 $markup,
