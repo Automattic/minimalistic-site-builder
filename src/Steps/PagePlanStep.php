@@ -661,6 +661,37 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $repairActionContext,
                 );
             }
+            // A repair that answers with a fraction of the plan is a loss, not
+            // a fix (frm PR-3ag): zova-like39's repair of one unresolved
+            // anchor came back as the hero alone, and the page shipped three
+            // sections, two of them generic padding. The original plan the
+            // model already paid for goes through the mechanical backstop
+            // instead, which coerces every known rejection.
+            $originalRaw = $_rejection['plan']['sections'] ?? null;
+            $originalCount = self::sectionArrayCount($originalRaw);
+            if ($originalCount >= self::REPAIR_SHRINK_MIN_PLAN && count($sections) < (int) ceil($originalCount / 2)) {
+                $shrunk = count($sections);
+                $recoveredWarnings = [];
+                $recoveredRepairs = [];
+                $recovered = self::recoverSections(
+                    $originalRaw,
+                    $front,
+                    $recoveredWarnings,
+                    $slug,
+                    $front ? $frontProjection : null,
+                    $repairActionContext,
+                    $recoveredRepairs,
+                    $allowOffsetGrid,
+                );
+                if (count($recovered) > $shrunk) {
+                    $warnings[] = "page-plan: file='pages.json'; path=\"pages[slug='{$slug}'].sections\"; authored={$originalCount} planned"
+                        . " section(s); delivered=" . count($recovered) . " section(s) from the original plan; disposition=the model repair"
+                        . " answered with {$shrunk} section(s), so the original plan was recovered mechanically instead of the repair";
+                    $warnings = array_merge($warnings, $recoveredWarnings);
+                    $successfulRepairs = array_merge($successfulRepairs, $recoveredRepairs);
+                    $sections = $recovered;
+                }
+            }
             $sectionsBySlug[$slug] = $sections;
         }
 
@@ -775,6 +806,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     ];
 
     /** Archetypes that plan no image; a demoted cover was image-led, so its slot keeps a media-capable row. */
+    /** A plan of at least this many sections whose repair answers with fewer than half is recovered from the original (frm PR-3ag). */
+    private const REPAIR_SHRINK_MIN_PLAN = 5;
+
     private const NO_IMAGE_ARCHETYPES = ['statement-lines', 'feature-row-hairlines', 'stat-ledger', 'faq-split'];
 
     /** Whether a brief asks for a cover band below the hero in so many words. */
