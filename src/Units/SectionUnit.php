@@ -181,6 +181,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
         // A price figure without a price is a scope line (frm PR-3ae).
         $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
+        // A long marquee line is marked for the static branches (frm PR-8n).
+        $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
         if ($archetype !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
                 $markup,

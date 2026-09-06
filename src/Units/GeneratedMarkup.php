@@ -3645,6 +3645,65 @@ final class GeneratedMarkup
         return $document->render();
     }
 
+    /** A marquee line longer than this many characters wraps to a wall under reduced motion (frm PR-8n). */
+    public const LONG_MARQUEE_CHARS = 64;
+    public const LONG_MARQUEE_CLASS = 'is-long-line';
+
+    /**
+     * A long marquee line is marked for the static branches (frm PR-8n):
+     * spector-like34's eight client names wrapped to eight display-scale
+     * lines under reduced motion. The kit reads the mark and sets the
+     * static statement at section-title scale; the loop is untouched.
+     *
+     * @param list<array<string,string>> $repairs
+     */
+    public static function markLongMarquee(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $marked = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('marquee', $classes, true) || in_array(self::LONG_MARQUEE_CLASS, $classes, true)) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (mb_strlen($text, 'UTF-8') <= self::LONG_MARQUEE_CHARS) {
+                continue;
+            }
+            $classes[] = self::LONG_MARQUEE_CLASS;
+            $attrs['className'] = implode(' ', $classes);
+            $document->setAttrs($index, $attrs);
+            $own = $document->ownHtml($index);
+            if (preg_match('/<p\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $tokens[] = self::LONG_MARQUEE_CLASS;
+                    return ' class="' . implode(' ', $tokens) . '"';
+                }, $opening, 1) ?? $opening;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $marked++;
+        }
+        if ($marked === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'long-marquee-marked',
+            'part' => $part,
+            'authored' => $marked . ' marquee line(s) over ' . self::LONG_MARQUEE_CHARS . ' characters',
+            'delivered' => 'marked ' . self::LONG_MARQUEE_CLASS . ' for the static branches',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
     private static function describePaint(mixed $value): string
     {
         return is_string($value) ? '"' . mb_strimwidth($value, 0, 60, '…', 'UTF-8') . '"' : 'set';
