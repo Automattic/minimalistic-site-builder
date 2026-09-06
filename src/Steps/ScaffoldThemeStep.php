@@ -185,6 +185,24 @@ final class ScaffoldThemeStep implements Step
         .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group:not(.card-body):not([style*="padding"]) {
             padding: var(--wp--preset--spacing--md, 1.5rem);
         }
+        /* Ink follows fill (frm PR-4x): dasstudio-like24's process band
+           (contrast fill, base ink) carried its step rows as card items, the
+           model's sheet painted `.card-style--flush` base, and the copy went
+           white on white. Inside a dark band a card item takes a translucent
+           plate and keeps the band's ink; a block that paints itself base or
+           band inside a dark band, without an ink of its own, takes contrast
+           ink; and a block that paints itself contrast or primary without an
+           ink of its own takes base ink. Core sets only the background on
+           these classes, so no rule here fights an !important. */
+        :is(.has-contrast-background-color, .has-primary-background-color) .item-pattern__item:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless):not(.has-background) {
+            background-color: color-mix(in srgb, currentColor 8%, transparent);
+        }
+        :is(.has-contrast-background-color, .has-primary-background-color) :is(.has-base-background-color, .has-band-background-color):not(.has-text-color) {
+            color: var(--wp--preset--color--contrast);
+        }
+        :is(.has-contrast-background-color, .has-primary-background-color):not(.has-text-color):not(.wp-block-cover) {
+            color: var(--wp--preset--color--base);
+        }
         /* The overlap panel deliberately retains a one-rem reveal on each side.
            Its explicit width keeps the fixed margins inside the card box. */
         .wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {
