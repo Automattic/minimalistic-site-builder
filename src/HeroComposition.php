@@ -21,7 +21,24 @@ final class HeroComposition
         'marquee-name',
         'metadata-corners',
         'portrait-backdrop',
+        'wordmark-stage',
     ];
+
+    /** The giant name headline of wordmark-stage (frm W2e). */
+    public const WORDMARK_CLASS = 'hero-composition__wordmark';
+
+    /** The optional facts ledger of wordmark-stage: one flex group of two or three short paragraphs (frm W2e). */
+    public const FACTS_CLASS = 'hero-composition__facts';
+
+    /** @var list<int> */
+    public const FACTS_COUNTS = [2, 3];
+
+    /**
+     * Per-character advance the wordmark pin assumes, in em (frm W2e): a
+     * generous median for a display face in either case, so a long name
+     * pins smaller rather than running off a phone.
+     */
+    public const WORDMARK_CHAR_EM = 0.66;
 
     /** The one portrait plate of portrait-backdrop (frm W2d). */
     public const PORTRAIT_CLASS = 'hero-composition__portrait';
@@ -307,6 +324,45 @@ final class HeroComposition
                 'height_profile' => 'standard', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
                 'media_aspect' => 'portrait', 'media_weight' => 'dominant',
+            ],
+        ],
+        // frm W2e: fabrica, dasstudio and calderr open on the name itself.
+        // The site name set giant is the level-1 heading, in the heading
+        // face and case the direction commits; one line and at most one
+        // action under it; an optional facts ledger of two or three short
+        // paragraphs on the trailing side. No picture: the name is the
+        // picture. The build pins the name's size to the viewport from its
+        // character count, so it fills the measure on every screen.
+        'wordmark-stage' => [
+            'canvases' => ['full-bleed', 'framed'],
+            // The foreground mode with a zero budget: the recipe sits in the
+            // foreground pools (a stated light page keeps it) and generates
+            // nothing, because max_images is 0 and the gate reads the budget.
+            'media_modes' => ['foreground-image'],
+            'min_images' => 0,
+            'max_images' => 0,
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-copy-first'],
+            'layout_archetype' => 'centered-stack',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--wordmark-stage',
+            'prompt' => 'hero-compositions/wordmark-stage.md',
+            'headline_registers' => ['poster', 'display'],
+            'height_profiles' => ['compact', 'standard'],
+            'media_aspects' => ['square'],
+            'media_weights' => ['balanced'],
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'poster',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [1, 3]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'quiet',
+                'mobile_transformation' => 'stack-copy-first',
+                'media_aspect' => 'square', 'media_weight' => 'balanced',
             ],
         ],
         'layered-poster' => [
@@ -844,6 +900,57 @@ final class HeroComposition
                 );
             }
         }
+        // frm W2e: the giant name is the recipe's device. Exactly one level-1
+        // heading, marked, inside the copy region; at most one facts group,
+        // outside the copy region, of two or three non-empty paragraphs.
+        if ($recipe === 'wordmark-stage') {
+            $marks = [];
+            $headings = 0;
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index) ?? [];
+                $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if ($document->name($index) === 'heading' && (int) ($attrs['level'] ?? 2) === 1) {
+                    $headings++;
+                }
+                if (in_array(self::WORDMARK_CLASS, $classes, true)) {
+                    $marks[] = $index;
+                }
+            }
+            $sound = $headings === 1
+                && count($marks) === 1
+                && $document->name($marks[0]) === 'heading'
+                && self::hasAncestorClass($document, $marks[0], 'hero-composition__copy');
+            $factGroups = [];
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index) ?? [];
+                $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(self::FACTS_CLASS, $classes, true)) {
+                    $factGroups[] = $index;
+                }
+            }
+            $facts = [];
+            if (count($factGroups) > 1) {
+                $sound = false;
+            } elseif (count($factGroups) === 1) {
+                $sound = $sound
+                    && $document->name($factGroups[0]) === 'group'
+                    && !self::hasAncestorClass($document, $factGroups[0], 'hero-composition__copy');
+                foreach ($document->children($factGroups[0]) as $child) {
+                    $facts[] = $document->name($child) === 'paragraph'
+                        && trim(strip_tags($document->innerHtml($child))) !== '';
+                }
+                $sound = $sound && in_array(count($facts), self::FACTS_COUNTS, true) && !in_array(false, $facts, true);
+            }
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe wordmark headline',
+                    ['required_class' => self::WORDMARK_CLASS, 'headings' => 1, 'inside' => 'hero-composition__copy', 'facts_groups' => [0, 1], 'facts' => self::FACTS_COUNTS],
+                    ['level_1_headings' => $headings, 'marked_blocks' => count($marks), 'facts_groups' => count($factGroups), 'facts' => count($facts)],
+                    'safe parseable hero was retained; restore the one marked level-1 name heading in the copy region and at most one fact group of two or three short paragraphs beside it',
+                );
+            }
+        }
         // frm W2d: the portrait plate is the recipe's device. Exactly one
         // marked image inside the media region, and the copy region holds
         // one two-column row (headline leading, line and action trailing).
@@ -1113,6 +1220,92 @@ final class HeroComposition
     }
 
     /**
+     * Bind the wordmark-stage headline to the site name and pin its size
+     * (frm W2e). The level-1 heading in the copy region carries the site
+     * name exactly, takes the wordmark class, and gets one explicit size
+     * that fills the measure on every screen: the viewport width divided by
+     * the name's estimated em length, capped so a short name never runs
+     * past 18rem. The headline fit leaves an explicit size alone, so the pin
+     * survives; the theme's own case transform still applies.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function bindWordmarkHeadline(string $markup, string $siteName, string $part, array &$repairs = []): string
+    {
+        $siteName = trim($siteName);
+        if ($siteName === '') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ((int) ($attrs['level'] ?? 2) !== 1) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<h1\b[^>]*>)(.*)(<\/h1>\s*)$/su', $own, $m) !== 1) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $chars = max(1, mb_strlen($siteName, 'UTF-8'));
+            $size = 'min(18rem, calc(92vw / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '') . '))';
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-display-font-size'));
+            if (!in_array(self::WORDMARK_CLASS, $classes, true)) {
+                $classes[] = self::WORDMARK_CLASS;
+            }
+            $attrs['className'] = implode(' ', $classes);
+            unset($attrs['fontSize']);
+            if (!is_array($attrs['style'] ?? null)) {
+                unset($attrs['style']);
+            }
+            if (!is_array($attrs['style']['typography'] ?? null)) {
+                unset($attrs['style']['typography']);
+            }
+            $attrs['style']['typography']['fontSize'] = $size;
+            $document->setAttrs($index, $attrs);
+            $open = $m[1];
+            $open = preg_replace('/\s+style="[^"]*"/', '', $open, 1) ?? $open;
+            if (preg_match('/\bclass="([^"]*)"/', $open, $cm) === 1) {
+                $tokens = preg_split('/\s+/', trim($cm[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                $tokens = array_values(array_filter($tokens, static fn (string $c): bool => $c !== 'has-display-font-size'));
+                if (!in_array(self::WORDMARK_CLASS, $tokens, true)) {
+                    $tokens[] = self::WORDMARK_CLASS;
+                }
+                $open = str_replace($cm[0], 'class="' . implode(' ', $tokens) . '"', $open);
+            } else {
+                $open = preg_replace('/^(\s*<h1)/', '$1 class="wp-block-heading ' . self::WORDMARK_CLASS . '"', $open, 1) ?? $open;
+            }
+            $open = preg_replace('/>$/', ' style="font-size:' . $size . '">', rtrim($open), 1) ?? $open;
+            $document->spliceOwnHtml($index, 0, strlen($own), $open . htmlspecialchars($siteName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . $m[3]);
+            if ($text !== $siteName) {
+                $repairs[] = [
+                    'code' => 'wordmark-name-bound',
+                    'part' => $part,
+                    'block' => 'heading.' . self::WORDMARK_CLASS,
+                    'authored' => $text,
+                    'delivered' => $siteName,
+                    'disposition' => 'repaired',
+                    'note' => 'the wordmark headline carries the site name exactly, never a paraphrase or a slogan',
+                ];
+            }
+            $repairs[] = [
+                'code' => 'wordmark-size-pinned',
+                'part' => $part,
+                'block' => 'heading.' . self::WORDMARK_CLASS,
+                'authored' => 'display preset',
+                'delivered' => $size,
+                'disposition' => 'repaired',
+            ];
+            return $document->render();
+        }
+        return $markup;
+    }
+
+    /**
      * The hero the brief states in so many words, or null when it is silent
      * (frm PR-2g). The same bounded-phrase shape as GroundKey::statedInBrief:
      * these are the client's own instructions about the opening, and the
@@ -1128,6 +1321,12 @@ final class HeroComposition
         'portrait-backdrop' => [
             'portrait backdrop', 'portrait behind', 'portrait centered behind', 'photo centered behind',
             'portrait photo centered', 'headshot behind', 'photo behind the copy', 'portrait behind the copy',
+        ],
+        'wordmark-stage' => [
+            'giant serif name', 'name as the hero headline', 'name set huge as the hero', 'giant name as the hero',
+            'huge uppercase wordmark', 'giant lowercase wordmark', 'huge lowercase wordmark', 'giant uppercase wordmark',
+            'wordmark hero', 'giant wordmark hero', 'huge wordmark hero', 'wordmark as the hero',
+            'hero is a huge wordmark', 'hero is a giant wordmark', 'name set giant', 'giant name hero',
         ],
         'metadata-corners' => [
             'metadata in the corners', 'metadata corners', 'corner metadata', 'facts in the corners',

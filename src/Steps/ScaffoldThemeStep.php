@@ -670,6 +670,39 @@ final class ScaffoldThemeStep implements Step
             margin-block: 0;
             text-wrap: balance;
         }
+        /* wordmark-stage (frm W2e): the site name set giant as the headline,
+           its size pinned inline by the build from the name's length so it
+           fills the measure on every screen; the line and the action sit
+           under it, and the optional facts ledger runs as a hairline row on
+           the trailing side. The heading face and case come from the theme. */
+        .hero-composition--wordmark-stage .hero-composition__copy {
+            max-width: none;
+        }
+        .hero-composition--wordmark-stage .hero-composition__wordmark {
+            margin-block: 0 0.35em;
+            line-height: 0.88;
+            letter-spacing: -0.04em;
+            white-space: nowrap;
+            overflow-wrap: normal;
+            text-wrap: nowrap;
+        }
+        .hero-composition--wordmark-stage .hero-composition__copy > p {
+            max-width: 34rem;
+        }
+        .hero-composition--wordmark-stage .hero-composition__facts {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: var(--wp--preset--spacing--sm, 0.75rem) var(--wp--preset--spacing--lg, 3rem);
+            margin-block-start: var(--wp--preset--spacing--md, 1.5rem);
+            padding-block-start: var(--wp--preset--spacing--sm, 0.75rem);
+            border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+            opacity: 0.85;
+        }
+        .hero-composition--wordmark-stage .hero-composition__facts > p {
+            margin: 0;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+        }
         /* marquee-name floating objects (frm W7c): the aria-hidden object
            group is taken out of the flow and pinned over the whole hero;
            each cutout takes a corner slot around the centered stack, above
@@ -944,6 +977,9 @@ final class ScaffoldThemeStep implements Step
                 position: static;
                 inset: auto;
                 transform: none;
+            }
+            .hero-composition--wordmark-stage .hero-composition__facts {
+                justify-content: flex-start;
             }
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);

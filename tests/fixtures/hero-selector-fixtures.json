@@ -63,7 +63,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -80,7 +81,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -97,7 +99,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -115,7 +118,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -132,7 +136,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -149,7 +154,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -166,7 +172,8 @@
             "eligible": [
                 "foreground-split",
                 "marquee-name",
-                "portrait-backdrop"
+                "portrait-backdrop",
+                "wordmark-stage"
             ]
         },
         {
@@ -191,6 +198,12 @@
                 "layered-poster",
                 "metadata-corners"
             ]
+        },
+        {
+            "id": "panel-stage-seed",
+            "stable_identifier": "corpus-seed-9",
+            "concept_seed": "Corpus seed for panel-stage, variant 8.",
+            "constraints": []
         }
     ]
 }
