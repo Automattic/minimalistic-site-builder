@@ -353,6 +353,42 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
     assert_eq([], $coverAspect);
 });
 
+test('a cover recipe accepts an ultrawide background as its landscape plate delivered well', function () {
+    // image-generation.md steers a full-bleed background toward `ultrawide`
+    // so the desktop banner crops less, and the audited heroes wrote exactly
+    // that — then this check, pinned to the blueprint's `landscape` plate,
+    // reported every one of them as drift (PepeneBun, both builds of
+    // 2026-09-04). A wide plate fed by the wider source is not drift.
+    $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">One subject</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $cover = static fn (string $aspect): string =>
+        '<!-- wp:cover {"className":"hero-composition__media"} --><div class="wp-block-cover hero-composition__media">'
+        . '<img src="theme:./assets/bench.jpg" alt="AI_IMAGE: A split melon on a bench | full-frame backdrop | photorealistic | ' . $aspect . '" />'
+        . $copy . '</div><!-- /wp:cover -->';
+    $hero = static fn (string $aspect): string =>
+        '<!-- wp:group {"className":"hero-composition--cinematic-safe-zone"} --><div class="wp-block-group hero-composition--cinematic-safe-zone">'
+        . $cover($aspect) . '</div><!-- /wp:group -->';
+    $blueprint = HeroBlueprint::defaultFor('cinematic-safe-zone');
+
+    assert_eq([], HeroComposition::markupWarnings($hero('ultrawide'), 'cinematic-safe-zone', 'page-home--hero', $blueprint));
+    assert_eq([], HeroComposition::markupWarnings($hero('landscape'), 'cinematic-safe-zone', 'page-home--hero', $blueprint));
+
+    $tall = HeroComposition::markupWarnings($hero('portrait'), 'cinematic-safe-zone', 'page-home--hero', $blueprint);
+    assert_eq(1, count($tall), 'a portrait source under a wide plate is still drift');
+    assert_contains('recipe image aspect', $tall[0]);
+    assert_contains('landscape or ultrawide', $tall[0]);
+
+    // A contained foreground plate is never ultrawide: the image prompt
+    // forbids that ratio for contained slots, so there the check stays exact.
+    $plate = '<!-- wp:group --><div class="wp-block-group">' . $copy
+        . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<img src="theme:./assets/plate.jpg" alt="AI_IMAGE: A melon | foreground slot | photorealistic | ultrawide" />'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    $contained = HeroComposition::markupWarnings($plate, 'foreground-split', 'page-home--hero', HeroBlueprint::defaultFor('foreground-split'));
+    assert_eq(1, count(array_filter($contained, static fn (string $w): bool => str_contains($w, 'recipe image aspect'))));
+});
+
 test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {
     $media = '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
         . '<img src="theme:./assets/subject.jpg" alt="AI_IMAGE: Subject | foreground slot | photorealistic | landscape" />'

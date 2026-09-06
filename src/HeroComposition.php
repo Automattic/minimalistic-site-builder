@@ -601,6 +601,18 @@ final class HeroComposition
         $expectedAspects = in_array($committed, (array) $meta['media_aspects'], true)
             ? [$committed]
             : array_values((array) $meta['media_aspects']);
+        // A full-bleed cover plate is wide whichever wide source feeds it. The
+        // image prompt steers a background toward `ultrawide` so the desktop
+        // banner crops less, so that source is the committed landscape plate
+        // delivered well, not drift; a contained foreground plate never takes
+        // it, so the exact check stays for those recipes.
+        if (
+            in_array('cover-image', $mediaModes, true)
+            && in_array('landscape', $expectedAspects, true)
+            && !in_array('ultrawide', $expectedAspects, true)
+        ) {
+            $expectedAspects[] = 'ultrawide';
+        }
         if ($expectedAspects !== [] && $images !== []) {
             $aspects = array_values(array_map(
                 static fn (array $image): string => self::imageAspect($image['alt']),
