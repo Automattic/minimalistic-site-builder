@@ -2793,6 +2793,10 @@ test('colour photography the brief states outranks a monochrome grade and a duot
     assert_contains('field image_treatment authored "duotone" delivered "natural"', $repairs[1]);
 
     $repairs = [];
+    $drained = DesignDirectionStep::withStatedDirection(['image_grade' => 'Overcast daylight, colour but drained toward warm greys with only muted plum surviving.', 'image_treatment' => 'natural'], $meta, false, $repairs);
+    assert_contains('Full saturated colour photography, never monochrome and never duotone. Overcast daylight, colour but full colour with only muted plum surviving.', $drained['image_grade'], 'a drained-grey grade counts as monochrome (frm PR-4o-2)');
+    assert_eq(1, count($repairs));
+    $repairs = [];
     $colour = ['image_grade' => 'Saturated colour under low window light.', 'image_treatment' => 'natural'];
     assert_eq($colour, DesignDirectionStep::withStatedDirection($colour, $meta, false, $repairs), 'a colour grade stands');
     assert_eq([], $repairs);
