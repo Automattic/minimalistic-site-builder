@@ -2786,6 +2786,7 @@ test('colour photography the brief states outranks a monochrome grade and a duot
     assert_contains('Full saturated colour photography, never monochrome and never duotone.', $out['image_grade']);
     assert_true(!preg_match('/monochrome|silver-toned/i', substr($out['image_grade'], 70)), 'the monochrome words are gone from the authored prose');
     assert_contains('north light raking across the subject', $out['image_grade'], 'the light description survives');
+    assert_contains('Cool full colour throughout', $out['image_grade'], 'two adjacent monochrome words collapse to one clause');
     assert_eq('natural', $out['image_treatment']);
     assert_eq(2, count($repairs));
     assert_contains('field image_grade authored a monochrome grade', $repairs[0]);

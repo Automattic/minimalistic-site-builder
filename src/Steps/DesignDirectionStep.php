@@ -2485,6 +2485,8 @@ final class DesignDirectionStep implements Step
             $grade = trim((string) ($direction['image_grade'] ?? ''));
             if ($grade !== '' && preg_match(self::MONOCHROME_GRADE, $grade) === 1) {
                 $rewritten = trim((string) preg_replace(self::MONOCHROME_GRADE, 'full colour', $grade));
+                // Two adjacent monochrome words ("silver-toned monochrome") collapse to one clause.
+                $rewritten = (string) preg_replace('/\bfull colour(?:\s+full colour)+\b/u', 'full colour', $rewritten);
                 $direction['image_grade'] = 'Full saturated colour photography, never monochrome and never duotone. ' . $rewritten;
                 $repairs[] = 'designDirection.json: field image_grade authored a monochrome grade delivered a full-colour grade'
                     . '; disposition the brief names colour photography, so the model commitment yields to it';
