@@ -408,6 +408,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 89 | #539 | W5 (PR-5i) | Phone-fit section headings by their longest word (frm) | merged | gist 5afc0c9ab6cab7ceefec975d620c02c3: dasstudio-like2 at 390 probed before (scrollWidth 455, the h2 word CONVERSATION at 56.6px) / after (twelve pins mirrored with inline styles, scrollWidth 390) + replay of the pins | d670e795 |
 | 90 | #540 | W4 (PR-4m) | Let a page-level ground phrase outrank a loose colour word (frm) | merged | gist 2e8507b34d0de2d8ff1e93614e32edc9: the nine briefs replayed (fabrica now light; the others unchanged); no build | 1a101e43 |
 | 91 | #541 | W2 (PR-2o) | Read a stated cover hero in more words (frm) | merged | gist c4856ba18107f04d086e61494829b9b9: the nine briefs replayed (parley now reads cinematic-safe-zone) + the parley-like selection with its own meta and seed (portrait-backdrop to cinematic-safe-zone); no build | db2041bc |
+| 92 | #542 | W4 (PR-4l) | Read a stated wordmark footer in more words (frm) | merged | gist 070c3850eca4db83395bfc7ce39b23a2: the nine briefs replayed against the cohort-10 footers (fabrica, dasstudio and calderr now read sunken-wordmark); no build | 3658458d |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -511,6 +512,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 98: PR-5i #539 merged (section headings get a measured phone pin). Next: PR-4m on branch frm/ground-page-phrase (a page-level ground phrase outranks a loose colour word), then PR-2o and PR-4l.
 - 2026-09-06 turn 99: PR-4m #540 merged. Next: PR-2o on branch frm/stated-cover-hero-phrases (parley's painted cover hero), then PR-4l.
 - 2026-09-06 turn 100: PR-2o #541 merged. Next: PR-4l on branch frm/wordmark-footer-phrases, then PR-2p (stated framed canvas) and PR-4n (stated rounded panels), then cohort-11 of nine sites.
+- 2026-09-06 turn 101: PR-4l #542 merged. Next: PR-2p on branch frm/stated-canvas (a stated rounded frame commits the framed canvas through DesignDirectionStep::withStatedDirection), then PR-4n on the same helper, then cohort-11.
 
 ## 10. Parked / rejected
 

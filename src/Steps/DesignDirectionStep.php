@@ -363,6 +363,9 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired to caller-owned design_constraints.hero_canvas';
             $direction['canvas'] = $constraints['hero_canvas'];
         }
+        // A direction field the brief states in so many words outranks the
+        // model's commitment (frm PR-2p), inside the caller's constraints.
+        $direction = self::withStatedDirection($direction, $meta, isset($constraints['hero_canvas']), $repairs);
 
         if ($repairs !== []) {
             Narrator::write('  [design-direction] repaired ' . count($repairs)
@@ -2332,6 +2335,66 @@ final class DesignDirectionStep implements Step
      * @param array<mixed> $meta
      */
     /** The letterform tradition the brief names, the user's own words first (frm PR-5f). */
+    /**
+     * Bounded phrases a brief uses to ask for the framed canvas (frm PR-2p):
+     * parley's "cover hero in a rounded frame". The full-bleed canvas is the
+     * default and needs no phrase.
+     *
+     * @var list<string>
+     */
+    private const STATED_FRAMED_PHRASES = [
+        'in a rounded frame', 'rounded frame', 'framed hero', 'framed page', 'framed canvas', 'inset hero',
+        'hero in a frame', 'hero inset from the edge', 'inset from the viewport', 'page in a frame',
+    ];
+
+    /** The canvas a brief states in so many words, or null. */
+    public static function statedCanvas(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_FRAMED_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return 'framed';
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedCanvasFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedCanvas($text) !== null) {
+                return self::statedCanvas($text);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Apply the direction fields the brief states (frm PR-2p) to a
+     * normalized direction: the user's own words outrank the model's
+     * commitment, the way the stated ground, type register and hero already
+     * do, but never a caller-owned constraint. Pure — unit-testable.
+     *
+     * @param array<string,mixed> $direction
+     * @param array<string,mixed> $meta
+     * @param list<string> $repairs
+     * @return array<string,mixed>
+     */
+    public static function withStatedDirection(array $direction, array $meta, bool $canvasPinned, array &$repairs = []): array
+    {
+        $statedCanvas = self::statedCanvasFor($meta);
+        if ($statedCanvas !== null && !$canvasPinned && ($direction['canvas'] ?? null) !== $statedCanvas) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($direction['canvas'] ?? null) . ' delivered '
+                . self::describe($statedCanvas)
+                . '; disposition the brief names its canvas, so the model commitment yields to it';
+            $direction['canvas'] = $statedCanvas;
+        }
+        return $direction;
+    }
+
     public static function statedTypeRegisterFor(array $meta): ?string
     {
         foreach (['original_prompt', 'prompt'] as $key) {
