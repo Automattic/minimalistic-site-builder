@@ -674,3 +674,22 @@ test('the wordmark-stage recipe sets the site name giant as the one headline, wi
     assert_eq(['wordmark-size-pinned'], array_column($again, 'code'));
     assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($bound, 'wordmark-stage', 'page-home--hero')), 'recipe wordmark headline'));
 });
+
+
+test('a stated cover hero in more words reaches cinematic-safe-zone (frm PR-2o)', function () {
+    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('Warm off-white page, one painted desert-sky cover hero in a rounded frame with a centered white headline'));
+    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('a photo cover hero with the copy centered'));
+    assert_eq('cinematic-safe-zone', HeroComposition::statedInBrief('an illustrated cover hero'));
+    assert_eq(null, HeroComposition::statedInBrief('a cover band after the hero'), 'a cover band below the hero is not a hero');
+    // The stated hero outranks the light-page ration in selectHeroRecipe.
+    $w = [];
+    $note = null;
+    $recipe = \Automattic\SiteBuild\Steps\DesignDirectionStep::selectHeroRecipe(
+        ['original_prompt' => 'Warm off-white page, one painted desert-sky cover hero in a rounded frame.'],
+        'parley-like',
+        'A warm painted seed.',
+        $w,
+        $note,
+    );
+    assert_eq('cinematic-safe-zone', $recipe);
+});

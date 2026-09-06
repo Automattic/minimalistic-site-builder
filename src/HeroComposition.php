@@ -1344,6 +1344,10 @@ final class HeroComposition
             'cinematic hero', 'full-bleed hero', 'hero photo', 'portrait hero',
             'full-bleed high-contrast portrait', 'high-contrast portrait',
             'photo hero', 'cinematic dusk photo', 'full-bleed cover',
+            // frm PR-2o: parley's "painted desert-sky cover hero in a rounded
+            // frame" fell to the hash and the light-page ration.
+            'cover hero', 'painted cover hero', 'photo cover hero', 'painted cover', 'cover photo hero',
+            'painted landscape hero', 'illustrated cover hero', 'image cover hero',
         ],
         'foreground-split' => [
             'split hero', 'copy left, image right', 'image right', 'photo on the right', 'hero split',
