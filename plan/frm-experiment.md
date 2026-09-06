@@ -223,6 +223,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-4m (P1): GroundKey reads "Light grey page with rounded near-black panels" as dark because the panel colour phrase wins; the page phrase ("light grey page", "white page", "off-white page") must outrank a panel or band colour named later in the same brief.
 - PR-2o (P1): HeroComposition's stated phrases miss "cover hero", "painted cover hero", "photo cover hero" and "hero in a rounded frame"; parley's stated cover hero fell to the hash and the light-page ration. The stated cover phrases map to cinematic-safe-zone, with the framed canvas when the brief says rounded frame.
 - PR-4l (P1): FooterComposition's stated phrases miss "footer with a huge wordmark", "huge wordmark", "giant wordmark", "footer with a giant wordmark", "name set huge", "solid blue footer band" and "footer band with the name"; three of the four new briefs name a wordmark footer and got the hash pick.
+- PR-2p (second set, P2): the parley brief's "cover hero in a rounded frame" names the framed canvas; the direction step lets the model commit the canvas and only a caller constraint repairs it. Fix: a stated canvas outranks the model commitment, never a caller constraint (DesignDirectionStep::withStatedDirection).
 - PR-4n (P2): a brief that says "rounded panels" or "rounded near-black panels" commits the rounded band geometry (BandGeometry stated reader); fabrica got flat bands.
 - PR-6b (P2): a stated numbered row (PR-3w) on a site whose direction committed no step numeral gets nothing; the stated clause should commit the ghost numeral when the direction says none (parley's "four numbered feature cards").
 
@@ -406,6 +407,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 88 | #538 | W2e | Add the wordmark-stage hero recipe (frm) | merged | gist c80bb55678b157ef324bc29e4d019adf: dasstudio-like baseline hero (portrait plate) / dasstudio-like2 evidence build (Studio Noir set giant, one line, facts ledger) on desktop and at 390; the first probe wrapped the name, the pin moved to container units | d3522a93 |
 | 89 | #539 | W5 (PR-5i) | Phone-fit section headings by their longest word (frm) | merged | gist 5afc0c9ab6cab7ceefec975d620c02c3: dasstudio-like2 at 390 probed before (scrollWidth 455, the h2 word CONVERSATION at 56.6px) / after (twelve pins mirrored with inline styles, scrollWidth 390) + replay of the pins | d670e795 |
 | 90 | #540 | W4 (PR-4m) | Let a page-level ground phrase outrank a loose colour word (frm) | merged | gist 2e8507b34d0de2d8ff1e93614e32edc9: the nine briefs replayed (fabrica now light; the others unchanged); no build | 1a101e43 |
+| 91 | #541 | W2 (PR-2o) | Read a stated cover hero in more words (frm) | merged | gist c4856ba18107f04d086e61494829b9b9: the nine briefs replayed (parley now reads cinematic-safe-zone) + the parley-like selection with its own meta and seed (portrait-backdrop to cinematic-safe-zone); no build | db2041bc |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -508,6 +510,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 97: W2e #538 merged (wordmark-stage hero: the site name set giant, container-pinned, optional facts ledger; stated phrases for the three second-set briefs). Next: PR-5i on branch frm/section-heading-phone-fit (P0: section heading word overflow at 390), then PR-4m, PR-2o, PR-4l.
 - 2026-09-06 turn 98: PR-5i #539 merged (section headings get a measured phone pin). Next: PR-4m on branch frm/ground-page-phrase (a page-level ground phrase outranks a loose colour word), then PR-2o and PR-4l.
 - 2026-09-06 turn 99: PR-4m #540 merged. Next: PR-2o on branch frm/stated-cover-hero-phrases (parley's painted cover hero), then PR-4l.
+- 2026-09-06 turn 100: PR-2o #541 merged. Next: PR-4l on branch frm/wordmark-footer-phrases, then PR-2p (stated framed canvas) and PR-4n (stated rounded panels), then cohort-11 of nine sites.
 
 ## 10. Parked / rejected
 
