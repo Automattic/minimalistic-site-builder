@@ -33,6 +33,7 @@ use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 use Automattic\SiteBuild\FormPlaceholder;
+use Automattic\SiteBuild\StrayGlyph;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -363,6 +364,7 @@ final class SectionsStep implements Step
         }
         $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
         $files = self::stripLooseFormMarkers($files, $warnings);
+        $files = self::stripStrayGlyphs($files, SiteSpecStep::languageOf($project), $warnings);
         if (self::formPlaceholders($project)) {
             $files = self::ensureContactFormPlaceholders(
                 $pages,
@@ -1274,6 +1276,29 @@ final class SectionsStep implements Step
                 . "authored={$stripped['removed']} " . FormPlaceholder::MARKER_NAME
                 . ' marker(s) outside a ' . FormPlaceholder::CLASS_NAME . ' block; delivered=removed; '
                 . 'disposition=no host substitutes these, so they would ship as visible text';
+        }
+        return $files;
+    }
+
+    /**
+     * A lone glyph from a script the site's language does not use is never
+     * copy (frm PR-9b); each one leaves the delivered text with a warning.
+     *
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    public static function stripStrayGlyphs(array $files, string $language, array &$warnings = []): array
+    {
+        foreach ($files as $rel => $markup) {
+            $stripped = StrayGlyph::strip($markup, $language);
+            if ($stripped['removed'] === 0) {
+                continue;
+            }
+            $files[$rel] = $stripped['markup'];
+            $warnings[] = "file='theme/{$rel}'; block='text'; "
+                . "authored={$stripped['removed']} lone glyph(s) from a script the site's language does not use; "
+                . 'delivered=removed; disposition=a stray character inside Latin copy is a model slip, not a word';
         }
         return $files;
     }
