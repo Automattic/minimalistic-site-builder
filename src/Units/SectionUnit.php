@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
@@ -243,6 +244,25 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
         // A project tile's overlay and ink are the build's on every ground (frm PR-3p).
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
+        // A heading word that would overflow a phone gets a measured phone pin (frm PR-5i).
+        $themeArray = $input['theme_json'] ?? null;
+        if (is_string($themeArray)) {
+            $themeArray = json_decode($themeArray, true);
+        }
+        if (is_array($themeArray)) {
+            $headingFit = HeroHeadlineFit::fitSectionHeadings($markup, $themeArray, HeroHeadlineFit::PHONE_VIEWPORT_PX);
+            $markup = $headingFit['markup'];
+            foreach ($headingFit['notes'] as $note) {
+                $repairs[] = [
+                    'code' => 'section-heading-phone-fit',
+                    'part' => $this->key($input),
+                    'block' => 'heading',
+                    'authored' => 'preset size',
+                    'delivered' => $note,
+                    'disposition' => 'repaired',
+                ];
+            }
+        }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

@@ -658,3 +658,48 @@ test('a wide display face widens the word estimate, so the phone bound bites har
     ]]]]);
     assert_eq($generic['markup'], HeroHeadlineFit::apply(hhf_hero('Design cut sharp enough to hold a room'), $unknown, null, HeroHeadlineFit::PHONE_VIEWPORT_PX)['markup']);
 });
+
+
+test('a section heading word that would overflow a phone gets a measured phone pin on its preset (frm PR-5i)', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontSizes' => [
+            ['slug' => 'heading', 'size' => '2.828rem'],
+            ['slug' => 'section-title', 'size' => 'clamp(3.536rem, 4vw, 4.757rem)'],
+            ['slug' => 'display', 'size' => 'clamp(4.384rem, 9vw, 8rem)'],
+        ]]],
+        'styles' => ['elements' => [
+            'h2' => ['typography' => ['fontSize' => 'var:preset|font-size|section-title']],
+            'h3' => ['typography' => ['fontSize' => 'var:preset|font-size|heading']],
+        ]],
+    ];
+    $section = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--zigzag-steps","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--zigzag-steps">' . $inner . '</div><!-- /wp:group -->';
+    $h2 = '<!-- wp:heading {"className":"reveal-wipe-up"} --><h2 class="wp-block-heading reveal-wipe-up">Four moves <span class="emph">from first conversation to launch</span></h2><!-- /wp:heading -->';
+    $h3 = '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">First, we listen</h3><!-- /wp:heading -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($section($h2 . $h3), $theme);
+    // "conversation": 12 × 0.58em = 6.96em; the section-title minimum is 56.6px,
+    // 56.6 × 6.96 = 394px > (390 − 64) × 0.82 = 267px, so (267 ÷ 390 × 100) ÷ 6.96 = 9.8vw.
+    assert_contains('"fontSize":"min(var(\u002d\u002dwp\u002d\u002dpreset\u002d\u002dfont-size\u002d\u002dsection-title), 9.8vw)"', $r['markup']);
+    assert_contains("section heading phone-fit: h2 'conversation' (~6.96em)", implode("\n", $r['notes']));
+    assert_eq(1, count($r['notes']), 'the short h3 is untouched');
+    assert_contains('<h3 class="wp-block-heading">First, we listen</h3>', $r['markup']);
+
+    // Idempotent: the explicit size now present is left alone.
+    $again = HeroHeadlineFit::fitSectionHeadings($r['markup'], $theme);
+    assert_eq($r['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+
+    // An authored preset attribute is read as the preset, and its class token goes with the pin.
+    $sized = $section('<!-- wp:heading {"level":3,"fontSize":"section-title"} --><h3 class="wp-block-heading has-section-title-font-size">Unconventionally</h3><!-- /wp:heading -->');
+    $r = HeroHeadlineFit::fitSectionHeadings($sized, $theme);
+    assert_contains('section-title), ', $r['markup']);
+    assert_true(!str_contains($r['markup'], 'has-section-title-font-size'));
+    assert_true(!str_contains($r['markup'], '"fontSize":"section-title"'));
+
+    // Uppercase widens the estimate; a heading whose words all fit is byte-identical.
+    $upper = $theme;
+    $upper['styles']['elements']['h2']['typography']['textTransform'] = 'uppercase';
+    $r = HeroHeadlineFit::fitSectionHeadings($section($h2), $upper);
+    assert_contains("(~8.40em)", implode("\n", $r['notes']));
+    $short = $section('<!-- wp:heading --><h2 class="wp-block-heading">Four moves that hold</h2><!-- /wp:heading -->');
+    assert_eq($short, HeroHeadlineFit::fitSectionHeadings($short, $theme)['markup']);
+});
