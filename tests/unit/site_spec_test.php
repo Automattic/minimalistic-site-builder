@@ -1267,6 +1267,16 @@ test('an empty persona on a brief that states a personal site is a placeholder (
     $llm->queueJson(['name' => 'Hearth', 'persona_name' => '', 'invented' => ['name']] + $base);
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     assert_eq(1, $llm->completeJsonCalls, 'a bakery brief has no persona to fill');
+
+    // The phrase may survive only in the original prompt when the refine step rewrote it.
+    $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A single-page site for a web designer based in Amsterdam.', 'original_prompt' => 'Create a personal portfolio for a web designer in Amsterdam.', 'multi_page' => false]);
+    $llm = new FakeLlm();
+    $llm->queueJson(['name' => 'Studioblock', 'persona_name' => '', 'invented' => ['name']] + $base);
+    $llm->queueJson(['name' => 'Studio Vermeulen', 'persona_name' => 'Marieke Vermeulen', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls, 'the original prompt states the personal site');
 });
 
 test('statedNameNear never restores a generated name to an initialism in the brief (frm PR-0j)', function () {

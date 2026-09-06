@@ -175,7 +175,7 @@ final class SiteSpecStep implements Step
                 // portfolio for a web designer", and no retry could fire.
                 $emptyPersona = $placeholder === '' && is_array($spec)
                     && trim((string) ($spec['persona_name'] ?? '')) === ''
-                    && self::personalBrief($prompt);
+                    && (self::personalBrief((string) ($meta['original_prompt'] ?? '')) || self::personalBrief($prompt));
                 if ($emptyPersona) {
                     $placeholder = '(empty)';
                 }
