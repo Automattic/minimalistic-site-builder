@@ -677,6 +677,19 @@ final class ScaffoldThemeStep implements Step
            the trailing side. The heading face and case come from the theme. */
         .hero-composition--wordmark-stage .hero-composition__copy {
             container-type: inline-size;
+            /* The copy group spans the whole band, not the content measure
+               (frm PR-2t): the container query then sizes the name from the
+               band, so a long name reaches across the viewport the way
+               dasstudio sets it. The root's constrained layout caps children
+               with a zero-specificity rule, so this plain rule wins. The
+               line keeps its own measure below. */
+            max-width: none;
+        }
+        /* The copy group's own constrained layout caps its children the
+           same way; the name, the action and the facts row take the band,
+           and the line keeps its own measure below (frm PR-2t). */
+        .hero-composition--wordmark-stage .hero-composition__copy > * {
+            max-width: none;
         }
         .hero-composition--wordmark-stage .hero-composition__wordmark {
             margin-block: 0 0.35em;
