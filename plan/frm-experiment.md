@@ -661,7 +661,8 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 128 | PR-8n | #579 | merged | a long static marquee reads at section-title scale | https://gist.github.com/matiasbenedetto/cbd1356f23851e840c08fc3f637fb95c |
 | 129 | PR-0j | #580 | merged | an initialism in the brief is never a stated brand | https://gist.github.com/matiasbenedetto/1588983fba7456d68fa42525fefbe79a |
 | 130 | PR-3ag | #581 | merged | the original plan is recovered when the model repair delivers fewer than half of five or more sections | (unit evidence: page_plan_test; zova-like39 plan replay) |
-| 131 | PR-5n | | in PR | a long heading in a narrow nested column keeps its widest word pair on one line; nested column shares; Anybody width | https://gist.github.com/matiasbenedetto/0d04676cbc6199a9878c0fff8a2b645d |
+| 131 | PR-5n | #582 | merged | a long heading in a narrow nested column keeps its widest word pair on one line; nested column shares; Anybody width | https://gist.github.com/matiasbenedetto/0d04676cbc6199a9878c0fff8a2b645d |
+| 132 | PR-5o | | in PR | a stated serif or sans name, headline or wordmark names the letterform tradition | https://gist.github.com/matiasbenedetto/ab515fafd365c7547ae8ea55b6fe23b8 |
 
 ## 9. Iteration log (one line per loop turn)
 
