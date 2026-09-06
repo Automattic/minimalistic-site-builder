@@ -179,6 +179,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::stripHeadingPaint($markup, $this->key($input), $repairs, $warnings);
         // An empty step plate takes the theme's tint, not a preset (frm PR-3ad).
         $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
+        // A price figure without a price is a scope line (frm PR-3ae).
+        $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
         if ($archetype !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
                 $markup,
