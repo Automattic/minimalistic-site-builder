@@ -703,3 +703,32 @@ test('a section heading word that would overflow a phone gets a measured phone p
     $short = $section('<!-- wp:heading --><h2 class="wp-block-heading">Four moves that hold</h2><!-- /wp:heading -->');
     assert_eq($short, HeroHeadlineFit::fitSectionHeadings($short, $theme)['markup']);
 });
+
+
+test('a section heading word that would overflow its column on a wide viewport gets a pixel bound (frm PR-5m)', function () {
+    $theme = [
+        'settings' => ['layout' => ['wideSize' => '1280px'], 'typography' => ['fontSizes' => [
+            ['slug' => 'heading', 'size' => '2.828rem'],
+            ['slug' => 'section-title', 'size' => 'clamp(3.536rem, 4vw, 4.757rem)'],
+        ]]],
+        'styles' => ['elements' => [
+            'heading' => ['typography' => ['textTransform' => 'uppercase']],
+            'h3' => ['typography' => ['fontSize' => 'var:preset|font-size|heading']],
+        ]],
+    ];
+    $col = static fn (string $text): string => '<!-- wp:column --><div class="wp-block-column"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $text . '</h3><!-- /wp:heading --></div><!-- /wp:column -->';
+    $row = '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $col('Brand strategy') . $col('Visual identity') . $col('Digital design') . $col('Environmental graphics') . '</div><!-- /wp:columns -->';
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . $row . '</div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($markup, $theme);
+    // Four columns of (1280 − 3 × 24) ÷ 4 = 302px; ENVIRONMENTAL is 13 × 0.70em = 9.1em;
+    // the heading maximum 45.2px × 9.1 = 411px > 302 × 0.92 = 278px, so 278 ÷ 9.1 = 30px.
+    assert_contains('"fontSize":"min(var(\\u002d\\u002dwp\\u002d\\u002dpreset\\u002d\\u002dfont-size\\u002d\\u002dheading), 7.5vw, 30px)"', $r['markup'], 'the phone term and the column term share one min()');
+    assert_contains("section heading column-fit: h3 'Environmental' (~9.10em) would overflow a 302px column", implode("\n", $r['notes']));
+    assert_contains('<h3 class="wp-block-heading">Brand strategy</h3>', $r['markup'], 'a short word keeps the preset');
+    $again = HeroHeadlineFit::fitSectionHeadings($r['markup'], $theme);
+    assert_eq($r['markup'], $again['markup'], 'idempotent');
+
+    $wideCol = str_replace('<!-- wp:column --><div class="wp-block-column"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Environmental', '<!-- wp:column {"width":"70%"} --><div class="wp-block-column" style="flex-basis:70%"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Environmental', $markup);
+    $r = HeroHeadlineFit::fitSectionHeadings($wideCol, $theme);
+    assert_true(!str_contains(implode("\n", $r['notes']), 'column-fit'), 'a 70% column is wide enough for the word');
+});
