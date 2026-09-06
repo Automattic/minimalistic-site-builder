@@ -2678,6 +2678,12 @@ test('the marquee-name hero comes only from a brief that names it; a hash pick o
     );
     assert_eq('marquee-name', $stated, 'the brief that names it keeps it');
 
+    // On a stated light page the quiet pick is a foreground recipe, never a cover band (frm PR-2h).
+    $note = null;
+    $lit = DesignDirectionStep::selectHeroRecipe(['prompt' => 'Light page, tight sans headings, featured work as large image cards.'], $hit, 'Committed seed', $w, $note);
+    assert_true($lit !== 'marquee-name');
+    assert_eq(['foreground-image'], Automattic\SiteBuild\HeroComposition::metadata($lit)['media_modes'], "a light page opens on its ground (got {$lit})");
+
     // A site whose hash pick is not marquee-name keeps its seat byte for byte.
     $other = null;
     foreach (range(1, 400) as $i) {

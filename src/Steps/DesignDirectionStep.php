@@ -728,11 +728,21 @@ final class DesignDirectionStep implements Step
         $select = static fn (): string => HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
         $stablePick = $select();
         if ($stated === null && in_array($stablePick, HeroComposition::STATED_ONLY_RECIPES, true)) {
+            // The quiet pick honours the PR-2h light-page ration too: a
+            // stated light page never opens on a cover band.
+            $excluded = HeroComposition::STATED_ONLY_RECIPES;
+            if ($ground === 'light') {
+                foreach (HeroComposition::RECIPES as $candidate) {
+                    if ((array) HeroComposition::metadata($candidate)['media_modes'] === ['cover-image']) {
+                        $excluded[] = $candidate;
+                    }
+                }
+            }
             $quietPick = HeroComposition::selectExcluding(
                 $stableIdentifier,
                 $conceptSeed,
                 $constraints,
-                HeroComposition::STATED_ONLY_RECIPES,
+                $excluded,
             );
             if (!in_array($quietPick, HeroComposition::STATED_ONLY_RECIPES, true)) {
                 $note = 'designDirection.json: hero recipe stable pick ' . self::describe($stablePick)
