@@ -663,7 +663,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 130 | PR-3ag | #581 | merged | the original plan is recovered when the model repair delivers fewer than half of five or more sections | (unit evidence: page_plan_test; zova-like39 plan replay) |
 | 131 | PR-5n | #582 | merged | a long heading in a narrow nested column keeps its widest word pair on one line; nested column shares; Anybody width | https://gist.github.com/matiasbenedetto/0d04676cbc6199a9878c0fff8a2b645d |
 | 132 | PR-5o | #583 | merged | a stated serif or sans name, headline or wordmark names the letterform tradition | https://gist.github.com/matiasbenedetto/ab515fafd365c7547ae8ea55b6fe23b8 |
-| 133 | PR-4v | | in PR | a hue budget the brief states outranks the seed economy; monochrome keeps the cobalt accent | (gist after the evidence build) |
+| 133 | PR-4v | | in PR | a hue budget the brief states outranks the seed economy; monochrome keeps the cobalt accent | https://gist.github.com/matiasbenedetto/8949d4f087f0efe0b7326afafdf268ec |
 
 ## 9. Iteration log (one line per loop turn)
 
