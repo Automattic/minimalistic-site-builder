@@ -694,7 +694,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 137 | PR-4w | #588 | merged | theme.json custom CSS may read a preset variable, never reassign it | https://gist.github.com/matiasbenedetto/e5b35b2db6b768c99f1a3466f1329713 |
 | 138 | PR-4x | #589 | merged | the ink follows the fill inside a dark band (scaffold rules) | https://gist.github.com/matiasbenedetto/8eeea27fa54cb0720c0bab1a0c56938a |
 | 139 | PR-0l | #590 | merged | the generic-name retry also asks for a full persona in the same call | https://gist.github.com/matiasbenedetto/695d4cec6ff3dbbf637e43f0b1ae176f |
-| 140 | PR-0m | | in PR | an empty persona on a brief that states a personal site is a placeholder | (gist after the evidence build) |
+| 140 | PR-0m | | in PR | an empty persona on a brief that states a personal site is a placeholder | https://gist.github.com/matiasbenedetto/afe8b1fe93f032bb02e944dc624f47e1 |
 
 ## 9. Iteration log (one line per loop turn)
 
