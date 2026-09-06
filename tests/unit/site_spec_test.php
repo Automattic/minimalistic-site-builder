@@ -1194,13 +1194,36 @@ test('site-spec re-asks once when the model invents a placeholder persona (frm P
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     assert_eq(1, $llm->completeJsonCalls, 'a stated persona is never re-asked');
 
-    // A generic site name still takes the name retry, never both.
+    // A generic site name with a placeholder persona takes ONE retry that asks for both (frm PR-0l).
     [$project, $llm] = make_sitespec_fixture();
-    $llm->queueJson(['name' => 'Portfolio', 'persona_name' => 'Maven', 'invented' => ['name', 'persona_name']] + $base);
-    $llm->queueJson(['name' => 'Mara Veldkamp', 'persona_name' => 'Mara Veldkamp', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Studio Atelier', 'persona_name' => 'Vera', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Studio Vermeulen', 'persona_name' => 'Marieke Vermeulen', 'invented' => ['name', 'persona_name']] + $base);
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     assert_eq(2, $llm->completeJsonCalls);
     assert_eq('site-spec-name-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    assert_contains('Your persona_name "Vera" is not a person\'s full name either', $llm->calls[1]['prompt']);
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('Marieke Vermeulen', $spec['persona_name']);
+    assert_eq('Studio Vermeulen', $spec['name']);
+    $warnings = json_encode($project->readJson('warnings.json'));
+    assert_contains('field persona_name authored \\"Vera\\" delivered \\"Marieke Vermeulen\\"; disposition an invented persona must be a person\'s full name, so the name retry asked for both', $warnings);
+
+    // The retry may fix the name and still answer a placeholder persona: the name ships, the persona is warned, no third call.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Studio Atelier', 'persona_name' => 'Vera', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Vera', 'persona_name' => 'Vera', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_eq('Vera', $project->readJson('siteSpec.json')['name']);
+    assert_contains('the one retry answered a placeholder again', json_encode($project->readJson('warnings.json')));
+
+    // A generic name with a real persona keeps the plain name retry.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Portfolio', 'persona_name' => 'Mara Veldkamp', 'invented' => ['name']] + $base);
+    $llm->queueJson(['name' => 'Mara Veldkamp', 'persona_name' => 'Mara Veldkamp', 'invented' => ['name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_true(!str_contains($llm->calls[1]['prompt'], 'Your persona_name'), 'a stated persona is not re-asked');
 });
 
 test('statedNameNear never restores a generated name to an initialism in the brief (frm PR-0j)', function () {

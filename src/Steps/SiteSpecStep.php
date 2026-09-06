@@ -170,10 +170,21 @@ final class SiteSpecStep implements Step
                     ? trim((string) $spec['persona_name'])
                     : '';
                 if ($generic !== '' && self::genericName($generic)) {
+                    // When the persona is a placeholder too, the one retry
+                    // asks for both (frm PR-0l): calderr-like25's "Studio
+                    // Atelier" became "Vera", persona "Vera", because the
+                    // name retry took precedence and the persona was never
+                    // re-asked.
+                    $personaClause = $placeholder !== ''
+                        ? " Your persona_name \"{$placeholder}\" is not a person's full name either: this is a personal"
+                            . ' site about one person, so give that person a plausible full name (a given name and a'
+                            . ' family name that fit the language and place), name the site after that person or their'
+                            . ' studio, and list both in "invented".'
+                        : '';
                     $retry = $this->llm->completeJson(
                         $rendered . "\n\nRETRY: your previous answer named the site \"{$generic}\", which is a generic"
                         . ' category word, not a name. Give the site a real proper name (invent one if the prompt states'
-                        . ' none, and list "name" in "invented"); keep every other fact as before.',
+                        . ' none, and list "name" in "invented"); keep every other fact as before.' . $personaClause,
                         $this->withOptions(['log_label' => $this->id() . '-name-retry']),
                     );
                     $retried = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
@@ -181,6 +192,17 @@ final class SiteSpecStep implements Step
                         $spec = $retry;
                         $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered \"{$retried}\""
                             . '; disposition a generic category word is not a site name, so one fresh sample replaced it';
+                        if ($placeholder !== '') {
+                            $retriedPersona = trim((string) ($retry['persona_name'] ?? ''));
+                            $warnings[] = self::placeholderPersona($retry)
+                                ? "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered "
+                                    . ($retriedPersona === '' ? 'nothing usable' : "\"{$retriedPersona}\"")
+                                    . "; disposition an invented persona must be a person's full name, and the one"
+                                    . ' retry answered a placeholder again'
+                                : "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered"
+                                    . " \"{$retriedPersona}\"; disposition an invented persona must be a person's"
+                                    . ' full name, so the name retry asked for both';
+                        }
                     } else {
                         $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered as authored"
                             . '; disposition a generic category word is not a site name, and the retry answered '
