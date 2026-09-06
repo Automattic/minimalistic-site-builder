@@ -722,3 +722,19 @@ test('the stat-ledger figure rule names level-3 figures, so a section heading in
     assert_true(!str_contains($css, '.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {'), 'no level-agnostic figure rule remains');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('scaffold-theme makes the wordmark-stage copy group a container so the pinned name fills it (frm W2e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_wordmark_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $rule = '.hero-composition--wordmark-stage .hero-composition__copy {';
+    assert_contains($rule, $css);
+    assert_contains('container-type: inline-size;', substr($css, (int) strpos($css, $rule), 200));
+    $name = '.hero-composition--wordmark-stage .hero-composition__wordmark {';
+    assert_contains($name, $css);
+    assert_contains('white-space: nowrap;', substr($css, (int) strpos($css, $name), 400), 'the name stays on one line at its pinned size');
+    assert_contains('.hero-composition--wordmark-stage .hero-composition__facts {', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -119,6 +119,19 @@ final class HeroUnit extends AbstractPageSectionUnit
             // A floating object is a keyed cutout: its source is a .png (frm PR-7e).
             $markup = HeroComposition::keyObjectFilenames($markup, $key, $repairs);
         }
+        if ($context['recipe'] === 'wordmark-stage') {
+            // The name is the headline, at a size pinned to the viewport (frm W2e).
+            $spec = $input['site_spec'] ?? null;
+            if (is_string($spec)) {
+                $spec = json_decode($spec, true);
+            }
+            $markup = HeroComposition::bindWordmarkHeadline(
+                $markup,
+                is_array($spec) ? (string) ($spec['name'] ?? '') : '',
+                $key,
+                $repairs,
+            );
+        }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);

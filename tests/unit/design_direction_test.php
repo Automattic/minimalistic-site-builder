@@ -2096,7 +2096,9 @@ test('automatic hero selection keeps the image gate aligned with each catalog me
         fn (string $recipe): bool
             => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
     ));
-    assert_eq([], $imageless);
+    // frm W2e: the wordmark hero is the one imageless recipe, and its zero
+    // budget keeps the gate aligned the same way (the name is the picture).
+    assert_eq(['wordmark-stage'], $imageless);
 
     $selected = [];
     foreach (range(1, 16) as $i) {

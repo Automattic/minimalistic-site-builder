@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(7, count(HeroComposition::RECIPES));
+    assert_eq(8, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -618,4 +618,59 @@ test('the hero boundary renames a floating object authored as .jpg to the .png t
     $clean = $hero($media . $objects($object('a.png') . $object('b.png')));
     assert_eq($clean, HeroComposition::keyObjectFilenames($clean, 'x', $repairs));
     assert_eq([], $repairs);
+});
+
+
+test('the wordmark-stage recipe sets the site name giant as the one headline, with an optional facts ledger (frm W2e)', function () {
+    assert_true(in_array('wordmark-stage', HeroComposition::RECIPES, true));
+    $meta = HeroComposition::metadata('wordmark-stage');
+    assert_eq(['foreground-image'], $meta['media_modes'], 'the foreground pools keep it; the zero budget generates nothing');
+    assert_eq(0, (int) $meta['max_images']);
+    assert_true(!HeroComposition::usesGeneratedImages(HeroBlueprint::defaultFor('wordmark-stage')));
+    assert_eq('hero-compositions/wordmark-stage.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(!HeroComposition::usesGeneratedImages('wordmark-stage'));
+    assert_eq('wordmark-stage', HeroComposition::statedInBrief('the hero is a huge uppercase wordmark with a one-line tagline'));
+    assert_eq('wordmark-stage', HeroComposition::statedInBrief('one dark photo panel with a giant lowercase wordmark'));
+    assert_eq('wordmark-stage', HeroComposition::statedInBrief('a giant serif name as the hero headline'));
+    assert_eq('marquee-name', HeroComposition::statedInBrief('one giant marquee of my name behind the hero'), 'the marquee stays its own recipe');
+    assert_eq(null, HeroComposition::statedInBrief('a footer with a huge wordmark'), 'a wordmark footer is not a wordmark hero');
+    $warnings = [];
+    assert_eq(HeroBlueprint::defaultFor('wordmark-stage'), HeroBlueprint::normalize(HeroBlueprint::defaultFor('wordmark-stage'), 'wordmark-stage', $warnings));
+    assert_eq([], $warnings);
+
+    $copy = static fn (string $h1Class, string $extra = ''): string => '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"className":"' . $h1Class . '","fontSize":"display"} --><h1 class="wp-block-heading ' . $h1Class . ' has-display-font-size">Das Studio</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Strategy and design for growing brands.</p><!-- /wp:paragraph -->' . $extra . '</div><!-- /wp:group -->';
+    $facts = static fn (int $n): string => '<!-- wp:group {"className":"hero-composition__facts","layout":{"type":"flex","flexWrap":"wrap"}} --><div class="wp-block-group hero-composition__facts">'
+        . implode('', array_map(static fn (int $i): string => '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Fact ' . $i . '</p><!-- /wp:paragraph -->', range(1, $n)))
+        . '</div><!-- /wp:group -->';
+    $hero = static fn (string $inner): string => '<!-- wp:group {"className":"hero-composition--wordmark-stage","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition--wordmark-stage">' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $hero($copy('hero-composition__wordmark') . $facts(3));
+    $joined = implode("\n", HeroComposition::markupWarnings($good, 'wordmark-stage', 'page-home--hero'));
+    assert_true(!str_contains($joined, 'recipe wordmark headline'), $joined);
+    $bare = $hero($copy('hero-composition__wordmark'));
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($bare, 'wordmark-stage', 'page-home--hero')), 'recipe wordmark headline'), 'the facts are optional');
+    $unmarked = $hero($copy('') . $facts(2));
+    assert_contains('recipe wordmark headline', implode("\n", HeroComposition::markupWarnings($unmarked, 'wordmark-stage', 'page-home--hero')));
+    $four = $hero($copy('hero-composition__wordmark') . $facts(4));
+    assert_contains('"facts":4', implode("\n", HeroComposition::markupWarnings($four, 'wordmark-stage', 'page-home--hero')));
+    $inside = $hero($copy('hero-composition__wordmark', $facts(2)));
+    assert_contains('recipe wordmark headline', implode("\n", HeroComposition::markupWarnings($inside, 'wordmark-stage', 'page-home--hero')), 'facts inside the copy group fail');
+
+    // The binding: the name replaces a slogan, the class and the pinned size arrive, and a second pass is a fixed point.
+    $slogan = $hero(str_replace('Das Studio', 'Design with weight', $copy('')));
+    $repairs = [];
+    $bound = HeroComposition::bindWordmarkHeadline($slogan, 'Das Studio', 'page-home--hero', $repairs);
+    assert_contains('>Das Studio</h1>', $bound);
+    assert_contains('"className":"hero-composition__wordmark"', $bound);
+    assert_contains('"fontSize":"min(18rem, calc(92cqi / 6.60))"', $bound, 'ten characters at 0.66em');
+    assert_contains('style="font-size:min(18rem, calc(92cqi / 6.60))"', $bound);
+    assert_true(!str_contains($bound, 'has-display-font-size'));
+    assert_eq(['wordmark-name-bound', 'wordmark-size-pinned'], array_column($repairs, 'code'));
+    $again = [];
+    assert_eq($bound, HeroComposition::bindWordmarkHeadline($bound, 'Das Studio', 'page-home--hero', $again));
+    assert_eq(['wordmark-size-pinned'], array_column($again, 'code'));
+    assert_true(!str_contains(implode("\n", HeroComposition::markupWarnings($bound, 'wordmark-stage', 'page-home--hero')), 'recipe wordmark headline'));
 });
