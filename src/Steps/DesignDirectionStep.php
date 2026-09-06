@@ -2383,6 +2383,46 @@ final class DesignDirectionStep implements Step
         return null;
     }
 
+    /**
+     * Bounded phrases a brief uses to ask for colour photography (frm
+     * PR-4o): fabrica's "moody colour photography" met a direction that
+     * committed a silver monochrome grade with a duotone treatment.
+     *
+     * @var list<string>
+     */
+    private const STATED_COLOUR_PHRASES = [
+        'colour photography', 'color photography', 'colour photos', 'color photos', 'colour photographs',
+        'color photographs', 'saturated colour', 'saturated color', 'full colour', 'full color',
+        'photos in colour', 'photos in color', 'photography in colour', 'photography in color',
+    ];
+
+    /** Grade words that contradict stated colour photography. */
+    private const MONOCHROME_GRADE = '/\b(?:monochrome|monochromatic|black[- ]and[- ]white|black & white|b&w|grayscale|greyscale|duotone|desaturated|silver[- ]toned)\b/iu';
+
+    /** Whether a brief asks for colour photography in so many words. */
+    public static function statedColourPhotography(string $brief): bool
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_COLOUR_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedColourPhotographyFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedColourPhotography($text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The canvas a brief states in so many words, or null. */
     public static function statedCanvas(string $brief): ?string
     {
@@ -2436,6 +2476,25 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedGeometry)
                 . '; disposition the brief names rounded panels, so the model commitment yields to it';
             $direction['band_geometry'] = $statedGeometry;
+        }
+        // frm PR-4o: colour photography the brief states outranks a
+        // monochrome grade and a duotone treatment. The grade prose drives
+        // every generated picture, so its monochrome words are rewritten and
+        // the clause is stated first; the treatment goes back to natural.
+        if (self::statedColourPhotographyFor($meta)) {
+            $grade = trim((string) ($direction['image_grade'] ?? ''));
+            if ($grade !== '' && preg_match(self::MONOCHROME_GRADE, $grade) === 1) {
+                $rewritten = trim((string) preg_replace(self::MONOCHROME_GRADE, 'full colour', $grade));
+                $direction['image_grade'] = 'Full saturated colour photography, never monochrome and never duotone. ' . $rewritten;
+                $repairs[] = 'designDirection.json: field image_grade authored a monochrome grade delivered a full-colour grade'
+                    . '; disposition the brief names colour photography, so the model commitment yields to it';
+            }
+            $treatment = (string) ($direction['image_treatment'] ?? '');
+            if (in_array($treatment, ['duotone', 'high-key-bw'], true)) {
+                $repairs[] = 'designDirection.json: field image_treatment authored ' . self::describe($treatment)
+                    . ' delivered "natural"; disposition the brief names colour photography, so the treatment stays natural';
+                $direction['image_treatment'] = 'natural';
+            }
         }
         // frm PR-6b: a numbered row the brief states (PR-3w) needs a
         // committed numeral to draw; parley's "four numbered feature cards"

@@ -2769,3 +2769,33 @@ test('a stated numbered row commits the ghost numeral when the direction committ
     assert_eq('none', DesignDirectionStep::withStatedDirection(['step_numeral' => 'none'], ['prompt' => 'a dark landing page'], false, $repairs)['step_numeral'], 'a silent brief changes nothing');
     assert_eq([], $repairs);
 });
+
+
+test('colour photography the brief states outranks a monochrome grade and a duotone treatment (frm PR-4o)', function () {
+    assert_true(DesignDirectionStep::statedColourPhotography('Light grey page, bold grotesque type, moody colour photography, rounded near-black panels'));
+    assert_true(DesignDirectionStep::statedColourPhotography('saturated color photos throughout'));
+    assert_true(!DesignDirectionStep::statedColourPhotography('one cinematic dusk photo series'));
+    assert_true(!DesignDirectionStep::statedColourPhotography('Create a website for a Georgian restaurant.'));
+
+    $meta = ['original_prompt' => 'Light grey page, bold grotesque type, moody colour photography.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection([
+        'image_grade' => 'Cool silver-toned monochrome throughout — every photograph a fine gelatin print: north light raking across the subject.',
+        'image_treatment' => 'duotone',
+    ], $meta, false, $repairs);
+    assert_contains('Full saturated colour photography, never monochrome and never duotone.', $out['image_grade']);
+    assert_true(!preg_match('/monochrome|silver-toned/i', substr($out['image_grade'], 70)), 'the monochrome words are gone from the authored prose');
+    assert_contains('north light raking across the subject', $out['image_grade'], 'the light description survives');
+    assert_eq('natural', $out['image_treatment']);
+    assert_eq(2, count($repairs));
+    assert_contains('field image_grade authored a monochrome grade', $repairs[0]);
+    assert_contains('field image_treatment authored "duotone" delivered "natural"', $repairs[1]);
+
+    $repairs = [];
+    $colour = ['image_grade' => 'Saturated colour under low window light.', 'image_treatment' => 'natural'];
+    assert_eq($colour, DesignDirectionStep::withStatedDirection($colour, $meta, false, $repairs), 'a colour grade stands');
+    assert_eq([], $repairs);
+    $silent = ['image_grade' => 'Cool monochrome throughout.', 'image_treatment' => 'duotone'];
+    assert_eq($silent, DesignDirectionStep::withStatedDirection($silent, ['prompt' => 'a dark editorial page'], false, $repairs), 'a silent brief changes nothing');
+    assert_eq([], $repairs);
+});
