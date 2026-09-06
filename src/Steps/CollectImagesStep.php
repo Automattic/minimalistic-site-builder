@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -90,9 +91,22 @@ final class CollectImagesStep implements Step
         /** @var array<string,bool> $canonicalByFilename keyed by filename */
         $canonicalByFilename = [];
         $warnings = [];
+        /** @var list<string> $folds successful path repairs, reported outside warnings.json */
+        $folds = [];
+        $assetsOnDisk = self::assetFilenamesOnDisk($project);
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
-            $content = $project->readText('theme/' . $rel);
+            $original = $project->readText('theme/' . $rel);
+            // The model sometimes writes the POST-generation form of a path —
+            // "/wp-content/themes/<slug>/assets/<file>" — instead of the
+            // placeholder it was taught. Fold that guess back so the canonical
+            // parser below sees it (rung 1); a file that really exists on disk
+            // is a resume after generation and is left alone.
+            $folded = self::foldGuessedAssetPaths($original, $assetsOnDisk);
+            $content = $folded['content'];
+            foreach ($folded['folded'] as $from => $to) {
+                $folds[] = "theme/{$rel}: model-written asset path {$from} folded to {$to}";
+            }
             $parsed = self::parseAndNormalize($content);
             $updated = $parsed['content'];
 
@@ -228,9 +242,14 @@ final class CollectImagesStep implements Step
                 $byFilename[$filename] = $img;
                 $canonicalByFilename[$filename] = $entry['canonical'];
             }
-            if ($updated !== $content) {
+            if ($updated !== $original) {
                 $project->writeText('theme/' . $rel, $updated);
             }
+        }
+        if ($folds !== []) {
+            Narrator::write('  [collect-images] folded ' . count($folds)
+                . " model-written absolute asset path(s) back to placeholders (details: logs/collect-images.log)\n");
+            $project->writeText('logs/collect-images.log', implode("\n", $folds) . "\n");
         }
 
         // A part can reference a theme asset that no placeholder declares —
@@ -363,6 +382,84 @@ final class CollectImagesStep implements Step
             }
         }
         return array_keys($sources);
+    }
+
+    /**
+     * Fold a model-written post-generation path back into the placeholder
+     * form the parser understands.
+     *
+     * The hero prompt teaches "theme:./assets/<name>.jpg", and GenerateImagesStep
+     * later rewrites that to "/wp-content/themes/<slug>/assets/<name>.jpg". A
+     * model that has seen both writes the second form straight away — with a
+     * slug it invented and a filename nothing will generate under. The
+     * PepeneBun build (2026-09-04) shipped exactly that on its hero cover: the
+     * canonical parser saw no theme: src, the spec was never collected, the
+     * fold rendered a broken image, and the validator (which then trusted the
+     * path shape) said nothing.
+     *
+     * A path whose basename exists on disk is a genuine post-generation
+     * reference (a resume after images were made) and is left alone; folding
+     * it would ask for the same photo twice. The basename is slugified to the
+     * `[a-z0-9-]` alphabet the canonical parser requires, so a model's
+     * "Field_Rows At-Dawn.JPG" becomes a placeholder rather than a dangling
+     * reference the later pass would have to cut. The three source syntaxes
+     * are the same ones recoverPlaceholders() covers (JSON url/src, quoted
+     * src=), so an extra wrapper lands there, not here. Pure — unit-testable.
+     *
+     * @param array<string,true> $assetsOnDisk basenames present under theme/assets
+     * @return array{content:string,folded:array<string,string>} content and from => to
+     */
+    public static function foldGuessedAssetPaths(string $content, array $assetsOnDisk): array
+    {
+        $folded = [];
+        $fold = static function (string $value) use ($assetsOnDisk, &$folded): ?string {
+            // The value is already bounded by its quotes, so a basename may
+            // carry spaces; slugification below turns them into hyphens.
+            if (preg_match('#^/wp-content/themes/[^/"\']+/assets/([^/"\'?\#]+)$#i', trim($value), $m) !== 1) {
+                return null;
+            }
+            $basename = $m[1];
+            if (isset($assetsOnDisk[$basename])) {
+                return null;
+            }
+            $extension = preg_match('/\.png$/i', $basename) === 1 ? 'png' : 'jpg';
+            $stem = preg_replace('/\.(?:jpe?g|png)$/i', '', $basename) ?? $basename;
+            $stem = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($stem)), '-');
+            $to = 'theme:./assets/' . ($stem === '' ? 'image' : $stem) . '.' . $extension;
+            $folded[trim($value)] = $to;
+            return $to;
+        };
+
+        $content = (string) preg_replace_callback(
+            '/(?P<prefix>"(?:url|src)"\s*:\s*")(?P<raw>[^"\\\\]*)(?P<suffix>")/i',
+            static function (array $match) use ($fold): string {
+                $to = $fold($match['raw']);
+                return $to === null ? $match[0] : $match['prefix'] . $to . $match['suffix'];
+            },
+            $content,
+        );
+        $content = (string) preg_replace_callback(
+            '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))(?P<raw>[^"\']*)(?P<suffix>\k<quote>)/i',
+            static function (array $match) use ($fold): string {
+                $to = $fold($match['raw']);
+                return $to === null ? $match[0] : $match['prefix'] . $to . $match['suffix'];
+            },
+            $content,
+        );
+
+        return ['content' => $content, 'folded' => $folded];
+    }
+
+    /** Basenames of every file already under theme/assets. @return array<string,true> */
+    private static function assetFilenamesOnDisk(Project $project): array
+    {
+        $names = [];
+        foreach (glob($project->themePath('assets/*')) ?: [] as $abs) {
+            if (is_file($abs)) {
+                $names[basename($abs)] = true;
+            }
+        }
+        return $names;
     }
 
     /**
