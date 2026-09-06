@@ -69,3 +69,16 @@ test('finalize-theme ships the band kit for rounded and prunes it for square (fr
     assert_true(!str_contains($project->readText('theme/functions.php'), 'forno-vero-band'), 'stale band enqueue pruned');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('the rounded band kit insets a wordmark-stage hero on the contrast surface and no other hero (frm PR-2s)', function () {
+    $css = (string) BandGeometry::kitCss('rounded');
+    $rule = '.wp-block-group.hero-composition--wordmark-stage.has-contrast-background-color.has-background {';
+    assert_eq(2, substr_count($css, $rule), 'one desktop rule and one phone gutter rule');
+    $body = substr($css, (int) strpos($css, $rule), 260);
+    assert_contains('margin-inline: var(--wp--preset--spacing--md, 1.5rem);', $body);
+    assert_contains('border-radius: var(--shape-radius-panel, 1.5rem);', $body);
+    assert_contains('overflow: hidden;', $body);
+    assert_true(!str_contains($css, '.hero-composition--panel-stage.has-contrast'), 'other recipes stay edge to edge');
+    assert_contains('a wordmark-stage hero on the contrast surface takes the same plate', BandGeometry::meaning('rounded'));
+});
