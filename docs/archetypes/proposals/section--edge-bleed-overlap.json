@@ -1,0 +1,17 @@
+{
+    "id": "edge-bleed-overlap",
+    "family": "section",
+    "title": "edge-bleed-overlap — an image running off the band edge with copy laid over it",
+    "idea": "One image runs off the trailing edge of the band and is cut by it, while a solid copy panel overlaps its leading side. Two planes, and neither one respects the band's box.",
+    "why_new": "nothing in the catalog crosses a band boundary or overlaps two elements. full-bleed-split reaches the edge but keeps the halves apart; collage-overlap overlaps images with each other and is gated to photography. This overlaps copy on media and works on any brief with one photograph.",
+    "built_from": "one full-aligned image plate and one constrained group pulled over it with a negative margin, plus a CSS hook and a stacking order.",
+    "risk": "the panel hides part of the image, so the crop has to survive being covered — it needs the same subject-safe-zone thinking the cinematic hero uses. The pull must be a fixed reviewed amount and must reset to zero when the band stacks.",
+    "mockup": {
+        "scope": "mock-section-edge-bleed-overlap",
+        "html": "<div class=\"preview mock-section-edge-bleed-overlap grain\">\n<div class=\"shot ph-kiln\"></div>\n    <div class=\"overlay\">\n      <h4>The last firing of the year</h4>\n      <p>Forty hours, two people awake in shifts, and one door that stays shut until Tuesday.</p>\n      <span class=\"cta\">Read the log</span>\n    </div>\n</div>",
+        "css": ".mock-section-edge-bleed-overlap { background: #efeadf; color: #17150f; font-family: var(--f-sans); }\n.mock-section-edge-bleed-overlap .shot { position: absolute; left: 33%; right: -9%; top: 7%; bottom: 7%; }\n.mock-section-edge-bleed-overlap .overlay { position: absolute; left: 6%; top: 20%; inline-size: 40%; z-index: 3;\n  background: #16150f; color: #f3f0e7; padding: 4cqw; display: flex; flex-direction: column; gap: 1.6cqw; }\n.mock-section-edge-bleed-overlap .overlay h4 { margin: 0; font-family: var(--f-serif); font-size: 3.6cqw; line-height: 1.08; }\n.mock-section-edge-bleed-overlap .overlay p { margin: 0; font-size: 1.4cqw; line-height: 1.5; opacity: .75; }\n.mock-section-edge-bleed-overlap .overlay .cta { font-size: 1.2cqw; letter-spacing: .14em; text-transform: uppercase;\n  border-bottom: 1px solid; padding-bottom: .5cqw; align-self: flex-start; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

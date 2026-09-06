@@ -1,0 +1,17 @@
+{
+    "id": "figure-with-notes",
+    "family": "section",
+    "title": "S8 figure-with-notes — one large image annotated with offset notes",
+    "idea": "One large image with two or three short notes set beside it, each joined to the plate by a leader line. The band explains an object instead of presenting it.",
+    "why_new": "every image in the catalog is either the whole band or one column of a split. Nothing annotates a picture, so a site whose subject is a thing — a press, a boat, a building — has no way to point at parts of it.",
+    "built_from": "one wp:columns with the image column and a stack of short notes, plus one CSS hook for the leaders.",
+    "risk": "the notes only look attached if they align to real features, which the pipeline cannot know from a generated or stock photograph — so the leaders must stay decorative and evenly spaced, never claim to point at a specific detail. Below the breakpoint the leaders must go.",
+    "mockup": {
+        "scope": "mock-section-figure-with-notes",
+        "html": "<div class=\"preview mock-section-figure-with-notes r-tall grain\">\n<div class=\"plate ph-press\"></div>\n    <div class=\"note n1\"><b>01</b><span>The bed is cast iron, and it has not been re-machined since 1961.</span></div>\n    <div class=\"note n2\"><b>02</b><span>Rollers are re-covered every second year by the last shop in the county that still does it.</span></div>\n    <div class=\"note n3\"><b>03</b><span>Maximum sheet is 720 by 1020 millimetres.</span></div>\n</div>",
+        "css": ".mock-section-figure-with-notes { background: #f0ede4; color: #181611; font-family: var(--f-sans); }\n.mock-section-figure-with-notes .plate { position: absolute; inset: 11% 32% 11% 6%; }\n.mock-section-figure-with-notes .note { position: absolute; inline-size: 23cqw; right: 5cqw;\n  display: flex; flex-direction: column; gap: .5cqw; }\n.mock-section-figure-with-notes .note b { font-family: var(--f-mono); font-size: 1.15cqw; letter-spacing: .14em; opacity: .5; }\n.mock-section-figure-with-notes .note span { font-size: 1.4cqw; line-height: 1.45; }\n.mock-section-figure-with-notes .note::before { content: \"\"; position: absolute; left: -6cqw; top: 1cqw;\n  inline-size: 5cqw; block-size: 1px; background: currentColor; opacity: .38; }\n.mock-section-figure-with-notes .n1 { top: 15%; }\n.mock-section-figure-with-notes .n2 { top: 44%; }\n.mock-section-figure-with-notes .n3 { top: 71%; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

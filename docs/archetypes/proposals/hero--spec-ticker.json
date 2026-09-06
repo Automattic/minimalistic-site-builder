@@ -1,0 +1,17 @@
+{
+    "id": "spec-ticker",
+    "family": "hero",
+    "title": "spec-ticker — a wide fact ticker under a light headline",
+    "idea": "A light headline with one weighted phrase, over a single rail of real facts running the full width like a departure board. Wide rather than tall, factual rather than persuasive.",
+    "why_new": "the imageless branch has one register today. The in-flight ledger-hero stacks facts vertically beside the copy; this runs them across the band as one line, which is a different rhythm and a different page height.",
+    "built_from": "heading plus a flex row of short paragraphs at caption size, full alignment.",
+    "risk": "only for briefs with real short facts — never invented — and it must wrap to two lines at 390px rather than scroll.",
+    "mockup": {
+        "scope": "mock-hero-spec-ticker",
+        "html": "<div class=\"preview mock-hero-spec-ticker\">\n<div class=\"chrome\" style=\"opacity:.6\"><span>Kaldvann</span><nav><span>Swims</span><span>Membership</span><span>Sauna</span></nav></div>\n    <h4>Cold water,<br><b>every morning</b></h4>\n    <div class=\"ticker\"><span>06:00 daily</span><s>·</s><span>Sea 4–14°C</span><s>·</s><span>240 members</span><s>·</s><span>Since 1974</span><s>·</s><span>Tromsø</span></div>\n</div>",
+        "css": ".mock-hero-spec-ticker { background: #eef1f2; color: #12181c; font-family: \"Inter\", ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: center; gap: 4cqw; padding: 0 5cqw; }\n.mock-hero-spec-ticker h4 { margin: 0; font-size: 7.8cqw; line-height: .98; font-weight: 300; letter-spacing: -.03em; }\n.mock-hero-spec-ticker h4 b { font-weight: 700; }\n.mock-hero-spec-ticker .ticker { border-block: 1px solid rgba(18,24,28,.22); padding: 2.2cqw 0;\n  display: flex; gap: 2.6cqw; align-items: baseline; font-family: ui-monospace, monospace;\n  font-size: 1.65cqw; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }\n.mock-hero-spec-ticker .ticker s { text-decoration: none; opacity: .35; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

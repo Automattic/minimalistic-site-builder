@@ -1,0 +1,17 @@
+{
+    "id": "sticky-pair",
+    "family": "section",
+    "title": "S1 sticky-pair — a pinned title beside a list that scrolls past it",
+    "idea": "A short title column stays pinned in place while a long list scrolls past it. The reader keeps the heading in view for the whole band, so a list of forty items still has one visible frame around it.",
+    "why_new": "",
+    "built_from": "",
+    "risk": "a still screenshot cannot show the value, so this one needs a short screen recording as evidence. Below the stacking breakpoint the pin is off and the band is a plain stack, a support column under four items never scrolls far enough to earn it, and a pinned column taller than the viewport traps its own bottom out of reach.",
+    "mockup": {
+        "scope": "mock-section-sticky-pair",
+        "html": "<div class=\"preview mock-section-sticky-pair r-tall\">\n<div class=\"pin\">\n      <em>Programme</em>\n      <h4>Forty-one events, one room</h4>\n      <p>Every reading, screening and lecture we hosted between March and December.</p>\n    </div>\n    <div class=\"scroll\">\n      <div class=\"row\"><b>A field guide to the estuary</b><span>04 MAR</span><p>Reading and conversation with the author.</p></div>\n      <div class=\"row\"><b>Printing the archive</b><span>19 MAR</span><p>Two sessions on the flatbed press.</p></div>\n      <div class=\"row\"><b>Night sounds</b><span>02 APR</span><p>Field recordings, played back at scale.</p></div>\n      <div class=\"row\"><b>The salt line</b><span>21 APR</span><p>A walk and a talk along the sea wall.</p></div>\n      <div class=\"row\"><b>Repair club</b><span>07 MAY</span><p>Bring one broken thing.</p></div>\n      <div class=\"row\"><b>Letterpress open day</b><span>26 MAY</span><p>Drop in, set a line, pull a print.</p></div>\n      <div class=\"row\"><b>Midsummer, outdoors</b><span>18 JUN</span><p>Three short readings and a fire.</p></div>\n      <div class=\"row\"><b>The paper mill visit</b><span>04 JUL</span><p>Twelve places, booked in advance.</p></div>\n    </div>\n</div>",
+        "css": ".mock-section-sticky-pair { background: #f5f3ec; color: #191712; font-family: var(--f-sans);\n  display: grid; grid-template-columns: 33% 1fr; gap: 5cqw; padding: 0 6cqw; }\n.mock-section-sticky-pair .pin { align-self: center; display: flex; flex-direction: column; gap: 1.6cqw; }\n.mock-section-sticky-pair .pin em { font-style: normal; font-family: var(--f-mono); font-size: 1.15cqw;\n  letter-spacing: .18em; text-transform: uppercase; opacity: .45; }\n.mock-section-sticky-pair .pin h4 { margin: 0; font-family: var(--f-serif); font-size: 5cqw;\n  line-height: 1.02; letter-spacing: -.02em; }\n.mock-section-sticky-pair .pin p { margin: 0; font-size: 1.45cqw; line-height: 1.5; opacity: .7; max-width: 28ch; }\n.mock-section-sticky-pair .scroll { display: flex; flex-direction: column; margin-block: -3.2cqw; }\n.mock-section-sticky-pair .scroll .row { border-top: 1px solid rgba(25,23,18,.18);\n  padding: 2cqw 0; display: grid; grid-template-columns: 1fr auto; gap: 2cqw; align-items: baseline; }\n.mock-section-sticky-pair .scroll b { font-weight: 600; font-size: 1.95cqw; }\n.mock-section-sticky-pair .scroll span { font-family: var(--f-mono); font-size: 1.2cqw; opacity: .45; }\n.mock-section-sticky-pair .scroll .row p { grid-column: 1 / -1; margin: .5cqw 0 0; font-size: 1.35cqw;\n  line-height: 1.45; opacity: .6; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

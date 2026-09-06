@@ -1,0 +1,17 @@
+{
+    "id": "comparison-columns",
+    "family": "section",
+    "title": "comparison-columns — two offers set against one shared column of labels",
+    "idea": "Two or three options set against one shared column of labels, so every row is a direct comparison on one criterion. The reader scans across, not down.",
+    "why_new": "spec-table gives one label column and one value column, which describes a single thing. Nothing in the catalog sets value against value, so pricing tiers and service options are forced into equal-card-grid, where each card repeats the labels and the comparison disappears.",
+    "built_from": "a stack of non-stacking three-column rows sharing one width set, plus a header row. Closest existing relative is spec-table, so it may belong in ItemPattern instead — worth deciding first.",
+    "risk": "only for briefs with real parallel options and matching facts for each; an empty cell reads as a missing feature. Three columns is the hard cap, and it must become one stack per option on mobile with the labels repeated.",
+    "mockup": {
+        "scope": "mock-section-comparison-columns",
+        "html": "<div class=\"preview mock-section-comparison-columns r-mid\">\n<h4>Two ways to work with us</h4>\n    <div class=\"g\">\n      <div class=\"hd\"></div><div class=\"hd\">Studio</div><div class=\"hd\">On site</div>\n      <div class=\"lb\">Where the work happens</div><div class=\"v\">Our bench</div><div class=\"v\">Your building</div>\n      <div class=\"lb\">Typical run</div><div class=\"v\">2–5 days</div><div class=\"v\">3 weeks</div>\n      <div class=\"lb\">Drawings supplied</div><div class=\"v\">Yes</div><div class=\"v\">Yes</div>\n      <div class=\"lb\">Minimum order</div><div class=\"v\">None</div><div class=\"v\">£4,000</div>\n      <div class=\"lb\">Booked ahead by</div><div class=\"v\">6 weeks</div><div class=\"v\">4 months</div>\n    </div>\n</div>",
+        "css": ".mock-section-comparison-columns { background: #f7f5ee; color: #17150f; font-family: var(--f-sans);\n  padding: 5cqw 6cqw; display: flex; flex-direction: column; gap: 2.6cqw; }\n.mock-section-comparison-columns h4 { margin: 0; font-family: var(--f-serif); font-size: 3.4cqw; }\n.mock-section-comparison-columns .g { display: grid; grid-template-columns: 1fr 22% 22%; }\n.mock-section-comparison-columns .g > * { padding: 1.5cqw 0; border-top: 1px solid rgba(23,21,15,.16); font-size: 1.45cqw; }\n.mock-section-comparison-columns .g > .hd { border-top: 0; font-weight: 600; font-size: 1.85cqw; padding-top: 0; }\n.mock-section-comparison-columns .g .lb { opacity: .66; }\n.mock-section-comparison-columns .g .v { font-family: var(--f-mono); font-size: 1.4cqw; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

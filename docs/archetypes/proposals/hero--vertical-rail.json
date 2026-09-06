@@ -1,0 +1,17 @@
+{
+    "id": "vertical-rail",
+    "family": "hero",
+    "title": "vertical-rail — a rotated identity spine down one edge",
+    "idea": "A narrow full-height spine down one edge carries the wordmark in rotated type, like the spine of a book on a shelf. The remaining field holds an ordinary copy-and-plate composition, framed by that edge.",
+    "why_new": "nothing in the catalog uses the vertical axis for type or treats an edge as structure.",
+    "built_from": "a two-column row with a fixed narrow column and a reviewed writing-mode hook.",
+    "risk": "rotated text is an accessibility hazard and must stay decorative identity, never the H1; below the stacking breakpoint the spine becomes a normal top strip.",
+    "mockup": {
+        "scope": "mock-hero-vertical-rail",
+        "html": "<div class=\"preview mock-hero-vertical-rail grain\">\n<div class=\"spine\"><span>Atelier Verso — Lisboa</span></div>\n    <div class=\"field\">\n      <div class=\"copy\">\n        <h4>Ink pulled<br>by hand</h4>\n        <p>Exhibition posters printed on a 1960s flatbed press, in runs of forty.</p>\n        <span style=\"font-family:Inter,sans-serif;font-size:1.6cqw;letter-spacing:.14em;text-transform:uppercase;border-bottom:1px solid;padding-bottom:.6cqw;align-self:flex-start\">See the press</span>\n      </div>\n      <div class=\"plate ph-press\"></div>\n    </div>\n</div>",
+        "css": ".mock-hero-vertical-rail { display: grid; grid-template-columns: 9% 1fr; background: #f4f2ea; color: #14231c;\n  font-family: \"Iowan Old Style\", Palatino, Georgia, serif; }\n.mock-hero-vertical-rail .spine { background: #123a2c; color: #eef3ef; display: flex; align-items: center;\n  justify-content: center; }\n.mock-hero-vertical-rail .spine span { writing-mode: vertical-rl; transform: rotate(180deg);\n  font-family: \"Inter\", ui-sans-serif, sans-serif; font-size: 1.5cqw;\n  letter-spacing: .34em; text-transform: uppercase; }\n.mock-hero-vertical-rail .field { display: grid; grid-template-columns: 1fr 38%; }\n.mock-hero-vertical-rail .copy { padding: 6cqw 4cqw 5cqw 5cqw; display: flex; flex-direction: column;\n  justify-content: center; gap: 2.6cqw; }\n.mock-hero-vertical-rail h4 { margin: 0; font-size: 7.6cqw; line-height: .98; letter-spacing: -.02em; }\n.mock-hero-vertical-rail p { margin: 0; font-family: \"Inter\", ui-sans-serif, sans-serif; font-size: 1.9cqw;\n  line-height: 1.45; opacity: .78; max-width: 30ch; }\n.mock-hero-vertical-rail .plate { margin: 5cqw 5cqw 5cqw 0; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

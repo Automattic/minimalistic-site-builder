@@ -1,0 +1,17 @@
+{
+    "id": "breathing-plate",
+    "family": "section",
+    "title": "breathing-plate — one modest image with a fixed proportion of empty band around it",
+    "idea": "One image at modest size, centred, with a large and fixed proportion of empty band around it and a single caption line beneath. The air is the composition.",
+    "why_new": "an image today is either the whole band or a column of a split, and both fill their space. There is no register where a single picture is given room, so every gallery, studio and portfolio site presents work at maximum density.",
+    "built_from": "one constrained group, one image at a capped width, one caption. The simplest entry here after quote-band, and it needs no new CSS.",
+    "risk": "it reads as unfinished unless the empty space is a fixed proportion of the band rather than whatever the content leaves over — the same failure mode as the quiet hero. Cap at one or two per page, and it must survive a short viewport without the plate filling the screen.",
+    "mockup": {
+        "scope": "mock-section-breathing-plate",
+        "html": "<div class=\"preview mock-section-breathing-plate r-xtall\">\n<i class=\"ph-room\"></i>\n    <span>Untitled, 1994 · Gelatin silver print</span>\n</div>",
+        "css": ".mock-section-breathing-plate { background: #faf8f2; color: #1a1813; font-family: var(--f-sans);\n  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2.8cqw; }\n.mock-section-breathing-plate i { display: block; inline-size: 28cqw; aspect-ratio: 4 / 5; }\n.mock-section-breathing-plate span { font-size: 1.35cqw; letter-spacing: .08em; opacity: .5; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

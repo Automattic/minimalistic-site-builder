@@ -1,0 +1,17 @@
+{
+    "id": "index-hero",
+    "family": "hero",
+    "title": "index-hero — the page's own contents as the opening composition",
+    "idea": "The hero is the page's own table of contents: the site name, then its real sections as a numbered index the visitor can jump into. It promises the whole page instead of pitching one line.",
+    "why_new": "no hero carries navigation as content, and none is built from the page plan itself.",
+    "built_from": "heading plus a list of real section anchors — no image, and no copy that can be invented.",
+    "risk": "needs the section list before the hero is authored, and duplicates the header nav on thin pages; gate to four or more real sections.",
+    "mockup": {
+        "scope": "mock-hero-index-hero",
+        "html": "<div class=\"preview mock-hero-index-hero\">\n<div class=\"chrome\" style=\"opacity:.6\"><span>Halvorsen &amp; Reed</span><nav><span>Index</span><span>Contact</span></nav></div>\n    <h4>Halvorsen &amp; Reed, cabinetmakers</h4>\n    <ol>\n      <li><b>01</b><span>Casework and joinery</span><em>Commissions</em></li>\n      <li><b>02</b><span>Restoration for museums</span><em>Conservation</em></li>\n      <li><b>03</b><span>The waiting list</span><em>18 months</em></li>\n      <li><b>04</b><span>Visit the workshop</span><em>By arrangement</em></li>\n    </ol>\n</div>",
+        "css": ".mock-hero-index-hero { background: #fbfaf6; color: #16150f; font-family: \"Iowan Old Style\", Palatino, Georgia, serif;\n  padding: 7cqw 5cqw 4cqw; display: flex; flex-direction: column; gap: 3cqw; }\n.mock-hero-index-hero h4 { margin: 0; font-size: 6.4cqw; line-height: 1; letter-spacing: -.02em; max-width: 60%; }\n.mock-hero-index-hero ol { margin: 0; padding: 0; list-style: none; display: grid; }\n.mock-hero-index-hero li { display: grid; grid-template-columns: 4cqw 1fr auto; gap: 2.4cqw; align-items: baseline;\n  border-top: 1px solid rgba(22,21,15,.16); padding: 1.5cqw 0;\n  font-family: \"Inter\", ui-sans-serif, sans-serif; font-size: 2cqw; }\n.mock-hero-index-hero li b { font-family: ui-monospace, monospace; font-weight: 500; font-size: 1.5cqw;\n  color: #a8340f; }\n.mock-hero-index-hero li em { font-style: normal; opacity: .45; font-size: 1.6cqw; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

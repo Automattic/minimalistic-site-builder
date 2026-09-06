@@ -1,0 +1,17 @@
+{
+    "id": "stat-band",
+    "family": "section",
+    "title": "S3 stat-band — three or four figures set as the display object",
+    "idea": "Three or four figures at display scale, each with a label and one short line, divided by hairlines. The numeral is the typographic object; the words explain it.",
+    "why_new": "spec-table sets facts as small aligned label/value pairs. Nothing sets a number as display type, so a site with real figures has nowhere to put them except a card grid that flattens them into paragraphs.",
+    "built_from": "one wp:columns with a heading at display size per column. No new CSS beyond the divider rule.",
+    "risk": "invented numbers are the worst failure this generator can produce. Gate it hard: at least three hard figures in the site spec, and no figure that the spec does not state.",
+    "mockup": {
+        "scope": "mock-section-stat-band",
+        "html": "<div class=\"preview mock-section-stat-band r-band\">\n<div class=\"fig\"><b>1908</b><span>Founded</span><i>Four generations on the same quay.</i></div>\n    <div class=\"fig\"><b>62</b><span>Boats</span><i>Registered to the harbour today.</i></div>\n    <div class=\"fig\"><b>3.4k</b><span>Tonnes</span><i>Landed and sorted last season.</i></div>\n    <div class=\"fig\"><b>11</b><span>Species</span><i>Under the inshore quota.</i></div>\n</div>",
+        "css": ".mock-section-stat-band { background: #ece7db; color: #1b1811; font-family: var(--f-sans);\n  display: grid; grid-template-columns: repeat(4, 1fr); align-items: center; padding: 0 5cqw; }\n.mock-section-stat-band .fig { padding: 0 2.6cqw; border-left: 1px solid rgba(27,24,17,.2);\n  display: flex; flex-direction: column; gap: .9cqw; }\n.mock-section-stat-band .fig:first-child { border-left: 0; padding-left: 0; }\n.mock-section-stat-band .fig b { font-family: var(--f-serif); font-weight: 400; font-size: 8.2cqw;\n  line-height: .88; letter-spacing: -.035em; color: #9d3311; }\n.mock-section-stat-band .fig span { font-size: 1.25cqw; letter-spacing: .14em; text-transform: uppercase; opacity: .55; }\n.mock-section-stat-band .fig i { font-style: normal; font-size: 1.4cqw; line-height: 1.45; opacity: .78; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

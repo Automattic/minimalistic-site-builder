@@ -1,0 +1,17 @@
+{
+    "id": "stacked-word-tower",
+    "family": "hero",
+    "title": "stacked-word-tower — one word per line, each sized to the same width",
+    "idea": "The headline breaks one word per line, each word sized so every line reaches the same width — a solid block of type where the size differences come from the words themselves.",
+    "why_new": "Every recipe sets one headline at one size. Per-line sizing is a different typographic object and the fit-text device already exists to do it.",
+    "built_from": "three headings (or one heading of three fit-text lines) inside a constrained group; imageless, solid surface.",
+    "risk": "only works for a three-to-five word headline with words of similar length; needs a word-shape gate, and the copy step must be told to write for it.",
+    "mockup": {
+        "scope": "mock-hero-stacked-word-tower",
+        "html": "<div class=\"preview mock-hero-stacked-word-tower\">\n<div class=\"chrome\" style=\"color:#f5f2ea\"><span>Plain Terms</span><nav><span>The work</span><span>Approach</span><span>Contact</span></nav></div>\n    <span class=\"w w1\">Contracts</span>\n    <span class=\"w w2\">People</span>\n    <span class=\"w w3\">Can Read</span>\n    <div class=\"tail\"><span>Two writers · Rotterdam</span><span>Ask for a sample rewrite</span></div>\n</div>",
+        "css": ".mock-hero-stacked-word-tower { background: #101010; color: #f5f2ea;\n  font-family: \"Helvetica Neue\", Inter, ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: center; padding: 5cqw; gap: .4cqw; }\n.mock-hero-stacked-word-tower .w { font-weight: 800; text-transform: uppercase; line-height: .86;\n  letter-spacing: -.04em; display: block; }\n.mock-hero-stacked-word-tower .w1 { font-size: 11.5cqw; }\n.mock-hero-stacked-word-tower .w2 { font-size: 15.5cqw; }\n.mock-hero-stacked-word-tower .w3 { font-size: 8.4cqw; }\n.mock-hero-stacked-word-tower .tail { display: flex; justify-content: space-between; margin-top: 3cqw;\n  font-size: 1.6cqw; letter-spacing: .16em; text-transform: uppercase; opacity: .6; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}
