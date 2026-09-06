@@ -40,6 +40,57 @@ final class HeroComposition
      */
     public const WORDMARK_CHAR_EM = 0.66;
 
+    /**
+     * Per-character advances of a bold grotesque, in em (frm PR-2v). The
+     * flat 0.66 let "momentum" overrun its plate and left "STUDIO GESTALTEN"
+     * short of the band. Letters outside the table take the case default;
+     * each case scales by the theme's heading face through HeroHeadlineFit.
+     *
+     * @var array<string,float>
+     */
+    private const WORDMARK_GLYPH_EM = [
+        'I' => 0.30, 'J' => 0.48, 'L' => 0.58, 'E' => 0.60, 'F' => 0.58, 'T' => 0.62, 'M' => 0.88, 'W' => 0.95,
+        'i' => 0.28, 'l' => 0.28, 'j' => 0.28, 't' => 0.36, 'f' => 0.34, 'r' => 0.40, 'm' => 0.95, 'w' => 0.88,
+        ' ' => 0.30,
+    ];
+    private const WORDMARK_UPPER_EM = 0.70;
+    private const WORDMARK_LOWER_EM = 0.58;
+    private const WORDMARK_DIGIT_EM = 0.60;
+    private const WORDMARK_OTHER_EM = 0.32;
+
+    /**
+     * The width of a name in em for the theme's heading face, or for a
+     * generic bold grotesque when the theme is unknown.
+     *
+     * @param array<string,mixed>|null $theme
+     */
+    public static function wordmarkEm(string $text, ?array $theme = null): float
+    {
+        $upperScale = $theme === null ? 1.0 : HeroHeadlineFit::characterEmFor($theme, true) / self::WORDMARK_UPPER_EM;
+        $lowerScale = $theme === null ? 1.0 : HeroHeadlineFit::characterEmFor($theme, false) / self::WORDMARK_LOWER_EM;
+        $em = 0.0;
+        foreach (preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+            if (isset(self::WORDMARK_GLYPH_EM[$char])) {
+                $width = self::WORDMARK_GLYPH_EM[$char];
+                $scale = $char === ' ' ? 1.0 : (mb_strtoupper($char, 'UTF-8') === $char ? $upperScale : $lowerScale);
+            } elseif (preg_match('/\p{Lu}/u', $char) === 1) {
+                $width = self::WORDMARK_UPPER_EM;
+                $scale = $upperScale;
+            } elseif (preg_match('/\p{Ll}/u', $char) === 1) {
+                $width = self::WORDMARK_LOWER_EM;
+                $scale = $lowerScale;
+            } elseif (preg_match('/\p{N}/u', $char) === 1) {
+                $width = self::WORDMARK_DIGIT_EM;
+                $scale = $upperScale;
+            } else {
+                $width = self::WORDMARK_OTHER_EM;
+                $scale = 1.0;
+            }
+            $em += $width * $scale;
+        }
+        return max(0.3, round($em, 2));
+    }
+
     /** The one portrait plate of portrait-backdrop (frm W2d). */
     public const PORTRAIT_CLASS = 'hero-composition__portrait';
 
@@ -1281,7 +1332,8 @@ final class HeroComposition
      *
      * @param list<array<string,mixed>> $repairs
      */
-    public static function bindWordmarkHeadline(string $markup, string $siteName, string $part, array &$repairs = []): string
+    /** @param array<string,mixed>|null $theme the theme.json data, for the heading face's advances (frm PR-2v) */
+    public static function bindWordmarkHeadline(string $markup, string $siteName, string $part, array &$repairs = [], ?array $theme = null): string
     {
         $siteName = trim($siteName);
         if ($siteName === '') {
@@ -1301,13 +1353,15 @@ final class HeroComposition
                 continue;
             }
             $text = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-            $chars = max(1, mb_strlen($siteName, 'UTF-8'));
-            // Container units, not viewport units (frm W2e): the copy group is
-            // capped at the content size, so the name fills the group's own
-            // inline size on every screen instead of wrapping at the cap.
-            $longest = 1;
+            // Container units, not viewport units (frm W2e): the copy group
+            // spans the band (PR-2t), so the name fills the band's own inline
+            // size on every screen instead of wrapping at the cap. The width
+            // is measured per character and per heading face (PR-2v), at 90%
+            // of the container so a wide face keeps a margin.
+            $lineEm = self::wordmarkEm($siteName, $theme);
+            $longestEm = 0.3;
             foreach (preg_split('/\s+/u', $siteName, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
-                $longest = max($longest, mb_strlen($word, 'UTF-8'));
+                $longestEm = max($longestEm, self::wordmarkEm($word, $theme));
             }
             // Two terms (frm PR-2r): the whole name on one line where the
             // container is wide, and on a narrow container the longest word
@@ -1315,8 +1369,8 @@ final class HeroComposition
             // a phone instead of shrinking to one small one. The max() picks
             // the line term on desktop (it exceeds 3rem there) and the word
             // term on a phone (the line term falls below it).
-            $size = 'min(18rem, max(calc(92cqi / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '')
-                . '), min(calc(92cqi / ' . number_format($longest * self::WORDMARK_CHAR_EM, 2, '.', '') . '), 3rem)))';
+            $size = 'min(18rem, max(calc(90cqi / ' . number_format($lineEm, 2, '.', '')
+                . '), min(calc(90cqi / ' . number_format($longestEm, 2, '.', '') . '), 3rem)))';
             $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
             $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-display-font-size'));
             if (!in_array(self::WORDMARK_CLASS, $classes, true)) {

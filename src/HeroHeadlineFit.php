@@ -116,6 +116,12 @@ final class HeroHeadlineFit
      * wide-face table when the family is known, the generic constant
      * otherwise.
      */
+    /** The per-character advance for the theme's heading face (frm PR-2v: shared with the wordmark pin). */
+    public static function characterEmFor(array $theme, bool $uppercase): float
+    {
+        return self::characterEm($theme, $uppercase);
+    }
+
     private static function characterEm(array $theme, bool $uppercase): float
     {
         $family = self::headingFamily($theme);

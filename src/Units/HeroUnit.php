@@ -127,11 +127,16 @@ final class HeroUnit extends AbstractPageSectionUnit
             if (is_string($spec)) {
                 $spec = json_decode($spec, true);
             }
+            $themeJson = $input['theme_json'] ?? null;
+            if (is_string($themeJson)) {
+                $themeJson = json_decode($themeJson, true);
+            }
             $markup = HeroComposition::bindWordmarkHeadline(
                 $markup,
                 is_array($spec) ? (string) ($spec['name'] ?? '') : '',
                 $key,
                 $repairs,
+                is_array($themeJson) ? $themeJson : null,
             );
         }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
