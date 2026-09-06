@@ -847,6 +847,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 147: PR-4x #589 merged (dasstudio-like24 replay: step copy on translucent plates; fabrica-like22 replay pixel-identical). PR-0l in PR: the one name retry also asks for a full persona when the persona is a placeholder, and warns when the retry answers a placeholder again. Next: cohort-32.
 - 2026-09-06 turn 147b: the two PR-0l evidence builds (calderr-like26, calderr-like27) were stopped externally mid-run with the machine idle; per the budget rule the PR ships on the unit replay, and their site-spec logs surfaced PR-0m (empty persona on a personal brief).
 - 2026-09-06 turn 148: PR-0l #590 merged on the unit replay. PR-0m in PR: SiteSpecStep::personalBrief reads "personal portfolio", "portfolio for a" and kin; an empty invented persona on such a brief takes the persona retry (or the combined name retry). Next: cohort-32.
+- 2026-09-06 turn 149: PR-0m #591 merged (calderr-like28: the model answered a full persona on its first call; the rule is proven by the unit replay). Cohort-32 build started on 60b4e5c2 and was stopped externally at 13:18 with no site finished, the third external stop of a background build in a row (calderr-like26, calderr-like27, cohort-32) while the machine was idle; the loop pauses here rather than spend a fourth run. Resume with: cohort-32 on 60b4e5c2, then the open P3 row PR-7j (parked).
 
 ## 10. Parked / rejected
 
