@@ -42,7 +42,7 @@
       "slug": "fabrica-like",
       "site_type": "agency",
       "reference": "https://fabrica.framer.media/",
-      "prompt": "Create a site for a digital design and marketing agency. Light grey page with rounded near-black panels: the hero is one dark photo panel with a giant lowercase wordmark, a short services list in one corner and a contact card in the other, then a client logo strip, a projects grid where every image carries a label bar, a proof row of two stats, a dark services band with accordion rows, testimonials with one big rating figure, a four-figure stat ledger, pricing, a team row, FAQ, journal cards, a dark closing panel that says let's talk, and a footer with a huge wordmark."
+      "prompt": "Create a site for a digital design and marketing agency. Light grey page, bold grotesque type, moody colour photography, rounded near-black panels: the hero is one dark photo panel with a giant lowercase wordmark, a short services list in one corner and a contact card in the other, then a client logo strip, a projects grid where every image carries a label bar, a proof row of two stats, a dark services band with accordion rows, testimonials with one big rating figure, a four-figure stat ledger, pricing, a team row, FAQ, journal cards, a dark closing panel that says let's talk, and a footer with a huge wordmark."
     },
     {
       "id": "parley-like",
