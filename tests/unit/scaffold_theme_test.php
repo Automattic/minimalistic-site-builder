@@ -732,6 +732,7 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     $rule = '.hero-composition--wordmark-stage .hero-composition__copy {';
     assert_contains($rule, $css);
     assert_contains('container-type: inline-size;', substr($css, (int) strpos($css, $rule), 200));
+    assert_contains('.wp-block-heading.has-fit-text { overflow: clip; }', preg_replace('/\\s+/', ' ', $css), 'a fit-text identity line is clipped so its inline overflow cannot lengthen the page (frm PR-4q)');
     $name = '.hero-composition--wordmark-stage .hero-composition__wordmark {';
     assert_contains($name, $css);
     $copyRule = substr($css, (int) strpos($css, '.hero-composition--wordmark-stage .hero-composition__copy {'), 700);
@@ -746,3 +747,4 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     assert_contains('.hero-composition--wordmark-stage .hero-composition__facts {', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+

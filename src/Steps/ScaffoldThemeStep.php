@@ -719,6 +719,16 @@ final class ScaffoldThemeStep implements Step
             margin: 0;
             font-size: var(--wp--preset--font-size--caption, 0.875rem);
         }
+        /* A fit-text identity line (frm PR-4q): at 600px and more the font's
+           content area stands taller than the heading's line box, and that
+           inline overflow is scrollable, so the page ran on below the
+           closing band and a strip of the ground showed under the wordmark.
+           Clipping the heading drops the scrollable overflow; glyphs sit
+           inside the line box at these metrics, and Chrome counts a clip
+           margin as overflow again, so none is set. */
+        .wp-block-heading.has-fit-text {
+            overflow: clip;
+        }
         /* marquee-name floating objects (frm W7c): the aria-hidden object
            group is taken out of the flow and pinned over the whole hero;
            each cutout takes a corner slot around the centered stack, above
