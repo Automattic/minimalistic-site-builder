@@ -175,6 +175,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        // A heading never carries its own paint (frm PR-5j).
+        $markup = GeneratedMarkup::stripHeadingPaint($markup, $this->key($input), $repairs, $warnings);
         if ($archetype !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
                 $markup,

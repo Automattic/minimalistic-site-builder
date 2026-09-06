@@ -3423,6 +3423,100 @@ final class GeneratedMarkup
         return $document->render();
     }
 
+    /**
+     * A heading never carries its own paint (frm PR-5j): spector-like23's H1
+     * took the theme's one gradient preset as a background box and the light
+     * copy washed out on the gradient's light end. The block loses its
+     * backgroundColor, gradient and custom colour paint, the matching
+     * classes and the inline background declaration; the text colour stays.
+     *
+     * @param list<array<string,string>> $repairs
+     * @param list<string> $warnings
+     */
+    public static function stripHeadingPaint(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $stripped = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $paint = [];
+            $classTokens = ['has-background'];
+            foreach (['backgroundColor' => 'background-color', 'gradient' => 'gradient-background'] as $key => $suffix) {
+                if (isset($attrs[$key])) {
+                    $paint[] = $key . ' ' . self::describePaint($attrs[$key]);
+                    if (is_string($attrs[$key]) && preg_match('/^[a-z0-9-]+$/', $attrs[$key]) === 1) {
+                        $classTokens[] = 'has-' . $attrs[$key] . '-' . $suffix;
+                    }
+                    unset($attrs[$key]);
+                }
+            }
+            foreach (['background', 'gradient'] as $key) {
+                if (isset($attrs['style']['color'][$key])) {
+                    $paint[] = 'style.color.' . $key . ' ' . self::describePaint($attrs['style']['color'][$key]);
+                    unset($attrs['style']['color'][$key]);
+                }
+            }
+            if ($paint === []) {
+                continue;
+            }
+            if (isset($attrs['style']['color']) && $attrs['style']['color'] === []) {
+                unset($attrs['style']['color']);
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            // One splice rewrites the opening tag: the paint classes and the
+            // inline background declaration go, the rest stays. (A class-token
+            // edit and a splice cannot share a node.)
+            $own = $document->ownHtml($index);
+            if (preg_match('/<h[1-6]\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c) use ($classTokens): string {
+                    $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $kept = array_values(array_filter($tokens, static fn (string $t): bool
+                        => !in_array($t, $classTokens, true)
+                        && preg_match('/^has-[a-z0-9-]+-(?:background-color|gradient-background)$/', $t) !== 1));
+                    return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+                }, $opening) ?? $opening;
+                $clean = preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $c): string {
+                    $decls = array_values(array_filter(array_map('trim', explode(';', $c[1])), static fn (string $d): bool
+                        => $d !== '' && preg_match('/^background(?:-color|-image)?\s*:/i', $d) !== 1));
+                    return $decls === [] ? '' : ' style="' . implode(';', $decls) . '"';
+                }, $clean) ?? $clean;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $stripped[] = implode(', ', $paint);
+            $warnings[] = "file='theme/parts/{$part}.html'; block='heading'; authored=" . implode(', ', $paint)
+                . '; delivered=no paint; disposition=a heading never carries its own background; the copy keeps its colour';
+        }
+        if ($stripped === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'heading-paint-stripped',
+            'part' => $part,
+            'authored' => count($stripped) . ' painted heading(s): ' . implode(' | ', $stripped),
+            'delivered' => 'headings without a background',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    private static function describePaint(mixed $value): string
+    {
+        return is_string($value) ? '"' . mb_strimwidth($value, 0, 60, '…', 'UTF-8') . '"' : 'set';
+    }
+
     public static function fullBleedCoverAlignment(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);
