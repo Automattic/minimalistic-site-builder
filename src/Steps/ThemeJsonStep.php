@@ -14,6 +14,7 @@ use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
@@ -3037,7 +3038,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // not part of the bounded construction and are replaced before that
         // later check.
         if ($style === 'solid') {
-            $label = self::deterministicCtaLabel($authoredLabel) !== null
+            $label = self::isDeterministicCtaLabel($authoredLabel)
                 ? $authoredLabel
                 : 'var:preset|color|base';
             if (($button['color']['text'] ?? null) !== $label) {
@@ -3094,20 +3095,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * The palette slug of a label ink ContrastFixStep may have chosen, in
-     * either preset spelling theme.json accepts, or null for anything else.
+     * Whether a label ink is one ContrastFixStep may have chosen (base or
+     * contrast), in either preset spelling theme.json accepts.
      */
-    private static function deterministicCtaLabel(mixed $value): ?string
+    private static function isDeterministicCtaLabel(mixed $value): bool
     {
-        if (!is_string($value)) {
-            return null;
-        }
-        if (preg_match('/^var:preset\|color\|(base|contrast)$/', trim($value), $m) === 1
-            || preg_match('/^var\(--wp--preset--color--(base|contrast)\)$/', trim($value), $m) === 1
-        ) {
-            return $m[1];
-        }
-        return null;
+        return is_string($value)
+            && preg_match('/^(?:var:preset\|color\|(?:base|contrast)|var\(--wp--preset--color--(?:base|contrast)\))$/', trim($value)) === 1;
     }
 
     /**
@@ -3137,8 +3131,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $byPath[$m[1]][] = $repair;
         }
         foreach ($byPath as $path => $rows) {
-            $before = self::jsonPathValue($authored, $path);
-            $after = self::jsonPathValue($delivered, $path);
+            $before = JsonDecoder::path($authored, $path);
+            $after = JsonDecoder::path($delivered, $path);
             if (self::sameJsonValue($before, $after)) {
                 continue;
             }
@@ -3150,26 +3144,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             // "authored null" is the stripper's doing, not the model's. Say
             // what the model wrote and what shipped, with the final verdict.
             $last = end($rows);
-            $disposition = preg_match('/; disposition (.*)$/', (string) $last, $d) === 1
+            $disposition = preg_match('/; disposition (.*)$/', $last, $d) === 1
                 ? $d[1]
                 : 'enforced committed CTA construction';
             $kept[] = 'theme/theme.json ' . $path . ': authored ' . Warnings::value($before)
                 . ' delivered ' . Warnings::value($after) . '; disposition ' . $disposition;
         }
         return array_values(array_unique($kept));
-    }
-
-    /** One dot-separated theme.json path, or null when any segment is missing. */
-    private static function jsonPathValue(array $theme, string $path): mixed
-    {
-        $value = $theme;
-        foreach (explode('.', $path) as $segment) {
-            if (!is_array($value) || !array_key_exists($segment, $value)) {
-                return null;
-            }
-            $value = $value[$segment];
-        }
-        return $value;
     }
 
     /** Compare decoded JSON values without treating object-key order as data. */

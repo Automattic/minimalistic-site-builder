@@ -88,7 +88,7 @@ final class CtaBudgetStep implements Step
                 $action = is_array($section['primary_action'] ?? null) ? $section['primary_action'] : null;
                 $planned = $action !== null;
                 $prefer = $planned ? trim((string) ($action['label'] ?? '')) : '';
-                $closing = $role === SectionRole::CLOSING || $index === $count - 1;
+                $closing = $role === SectionRole::CLOSING;
                 $keep = $planned || $closing ? 1 : 0;
 
                 $markup = $project->readText('theme/' . $rel);

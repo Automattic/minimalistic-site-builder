@@ -219,7 +219,7 @@ final class StepDefaults
             'design-direction'         => self::temperature('DESIGN_DIRECTION', 1.0),
             // Cold on purpose: a global LLM_TEMPERATURE must not heat the
             // judge. Only LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE overrides.
-            'design-direction-judge'   => self::judgeTemperature(),
+            'design-direction-judge'   => self::temperature('DESIGN_DIRECTION_JUDGE', 0.0, inheritGlobal: false),
             'theme-json'               => self::temperature('THEME_JSON', null),
             'page-plan'                => self::temperature('PAGE_PLAN', null),
             'sections'                 => self::temperature('SECTIONS', 0.9),
@@ -229,23 +229,12 @@ final class StepDefaults
     }
 
     /**
-     * LLM_TEMPERATURE_<STEP> wins, then LLM_TEMPERATURE, then $default.
-     * Non-numeric env values are ignored.
+     * LLM_TEMPERATURE_<STEP> wins, then LLM_TEMPERATURE (unless the step opts
+     * out of the global), then $default. Non-numeric env values are ignored.
      */
-    public static function temperature(string $envSuffix, ?float $default): ?float
+    public static function temperature(string $envSuffix, ?float $default, bool $inheritGlobal = true): ?float
     {
-        $raw = Env::get('LLM_TEMPERATURE_' . $envSuffix) ?? Env::get('LLM_TEMPERATURE');
+        $raw = Env::get('LLM_TEMPERATURE_' . $envSuffix) ?? ($inheritGlobal ? Env::get('LLM_TEMPERATURE') : null);
         return is_numeric($raw) ? (float) $raw : $default;
-    }
-
-    /**
-     * The seed judge is cold unless this one env is set. A global
-     * LLM_TEMPERATURE is the seed-spread / expansion knob and must not
-     * silently turn the ballot into another sample.
-     */
-    public static function judgeTemperature(): float
-    {
-        $raw = Env::get('LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE');
-        return is_numeric($raw) ? (float) $raw : 0.0;
     }
 }

@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -336,7 +337,7 @@ final class ContrastFixStep implements Step
         foreach (['' => 'button text', ':hover' => 'button hover text',
             ':focus' => 'button focus text', ':active' => 'button active text'] as $state => $label) {
             $prefix = 'styles.elements.button' . ($state === '' ? '' : '.' . $state);
-            $btnBgValue = self::pathValue($themeJson, $prefix . '.color.background');
+            $btnBgValue = JsonDecoder::path($themeJson, $prefix . '.color.background');
             $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
             if ($btnBg === null) {
                 continue;
@@ -420,19 +421,6 @@ final class ContrastFixStep implements Step
             $warnings++;
         }
         return true;
-    }
-
-    /** Read one dot-separated theme.json path without emitting notices. */
-    private static function pathValue(array $theme, string $path): mixed
-    {
-        $value = $theme;
-        foreach (explode('.', $path) as $key) {
-            if (!is_array($value) || !array_key_exists($key, $value)) {
-                return null;
-            }
-            $value = $value[$key];
-        }
-        return $value;
     }
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────
