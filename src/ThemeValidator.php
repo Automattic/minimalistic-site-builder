@@ -430,6 +430,13 @@ final class ThemeValidator
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $known = self::recordedImageSources($project);
+        $slug = $project->slug();
+        $onDisk = [];
+        foreach (glob($project->themePath('assets/*')) ?: [] as $abs) {
+            if (is_file($abs)) {
+                $onDisk[basename($abs)] = true;
+            }
+        }
 
         foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
@@ -449,8 +456,8 @@ final class ThemeValidator
             if ($contexts !== []) {
                 $problems[] = "{$rel}: contains unresolved AI_IMAGE: in " . implode(' and ', $contexts);
             }
-            foreach (self::danglingImageSources($markup, $known) as $source) {
-                $problems[] = "{$rel}: image source {$source} resolves to nothing and was never collected for generation";
+            foreach (self::danglingImageSources($markup, $known, $slug, $onDisk) as $source => $reason) {
+                $problems[] = "{$rel}: image source {$source} {$reason}";
             }
         }
 
@@ -481,13 +488,20 @@ final class ThemeValidator
 
     /**
      * Image references in one file that neither the browser nor the image
-     * pipeline can resolve. Only relative/custom-scheme values that name an
-     * image are judged, so a "#" social link or an absolute URL never trips it.
+     * pipeline can resolve, each with the reason. Relative and custom-scheme
+     * values that name an image are judged against the collected set; a
+     * root-relative theme asset ("/wp-content/themes/<slug>/assets/<file>",
+     * the post-generation form) is judged against THIS theme's slug and the
+     * files on disk, because a model can write that form itself with a slug
+     * it invented and a filename nothing generated — the browser then 404s
+     * exactly as it would on a relative path (PepeneBun, 2026-09-04). Other
+     * absolute URLs and a "#" social link never trip it.
      *
      * @param array<string,true>|null $known
-     * @return list<string>
+     * @param array<string,true>      $onDisk basenames present under theme/assets
+     * @return array<string,string> source => reason
      */
-    private static function danglingImageSources(string $markup, ?array $known): array
+    private static function danglingImageSources(string $markup, ?array $known, string $slug, array $onDisk): array
     {
         if ($known === null) {
             return [];
@@ -510,10 +524,23 @@ final class ThemeValidator
 
         $problems = [];
         foreach (array_unique($found) as $source) {
-            if (isset($known[$source]) || !self::isDanglingImageSource($source)) {
+            if (isset($known[$source])) {
                 continue;
             }
-            $problems[] = $source === '' ? '(empty)' : $source;
+            if (preg_match('#^/wp-content/themes/([^/]+)/assets/([^/?\#]+)$#', $source, $m) === 1) {
+                $file = $m[2];
+                $resolves = $m[1] === $slug
+                    && (isset($onDisk[$file]) || isset($known['theme:./assets/' . $file]));
+                if (!$resolves) {
+                    $problems[$source] = 'names no file of this theme (the theme slug or the filename matches no '
+                        . 'generated asset), so the browser shows a broken image';
+                }
+                continue;
+            }
+            if (!self::isDanglingImageSource($source)) {
+                continue;
+            }
+            $problems[$source === '' ? '(empty)' : $source] = 'resolves to nothing and was never collected for generation';
         }
         return $problems;
     }

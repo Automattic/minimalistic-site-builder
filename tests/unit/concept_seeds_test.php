@@ -269,3 +269,41 @@ test('ConceptSeeds::axisKey leaves tint out, so the dedup key stays the triple',
     $warnings = [];
     assert_eq(2, count(ConceptSeeds::distinct([$a, $b], $warnings)), 'a pool of two is never narrowed to one');
 });
+
+test('ConceptSeeds::judgeCandidates numbers every seed from zero and prints its coordinates', function () {
+    $pool = [
+        ['text' => 'Ink & Brass — a deep blue reading room.', 'ground' => 'dark', 'register' => 'noir',
+            'accent' => 'jewel', 'tint' => 'cool', 'type_register' => 'didone', 'color_economy' => 'single-accent'],
+        ['text' => 'Bare Seed', 'ground' => null, 'register' => null, 'accent' => null,
+            'tint' => null, 'type_register' => null, 'color_economy' => null],
+    ];
+    $rendered = ConceptSeeds::judgeCandidates($pool);
+    assert_contains('[0] Ink & Brass — a deep blue reading room.', $rendered);
+    assert_contains('ground dark', $rendered);
+    assert_contains('register noir', $rendered);
+    assert_contains('type_register didone', $rendered);
+    assert_contains('color_economy single-accent', $rendered);
+    assert_contains('[1] Bare Seed', $rendered);
+    assert_true(!str_contains($rendered, 'null'), 'an uncommitted coordinate is left out, not printed as null');
+    assert_true(!str_contains($rendered, '[2]'), 'no phantom third candidate');
+});
+
+test('ConceptSeeds::judgedWinner reads an in-range index and rejects everything else', function () {
+    assert_eq(1, ConceptSeeds::judgedWinner(['winner' => 1, 'why' => 'x'], 3));
+    assert_eq(2, ConceptSeeds::judgedWinner(['winner' => '2'], 3), 'a numeric string is an index');
+    assert_eq(0, ConceptSeeds::judgedWinner(['winner' => 0], 1));
+    assert_eq(null, ConceptSeeds::judgedWinner(['winner' => 3], 3), 'one past the end is out of range');
+    assert_eq(null, ConceptSeeds::judgedWinner(['winner' => -1], 3));
+    assert_eq(null, ConceptSeeds::judgedWinner(['winner' => 'second'], 3));
+    assert_eq(null, ConceptSeeds::judgedWinner(['winner' => true], 3));
+    assert_eq(null, ConceptSeeds::judgedWinner(['winner' => 1.5], 3));
+    assert_eq(null, ConceptSeeds::judgedWinner(['why' => 'no winner key'], 3));
+    assert_eq(null, ConceptSeeds::judgedWinner('1', 3), 'the payload must be an object');
+});
+
+test('ConceptSeeds::judgedWhy returns the reason as one trimmed line, or an empty string', function () {
+    assert_eq('Names the rind stripe.', ConceptSeeds::judgedWhy(['winner' => 0, 'why' => "  Names the rind stripe. \n"]));
+    assert_eq('one line, not two', ConceptSeeds::judgedWhy(['winner' => 0, 'why' => "one line,\n   not two"]));
+    assert_eq('', ConceptSeeds::judgedWhy(['winner' => 0]));
+    assert_eq('', ConceptSeeds::judgedWhy(['winner' => 0, 'why' => ['not', 'a', 'string']]));
+});

@@ -28,6 +28,7 @@
         "refine-prompt": "small",
         "site-spec": "small",
         "design-direction-seeds": "small",
+        "design-direction-judge": "large",
         "design-direction": "large",
         "theme-json": "large",
         "page-plan": "small",
