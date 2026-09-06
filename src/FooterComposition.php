@@ -169,6 +169,11 @@ final class FooterComposition
             'huge clipped wordmark', 'giant clipped wordmark', 'clipped wordmark', 'clipped giant wordmark',
             'giant wordmark footer', 'huge wordmark footer', 'ghost wordmark footer', 'ghost wordmark',
             'wordmark footer', 'sunken wordmark',
+            // frm PR-4l: three of the four second-set briefs name the footer
+            // this way and got the hash pick.
+            'footer with a huge wordmark', 'footer with a giant wordmark', 'footer with the name set huge',
+            'footer band with the name', 'footer with the wordmark', 'wordmark set huge in the footer',
+            'name set huge', 'footer with a big wordmark', 'giant wordmark', 'huge wordmark',
         ],
         'newsletter-columns' => ['newsletter footer', 'newsletter signup footer', 'footer with link columns', 'link columns footer', 'four-column footer', '4-col footer', 'four column footer'],
         'contact-sheet' => ['contact sheet footer', 'footer with contact details', 'contact details footer'],

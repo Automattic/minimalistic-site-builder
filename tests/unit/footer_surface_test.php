@@ -239,3 +239,13 @@ test('a footer the brief states in so many words is read as a bounded phrase (fr
     assert_eq('cover-coda', FooterComposition::statedArchetypeFor(['prompt' => 'a footer band with a photo']));
     assert_eq(null, FooterComposition::statedArchetypeFor([]));
 });
+
+
+test('a stated wordmark footer in more words reaches sunken-wordmark (frm PR-4l)', function () {
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('a dark closing panel, and a footer with a huge wordmark.'));
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('journal cards, a closing CTA, and a footer with a huge wordmark.'));
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('and a solid blue footer band with the name set huge.'));
+    assert_eq('sunken-wordmark', FooterComposition::statedInBrief('a footer with a giant ghost wordmark.'));
+    assert_eq(null, FooterComposition::statedInBrief('the hero is a huge uppercase wordmark with a one-line tagline'), 'a wordmark hero is not a footer');
+    assert_eq(null, FooterComposition::statedInBrief('one dark photo panel with a giant lowercase wordmark'), 'a lowercase wordmark hero is not a footer');
+});
