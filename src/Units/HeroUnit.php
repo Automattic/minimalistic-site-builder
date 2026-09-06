@@ -73,6 +73,8 @@ final class HeroUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        // A heading never carries its own paint (frm PR-5j).
+        $markup = GeneratedMarkup::stripHeadingPaint($markup, $key, $repairs, $warnings);
         $markup = GeneratedMarkup::withRootClassMarker(
             $markup,
             self::MARKER_PREFIX,
