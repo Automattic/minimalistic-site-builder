@@ -229,8 +229,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-5j (cohort-15, P0, merged #557): spector-like23's H1 took the theme's one gradient preset as a background box (style.color.gradient), and the light copy washed out on the gradient's cream end. Fix: GeneratedMarkup::stripHeadingPaint removes backgroundColor, gradient and custom paint from every heading block with its classes and inline background, in the hero and section units, with a warning per heading.
 - PR-0d (cohort-15, P1, merged #558): calderr-like6's spec named the site "Portfolio" (title "Web Designer Portfolio"), so the giant wordmark reads as a category word. Fix: the site-spec step rejects a name that is a generic category word (portfolio, studio, agency, website, company, brand, shop, blog, home) and re-asks once with the rule quoted; the prompt already says "a real NAME, never a generic descriptor".
 - PR-8k (cohort-15, closed, not a defect): a full-resolution crop shows the flat-cut r terminals are the letterform of the display face, not a clip by the word-reveal span.
-- PR-4p-2 (cohort-15, P3): the identity-line bind fires on a case-only difference ("meridian" vs "Meridian"); the lowercase wordmark was the brief's intent. Fix: compare case-insensitively and keep the authored case.
-- PR-4o-2 (cohort-15, P3, in PR on frm/drained-grade-phrases): fabrica-like7's grade "colour but drained toward warm greys" passes the monochrome check and ships near-grey photos. Fix: add "drained", "washed out", "grey-toned" to the monochrome phrase list.
+- PR-4p-2 (cohort-15, P3, in PR on frm/identity-line-case): the identity-line bind fires on a case-only difference ("meridian" vs "Meridian"); the lowercase wordmark was the brief's intent. Fix: compare case-insensitively and keep the authored case.
+- PR-4o-2 (cohort-15, P3, merged #559): fabrica-like7's grade "colour but drained toward warm greys" passes the monochrome check and ships near-grey photos. Fix: add "drained", "washed out", "grey-toned" to the monochrome phrase list.
 - PR-4q (cohort-14, P2, merged #556): a strip of the page ground showed under every giant-wordmark footer (calderr 41px, fabrica 67px, parley 123px). Probe: the fit-text heading's inline content area (855px at 642px) overflows its 732px line box, and that scrollable overflow lengthens the page past the band; 32px more is the admin bar's html margin in the logged-in capture. Fix: `.wp-block-heading.has-fit-text { overflow: clip }` (Chrome counts a clip margin as overflow again, so none).
 - PR-2u (cohort-14, P1, merged #553): fabrica-like6 planned the contrast hero surface and the model authored a near-black primary, so the PR-2s plate rule missed the opener. Fix: the plate matches the contrast or the primary surface on a wordmark-stage hero.
 - PR-2t (cohort-14, P2, merged #554): dasstudio-like6's wordmark stops at the copy group's content width; the reference sets the name across the viewport. Fix: the wordmark-stage copy group spans the hero's full inline width so the container query measures the band.
@@ -486,6 +486,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 106 | PR-4q | #556 | merged | the fit-text identity line is clipped so its inline overflow cannot lengthen the page | https://gist.github.com/matiasbenedetto/a81a8ab8aaad4a50725bbc9a7b0db0f8 |
 | 107 | PR-5j | #557 | merged | a heading block never carries its own background paint | https://gist.github.com/matiasbenedetto/f9139d786d89c5a98f739eefc03d479f |
 | 108 | PR-0d | #558 | merged | a generic category word is not a site name; one re-ask | https://gist.github.com/matiasbenedetto/614eb527029728d68b708bf3121bc2ab |
+| 109 | PR-4o-2 | #559 | merged | drained-grey phrases count as a monochrome grade | https://gist.github.com/matiasbenedetto/78969605024b81fca9084c0646b2703e |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -606,6 +607,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 115: PR-4q #556 merged. Cohort-15 built with images on 006dfd06 (nine sites, no plan loss): seven sites at 4.5, spector 4/4/3.5 (P0 gradient box on the H1), calderr 4/4.5/4.5 (generic name). PR-5j in PR: heading paint strip, spector mirror reads. New rows PR-0d (P1), PR-8k (P2), PR-4p-2 and PR-4o-2 (P3). Lesson: a class-token edit and a splice cannot share a BlockMarkup node; rewrite the opening tag with one splice.
 - 2026-09-06 turn 116: PR-5j #557 merged. PR-0d in PR: SiteSpecStep::genericName plus one re-ask with the rule quoted; a live replay on the calderr brief gave Mara Veldkamp on the first sample, the fake-client test drives the retry. Next: PR-8k word-reveal edge clip, then cohort-16.
 - 2026-09-06 turn 117: PR-0d #558 merged. PR-8k closed as not a defect (letterform). PR-4o-2 in PR: drained-grey phrases join the monochrome grade check. Next: PR-4p-2, then cohort-16.
+- 2026-09-06 turn 118: PR-4o-2 #559 merged. PR-4p-2 in PR: the identity-line bind compares case-insensitively and keeps the authored case. The backlog is then empty apart from the parked rows (W3f, PR-3l, PR-5e). Next: cohort-16 of nine sites.
 
 ## 10. Parked / rejected
 

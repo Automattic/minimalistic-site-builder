@@ -16,6 +16,9 @@ test('the fit-text identity line carries the site name, not the title (frm PR-4p
     $same = '<h2 class="wp-block-heading alignfull has-fit-text">Noa</h2>';
     assert_eq($same, FooterMarkup::withIdentityLineName($same, 'Noa', $warnings), 'the name stands');
     assert_eq([], $warnings);
+    $lower = '<h2 class="wp-block-heading alignfull has-fit-text">meridian</h2>';
+    assert_eq($lower, FooterMarkup::withIdentityLineName($lower, 'Meridian', $warnings), 'a case-only difference keeps the authored case (frm PR-4p-2)');
+    assert_eq([], $warnings);
     $plain = '<h2 class="wp-block-heading alignfull">Noa — Web Design</h2>';
     assert_eq($plain, FooterMarkup::withIdentityLineName($plain, 'Noa', $warnings), 'only the fit-text line is bound');
     assert_eq($same, FooterMarkup::withIdentityLineName($same, '', $warnings), 'an empty name changes nothing');

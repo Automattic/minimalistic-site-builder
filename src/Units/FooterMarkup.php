@@ -506,7 +506,9 @@ final class FooterMarkup
             '/(<h[1-6]\b[^>]*\bclass="[^"]*\bhas-fit-text\b[^"]*"[^>]*>)(.*?)(<\/h[1-6]>)/su',
             static function (array $m) use ($siteName, &$warnings): string {
                 $authored = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                if ($authored === $siteName) {
+                // A case-only difference is the brief's own choice (frm
+                // PR-4p-2): fabrica's lowercase wordmark stays lowercase.
+                if (mb_strtolower($authored, 'UTF-8') === mb_strtolower($siteName, 'UTF-8')) {
                     return $m[0];
                 }
                 $warnings[] = "file='theme/parts/footer.html'; block='heading'; authored=identity line "
