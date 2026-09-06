@@ -71,11 +71,11 @@ test('finalize-theme ships the band kit for rounded and prunes it for square (fr
 });
 
 
-test('the rounded band kit insets a wordmark-stage hero on the contrast surface and no other hero (frm PR-2s)', function () {
+test('the rounded band kit insets a wordmark-stage hero on the contrast or primary surface and no other hero (frm PR-2s, PR-2u)', function () {
     $css = (string) BandGeometry::kitCss('rounded');
-    $rule = '.wp-block-group.hero-composition--wordmark-stage.has-contrast-background-color.has-background {';
+    $rule = '.wp-block-group.hero-composition--wordmark-stage.has-background:is(.has-contrast-background-color, .has-primary-background-color) {';
     assert_eq(2, substr_count($css, $rule), 'one desktop rule and one phone gutter rule');
-    $body = substr($css, (int) strpos($css, $rule), 260);
+    $body = substr($css, (int) strpos($css, $rule), 400);
     assert_contains('margin-inline: var(--wp--preset--spacing--md, 1.5rem);', $body);
     assert_contains('border-radius: var(--shape-radius-panel, 1.5rem);', $body);
     assert_contains('overflow: hidden;', $body);

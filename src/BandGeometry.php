@@ -60,14 +60,16 @@ final class BandGeometry
                opening that takes the plate too (frm PR-2s): fabrica's opener
                is a rounded dark panel inset on the light page ground, with
                the header above it on the ground. Other hero recipes keep
-               their edges. */
-            .wp-block-group.hero-composition--wordmark-stage.has-contrast-background-color.has-background {
+               their edges. The model writes the dark surface as contrast or
+               as a near-black primary (frm PR-2u: fabrica-like6 planned
+               contrast and authored primary), so both take the plate. */
+            .wp-block-group.hero-composition--wordmark-stage.has-background:is(.has-contrast-background-color, .has-primary-background-color) {
                 margin-inline: var(--wp--preset--spacing--md, 1.5rem);
                 border-radius: var(--shape-radius-panel, 1.5rem);
                 overflow: hidden;
             }
             @media (max-width: 781px) {
-                .wp-block-group.hero-composition--wordmark-stage.has-contrast-background-color.has-background {
+                .wp-block-group.hero-composition--wordmark-stage.has-background:is(.has-contrast-background-color, .has-primary-background-color) {
                     margin-inline: var(--wp--preset--spacing--sm, 0.75rem);
                 }
             }
