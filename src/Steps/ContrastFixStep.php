@@ -423,7 +423,7 @@ final class ContrastFixStep implements Step
     }
 
     /** Read one dot-separated theme.json path without emitting notices. */
-    private static function pathValue(array $theme, string $path): mixed
+    public static function pathValue(array $theme, string $path): mixed
     {
         $value = $theme;
         foreach (explode('.', $path) as $key) {

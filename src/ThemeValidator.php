@@ -431,12 +431,7 @@ final class ThemeValidator
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $known = self::recordedImageSources($project);
         $slug = $project->slug();
-        $onDisk = [];
-        foreach (glob($project->themePath('assets/*')) ?: [] as $abs) {
-            if (is_file($abs)) {
-                $onDisk[basename($abs)] = true;
-            }
-        }
+        $onDisk = $project->assetFilenames();
 
         foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
