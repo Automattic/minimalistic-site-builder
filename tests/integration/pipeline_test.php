@@ -72,6 +72,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // random and expanded by the design-direction call below. Runs after
     // site-spec, before the concurrent group.
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
+    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     // design-direction (json) — the expanded direction, read by
     // theme-json/page-plan/sections.
     $llm->queueJson(['direction' => [

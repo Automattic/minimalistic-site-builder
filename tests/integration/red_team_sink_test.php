@@ -462,6 +462,7 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
         ],
     ]);
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
+    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     $llm->queueJson(['direction' => [
         'title' => 'Hearth & Grain',
         'description' => "Editorial warmth. <script>{$canary}()</script> Serif display over grotesque body.",
@@ -666,6 +667,7 @@ test('red team: the HTML-first graph delivers no executable or fetching model by
             'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []]],
         ]);
         $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
+        $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
         $llm->queueJson(['direction' => [
             'title' => 'Flour Archive',
             'description' => "Warm editorial system. <script>{$canary}()</script>",

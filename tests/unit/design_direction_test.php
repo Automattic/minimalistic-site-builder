@@ -73,6 +73,8 @@ function designdir_direction(): array
             'secondary' => '#CC9988', 'accent' => '#E08A3C',
         ],
         'type'             => designdir_type(),
+        'subject_anchor'   => 'accent is the crust ochre of a scored loaf; band is the flour-dusted bench',
+        'tension'          => 'Swiss poster discipline against the unevenness of real bread.',
         'image_grade'      => 'warm kodachrome color, soft golden light',
         'image_treatment'  => 'tinted-overlay',
         'text_placement'   => 'asymmetric-thirds',
@@ -95,6 +97,7 @@ function designdir_card_rows(array $rows): array
 test('design-direction persists and narrates an unexecutable ornament promise', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
     $authored['description'] = 'Delicate filigree runs along every band edge.';
     $authored['device'] = 'none';
@@ -133,6 +136,7 @@ test('design-direction persists and narrates an unexecutable ornament promise', 
 test('design-direction expands a picked seed into structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -160,7 +164,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_true(!array_key_exists('hero_composition', $written), 'old prose field is gone');
 
     // The seed prompt carries the user's words and the factual spec.
-    assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
+    assert_eq(3, count($llm->calls), 'exactly three calls: seeds + judge + expansion');
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
     assert_true(
         !str_contains($llm->calls[0]['prompt'], '`"luxury"`'),
@@ -170,22 +174,22 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('title', $llm->calls[0]['prompt']);
 
     // The expansion prompt carries the brief, the spec, ONE of the seeds
-    // (random pick), and asks for every structured field.
-    assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
-    assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
-    assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'type_scale', 'type_treatment', 'image_grade', 'image_treatment', 'image_crop', 'canvas', 'measure', 'card_style', 'depth', 'cta_style', 'hero_blueprint'] as $field) {
-        assert_contains($field, $llm->calls[1]['prompt']);
+    // (the judged pick), and asks for every structured field.
+    assert_contains('cozy neighborhood bakery', $llm->calls[2]['prompt']);
+    assert_contains('Hearth & Crumb', $llm->calls[2]['prompt']);
+    assert_contains('Seed ', $llm->calls[2]['prompt'], 'a seed reached the expansion prompt');
+    foreach (['palette', 'type', 'type_scale', 'type_treatment', 'subject_anchor', 'tension', 'image_grade', 'image_treatment', 'image_crop', 'canvas', 'measure', 'card_style', 'depth', 'cta_style', 'hero_blueprint'] as $field) {
+        assert_contains($field, $llm->calls[2]['prompt']);
     }
     assert_contains(
         '"motion_note": ["Zero or more motion-kit class names the profile ships, chosen per the motion_note field above."],',
-        $llm->calls[1]['prompt'],
+        $llm->calls[2]['prompt'],
     );
     $assigned = $written['hero_blueprint']['recipe'];
-    assert_contains($assigned, $llm->calls[1]['prompt']);
+    assert_contains($assigned, $llm->calls[2]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
         if ($other !== $assigned) {
-            assert_true(!str_contains($llm->calls[1]['prompt'], $other), "{$other} recipe does not leak");
+            assert_true(!str_contains($llm->calls[2]['prompt'], $other), "{$other} recipe does not leak");
         }
     }
 
@@ -195,6 +199,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
 test('design-direction persists an unmappable motion-note warning and reaches a fixed point', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
     $authored['motion'] = 'calm';
     $authored['motion_note'] = 'a cinematic wipe nobody ships';
@@ -259,6 +264,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 test('design-direction sends the seed call to the seed model and keeps the hot temperature on both calls', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -266,8 +272,8 @@ test('design-direction sends the seed call to the seed model and keeps the hot t
 
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null, 'seeds use the seed model');
     assert_eq(1.0, $llm->calls[0]['opts']['temperature'] ?? null, 'seed spread runs hot');
-    assert_eq('claude-opus-4-8', $llm->calls[1]['opts']['model'] ?? null, 'expansion uses the step model');
-    assert_eq(1.0, $llm->calls[1]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
+    assert_eq('claude-opus-4-8', $llm->calls[2]['opts']['model'] ?? null, 'expansion uses the step model');
+    assert_eq(1.0, $llm->calls[2]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -390,6 +396,7 @@ test('design-direction offers a locked extra label only when the brief named tha
     [$project, $llm, $tmp] = make_designdir_fixture();
     $project->writeJson('meta.json', ['prompt' => 'A luxury bakery in Lisbon']);
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -408,6 +415,7 @@ test('design-direction drops a repeated world from the pick and records one warn
         designdir_seed_obj('Copper Morning — a warm heritage bakery.', 'light', 'heritage', 'warm'),
         designdir_seed_obj('Night Kitchen — a dark modernist counter.', 'dark', 'modernist', 'cool'),
     ]]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -437,6 +445,7 @@ test('design-direction records a collapsed round once, without a shared-ground e
         designdir_seed_obj('Two', 'dark', 'editorial', 'jewel'),
         designdir_seed_obj('Three', 'dark', 'editorial', 'jewel'),
     ]]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -473,6 +482,7 @@ test('design-direction records a round of distinct worlds that all lean on one t
         designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'warm'],
         designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'warm'],
     ]]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
@@ -491,6 +501,7 @@ test('design-direction stays quiet about tint when the round spreads its familie
         designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'cool'],
         designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'violet'],
     ]]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
@@ -510,6 +521,7 @@ test('design-direction does not warn that every seed is grounded when two left g
         ['seed' => 'Two — a sentence.', 'register' => 'modernist', 'accent' => 'cool'],
         ['seed' => 'Three — a sentence.'],
     ]]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -532,6 +544,7 @@ test('design-direction does not read or write cross-build history', function () 
         ['title' => 'Forbidden Previous Direction'],
     ]));
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
@@ -547,6 +560,10 @@ test('design-direction does not read or write cross-build history', function () 
     );
     assert_true(
         !str_contains($llm->calls[1]['prompt'], 'Forbidden Previous Direction'),
+        'judge prompt ignores previous directions'
+    );
+    assert_true(
+        !str_contains($llm->calls[2]['prompt'], 'Forbidden Previous Direction'),
         'expansion prompt ignores previous directions'
     );
 
@@ -555,6 +572,7 @@ test('design-direction does not read or write cross-build history', function () 
     $second->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb']);
     $llm2 = new FakeLlm();
     $llm2->queueJson(['seeds' => designdir_seeds()]);
+    $llm2->queueJson(designdir_judge());
     $llm2->queueJson(['direction' => designdir_direction()]);
     (new DesignDirectionStep($llm2, $renderer))->run($second);
 
@@ -910,6 +928,7 @@ test('normalize ignores a ground_tint outside the vocabulary', function () {
 test('design-direction persists structured typography and warns when an axis is removed', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $direction = designdir_direction();
     $direction['type'] = [
         'heading' => [
@@ -947,6 +966,7 @@ test('design-direction persists structured typography and warns when an axis is 
 test('design-direction keeps hostile family values inert and warns for every lost commitment', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $direction = designdir_direction();
     $direction['type']['heading'] = [
         'family' => '*/ system($_GET["cmd"]); /*',
@@ -1261,6 +1281,7 @@ test('normalize degrades object and list card styles without emitting PHP diagno
 test('design-direction persists an invalid card style as a durable warning', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $direction = designdir_direction();
     $direction['card_style'] = 'polaroid';
     $llm->queueJson(['direction' => $direction]);
@@ -1478,6 +1499,7 @@ test('normalize warns actionably when invalid string and non-string shapes fall 
 test('design-direction persists invalid shape fallback evidence in warnings.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $direction = designdir_direction();
     $direction['shape'] = ['round'];
     $llm->queueJson(['direction' => $direction]);
@@ -1568,6 +1590,7 @@ test('invalid type scale degrades to classic with actionable evidence', function
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => ['title' => 'Empty', 'description' => '   ']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -1600,6 +1623,9 @@ test('design-direction delivers its deterministic fallback when repaired expansi
             $this->jsonCalls++;
             if ($this->jsonCalls === 1) {
                 return ['seeds' => designdir_seeds()];
+            }
+            if ($this->jsonCalls === 2) {
+                return designdir_judge();
             }
             return JsonBatchRecovery::run(
                 ['request' => ['prompt' => $prompt] + $opts],
@@ -1635,6 +1661,7 @@ test('design-direction delivers its deterministic fallback when repaired expansi
 test('design-direction keeps an operational expansion failure fatal', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     // No expansion response: FakeLlm throws a plain RuntimeException.
 
     assert_throws(fn () => (new DesignDirectionStep(
@@ -1883,6 +1910,7 @@ test('motionProfileFor fails closed to none', function () {
 test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
 
     putenv('HERO_RECIPE=foreground-split');
@@ -1895,10 +1923,10 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $direction = $project->readJson('designDirection.json');
     assert_eq('foreground-split', $direction['hero_blueprint']['recipe']);
     assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
-    assert_contains('foreground-split', $llm->calls[1]['prompt']);
+    assert_contains('foreground-split', $llm->calls[2]['prompt']);
     foreach (HeroComposition::RECIPES as $recipe) {
         if ($recipe !== 'foreground-split') {
-            assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
+            assert_true(!str_contains($llm->calls[2]['prompt'], $recipe), "{$recipe} is not exposed");
         }
     }
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1979,6 +2007,7 @@ test('split-nav preflight counts caller-requested nested pages recursively', fun
         ]],
     ]);
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
     putenv('HEADER_ARCHETYPE=split-nav');
     try {
@@ -1990,7 +2019,7 @@ test('split-nav preflight counts caller-requested nested pages recursively', fun
         putenv('HEADER_ARCHETYPE');
         exec('rm -rf ' . escapeshellarg($tmp));
     }
-    assert_eq(2, count($llm->calls), 'nested child makes the caller-owned scope definitively multi-page');
+    assert_eq(3, count($llm->calls), 'nested child makes the caller-owned scope definitively multi-page');
 });
 
 test('fallible batch hero assignment remaps incompatibility and warns with requested and delivered values', function () {
@@ -2001,6 +2030,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
         'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'foreground-split'],
     ]);
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $llm->queueJson(['direction' => designdir_direction()]);
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
@@ -2442,4 +2472,303 @@ test('color economy is normalized, formatted, and read with a restrained default
         $project->writeJson('designDirection.json', ['color_economy' => 'multicolor']);
         assert_eq('multicolor', DesignDirectionStep::colorEconomyFor($project));
     });
+});
+
+/** The judge's answer as the fixture round expects it. @return array{winner:int,why:string} */
+function designdir_judge(int $winner = 0, string $why = 'fixture judge'): array
+{
+    return ['winner' => $winner, 'why' => $why];
+}
+
+test('design-direction asks a judge to pick among distinct seeds and expands its winner', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge(2, 'Only this one names something the bakery owns.'));
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(3, count($llm->calls), 'seeds, judge, expansion');
+    $judge = $llm->calls[1]['prompt'];
+    assert_contains('cozy neighborhood bakery', $judge, 'the judge reads the brief');
+    assert_contains('Hearth & Crumb', $judge, 'the judge reads the spec');
+    foreach ([0, 1, 2, 3] as $i) {
+        assert_contains('[' . $i . '] Seed ' . ($i + 1), $judge, 'every distinct seed is on the ballot');
+    }
+    assert_eq('design-direction-judge', $llm->calls[1]['opts']['log_label'] ?? null);
+
+    $expansion = $llm->calls[2]['prompt'];
+    assert_contains('Seed 3', $expansion, 'the judged winner reaches the expansion');
+    foreach (['Seed 1', 'Seed 2', 'Seed 4'] as $loser) {
+        assert_true(!str_contains($expansion, $loser), "{$loser} does not leak into the expansion");
+    }
+    assert_eq('Seed 3', $project->readJson('designDirection.json')['concept_seed']);
+
+    $report = $project->readText('logs/design-direction.txt');
+    assert_contains('Seed choice: judge picked [2] Seed 3', $report);
+    assert_contains('Only this one names something the bakery owns.', $report);
+    $warnings = $project->exists('warnings.json')
+        ? implode("\n", $project->readJson('warnings.json')['design-direction'] ?? [])
+        : '';
+    assert_true(!str_contains($warnings, 'seed judge'), 'a working judge leaves no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the seed judge runs on its own model, cold, while seeds and expansion keep theirs', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        'claude-opus-4-8',
+        1.0,
+        'claude-haiku-4-5',
+        'judge-model',
+    ))->run($project);
+
+    assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null, 'seeds use the seed model');
+    assert_eq('judge-model', $llm->calls[1]['opts']['model'] ?? null, 'the judge uses the judge model');
+    assert_eq(0.0, $llm->calls[1]['opts']['temperature'] ?? null, 'the judge runs cold, not at the API default');
+    assert_eq('claude-opus-4-8', $llm->calls[2]['opts']['model'] ?? null, 'expansion uses the step model');
+    assert_eq(1.0, $llm->calls[2]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the seed judge sends no model key when none is configured', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq('design-direction-judge', $llm->calls[1]['opts']['log_label'] ?? null, 'the second call is the judge');
+    assert_true(!array_key_exists('model', $llm->calls[1]['opts']), 'no judge model key when default');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a judge that fails degrades to the random pick with a durable warning', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+    $llm->failPromptSubstrings = ['judging concept seeds'];
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(3, count($llm->calls), 'the judge was asked, failed, and the build went on');
+    assert_contains('Seed ', $llm->calls[2]['prompt'], 'a seed still reaches the expansion');
+    $warnings = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('seed judge', $warnings);
+    assert_contains('picked uniformly at random', $warnings);
+    assert_contains('disposition fallback', $warnings);
+    assert_contains('Seed choice: random', $project->readText('logs/design-direction.txt'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a judge answer outside the round degrades to the random pick with a durable warning', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['winner' => 9, 'why' => 'off the ballot']);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_contains('Seed ', $llm->calls[2]['prompt']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('seed judge', $warnings);
+    assert_contains('authored winner 9', $warnings);
+    assert_contains('picked uniformly at random', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a round with one distinct seed skips the judge', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => ['Only Seed — one world.']]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2, count($llm->calls), 'nothing to judge: seeds, expansion');
+    assert_contains('Seed choice: single seed', $project->readText('logs/design-direction.txt'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the expansion prompt does not name a specific audited site as an anti-example', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction.md'));
+    assert_true(
+        !str_contains(strtolower($prompt), 'watermelon'),
+        'a one-site war story in the expansion prompt overfits every later brand',
+    );
+});
+
+test('the seed judge prompt judges fit, subject specificity, and the category reflex, not position', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/design-seed-judge.md'));
+    assert_contains('judging concept seeds', $prompt);
+    assert_contains('{{candidates}}', $prompt);
+    assert_contains('<user_brief>', $prompt);
+    assert_contains('swap', $prompt);
+    assert_contains('category', $prompt);
+    assert_contains('position', $prompt);
+    assert_contains('"winner"', $prompt);
+});
+
+test('normalize keeps the tension and subject anchor the direction commits to', function () {
+    $direction = DesignDirectionStep::normalize(
+        [
+            'description'    => 'x',
+            'palette'        => ['base' => '#F4EBDA'],
+            'tension'        => "  Laboratory precision against the loud stripe of a rind.  ",
+            'subject_anchor' => " accent is the flesh red of a cut watermelon; band is the pale inner rind ",
+        ],
+        'cinematic-safe-zone',
+    );
+    assert_eq('Laboratory precision against the loud stripe of a rind.', $direction['tension']);
+    assert_eq('accent is the flesh red of a cut watermelon; band is the pale inner rind', $direction['subject_anchor']);
+});
+
+test('a non-string tension or subject anchor is removed with a durable warning', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'tension' => ['two', 'halves'], 'subject_anchor' => 7],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('', $direction['tension']);
+    assert_eq('', $direction['subject_anchor']);
+    $joined = implode("\n", $warnings);
+    assert_contains('path="tension"', $joined);
+    assert_contains('path="subject_anchor"', $joined);
+    assert_contains('was not a sentence', $joined);
+    assert_true(
+        !str_contains(implode("\n", $repairs), 'tension') && !str_contains(implode("\n", $repairs), 'subject_anchor'),
+        'a lost commitment is a delivered defect, not a repair',
+    );
+});
+
+test('an absent or empty tension and subject anchor normalize silently to their delivered form', function () {
+    // '' is the delivered form, so a re-normalized artifact must not restate
+    // the loss: normalize() is a fixed point, and the content judgement lives
+    // in commitmentWarnings(), which run() applies exactly once.
+    foreach ([
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA']],
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'tension' => '', 'subject_anchor' => '   '],
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'tension' => null, 'subject_anchor' => null],
+    ] as $payload) {
+        $repairs = [];
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize($payload, 'cinematic-safe-zone', '', $repairs, $warnings);
+        assert_eq('', $direction['tension']);
+        assert_eq('', $direction['subject_anchor']);
+        $joined = implode("\n", $warnings);
+        assert_true(!str_contains($joined, 'path="tension"'), 'normalize passes no judgement on a blank tension');
+        assert_true(!str_contains($joined, 'path="subject_anchor"'));
+    }
+});
+
+test('commitmentWarnings records a blank tension, a blank anchor, and an anchor bound to no palette role', function () {
+    $blank = DesignDirectionStep::commitmentWarnings(['tension' => '', 'subject_anchor' => '']);
+    $joined = implode("\n", $blank);
+    assert_eq(2, count($blank));
+    assert_contains('path="tension"', $joined);
+    assert_contains('category default', $joined);
+    assert_contains('path="subject_anchor"', $joined);
+    assert_contains('swap test is unanswered', $joined);
+
+    $unbound = DesignDirectionStep::commitmentWarnings([
+        'tension'        => 'A against B.',
+        'subject_anchor' => 'the striped rind of a watermelon',
+    ]);
+    assert_eq(1, count($unbound), 'the committed tension earns no row');
+    assert_contains('path="subject_anchor"', $unbound[0]);
+    assert_contains('names no palette role', $unbound[0]);
+
+    assert_eq([], DesignDirectionStep::commitmentWarnings([
+        'tension'        => 'A against B.',
+        'subject_anchor' => 'accent is the flesh red; the band is the pale inner rind',
+    ]), 'a bound anchor and a committed tension are silent');
+});
+
+test('design-direction records blank prose commitments once, in warnings.json, and keeps an unbound anchor', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $authored = designdir_direction();
+    $authored['tension'] = '';
+    $authored['subject_anchor'] = 'the striped rind of a watermelon';
+    $llm->queueJson(['direction' => $authored]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_eq('', $written['tension']);
+    assert_eq('the striped rind of a watermelon', $written['subject_anchor'], 'the unbound anchor is retained, not cut');
+    $rows = array_values(array_filter(
+        $project->readJson('warnings.json')['design-direction'] ?? [],
+        static fn (string $row): bool => str_contains($row, 'path="tension"') || str_contains($row, 'path="subject_anchor"'),
+    ));
+    assert_eq(2, count($rows), 'one row per lost commitment, no duplicates');
+    assert_contains('category default', implode("\n", $rows));
+    assert_contains('names no palette role', implode("\n", $rows));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the deterministic fallback direction does not pile prose-commitment rows onto its own loss row', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => ['title' => 'Empty', 'description' => '   ']]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('disposition fallback', $joined);
+    assert_true(!str_contains($joined, 'path="tension"'), 'the fallback already says the concept was lost');
+    assert_true(!str_contains($joined, 'path="subject_anchor"'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('format renders the tension and subject anchor as facts every downstream prompt reads', function () {
+    $rendered = DesignDirectionStep::format([
+        'description'    => 'x',
+        'tension'        => 'Laboratory precision against the loud stripe of a rind.',
+        'subject_anchor' => 'accent is the flesh red of a cut watermelon',
+    ]);
+    assert_contains('- **Tension**: Laboratory precision against the loud stripe of a rind.', $rendered);
+    assert_contains('- **Subject anchor**: accent is the flesh red of a cut watermelon', $rendered);
+
+    $bare = DesignDirectionStep::format(['description' => 'x']);
+    assert_true(!str_contains($bare, 'Tension'), 'an uncommitted tension states nothing');
+    assert_true(!str_contains($bare, 'Subject anchor'));
+});
+
+test('the expansion prompt asks for a tension and a subject anchor and states the swap test', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $direction = $renderer->render('design-direction.md', [
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
+        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
+        'color_economy' => 'monochrome',
+    ]);
+    assert_contains('"tension"', $direction);
+    assert_contains('"subject_anchor"', $direction);
+    assert_contains('Subject anchor', $direction);
+    assert_contains('swap', $direction);
+});
+
+test('fallbackDirection commits no tension and no subject anchor', function () {
+    $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
+    assert_eq('', $generic['tension']);
+    assert_eq('', $generic['subject_anchor']);
 });

@@ -201,6 +201,80 @@ final class ConceptSeeds
     }
 
     /**
+     * The judge prompt's variables: the brief and spec the seeds were written
+     * from, plus the distinct round as an indexed ballot.
+     *
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
+     * @return array<string,string>
+     */
+    public static function judgePromptVars(string $brief, string $spec, array $pool): array
+    {
+        return [
+            'user_prompt' => $brief,
+            'site_spec'   => $spec,
+            'candidates'  => self::judgeCandidates($pool),
+        ];
+    }
+
+    /**
+     * The round as the judge reads it: one zero-based index per seed, the
+     * sentence, then only the coordinates the seed actually committed. The
+     * index is what the judge answers with, so it is printed exactly once and
+     * an uncommitted coordinate is left out rather than printed as "null" —
+     * a word the judge would otherwise be tempted to weigh.
+     *
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
+     */
+    public static function judgeCandidates(array $pool): string
+    {
+        $lines = [];
+        foreach (array_values($pool) as $index => $seed) {
+            $coordinates = [];
+            foreach (['ground', 'register', 'accent', 'tint', 'type_register', 'color_economy'] as $axis) {
+                $value = $seed[$axis] ?? null;
+                if (is_string($value) && $value !== '') {
+                    $coordinates[] = $axis . ' ' . $value;
+                }
+            }
+            $lines[] = '[' . $index . '] ' . $seed['text']
+                . ($coordinates === [] ? '' : "\n    " . implode(' · ', $coordinates));
+        }
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The judge's answer as an index into the round, or null when the answer
+     * is not one: the index must be an integer (or a string of one) naming a
+     * printed candidate. A float, a bool, a word, or an index past the end is
+     * no verdict, and the caller falls back to a random pick rather than
+     * crown whichever seed the bad value happens to coerce to.
+     */
+    public static function judgedWinner(mixed $payload, int $count): ?int
+    {
+        if (!is_array($payload) || !array_key_exists('winner', $payload)) {
+            return null;
+        }
+        $raw = $payload['winner'];
+        if (is_string($raw) && preg_match('/^\s*-?\d+\s*$/', $raw) === 1) {
+            $raw = (int) $raw;
+        }
+        if (!is_int($raw)) {
+            return null;
+        }
+        return $raw >= 0 && $raw < $count ? $raw : null;
+    }
+
+    /** The judge's one-line reason for the report, or an empty string. */
+    public static function judgedWhy(mixed $payload): string
+    {
+        $why = is_array($payload) ? ($payload['why'] ?? null) : null;
+        if (!is_string($why)) {
+            return '';
+        }
+        return trim((string) preg_replace('/\s+/u', ' ', $why));
+    }
+
+    /**
      * The seed's coordinates as one comparable key, or null when it did not
      * declare all three. A seed missing a coordinate is never dropped on the
      * triple: an unstated axis is not evidence of sameness. Byte-identical

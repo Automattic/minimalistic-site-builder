@@ -233,18 +233,29 @@ test('theme-json passes the configured temperature into its request', function (
 test('step_temperatures defaults: hot design-direction and sections, env override wins', function () {
     $temps = step_temperatures();
     assert_eq(1.0, $temps['design-direction']);
+    assert_eq(0.0, $temps['design-direction-judge'], 'the seed judge is cold by default');
     assert_eq(0.9, $temps['sections']);
     assert_eq(null, $temps['theme-json']);
 
     putenv('LLM_TEMPERATURE_SECTIONS=0.5');
     putenv('LLM_TEMPERATURE=0.3');
+    putenv('LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE=0.2');
     try {
         $temps = step_temperatures();
         assert_eq(0.5, $temps['sections'], 'per-step env wins');
         assert_eq(0.3, $temps['design-direction'], 'global env replaces the code default');
         assert_eq(0.3, $temps['theme-json'], 'global env applies to unset steps');
+        assert_eq(0.2, $temps['design-direction-judge'], 'only the judge-specific env heats the judge');
     } finally {
         putenv('LLM_TEMPERATURE_SECTIONS');
+        putenv('LLM_TEMPERATURE');
+        putenv('LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE');
+    }
+
+    putenv('LLM_TEMPERATURE=0.3');
+    try {
+        assert_eq(0.0, step_temperatures()['design-direction-judge'], 'a global sampling temp does not heat the judge');
+    } finally {
         putenv('LLM_TEMPERATURE');
     }
 
