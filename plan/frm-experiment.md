@@ -226,8 +226,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-0c (second set, brief refinement): the fabrica brief names no type and no photo grade, and the direction picked a serif with monochrome photography in three builds; the reference is a bold grotesque with moody colour photography. The brief now says so, the way the original briefs name their type; no pipeline change.
 - PR-2r (second set, P1): dasstudio-like4 at 390 sets ATELIER STUDIO at 32px because the wordmark pin keeps the whole name on one line in a 326px container; the reference wraps the name to two large lines on a phone. Fix: the pin takes two terms, the whole name on one line where the container is wide and the longest word at up to 3rem where it is narrow, and the heading may wrap at the space.
 - PR-2q (second set, P2): fabrica's reference sets the wordmark hero in a dark rounded panel; the recipe delivers it on the base surface. Fix: a stated dark hero panel commits the contrast surface for wordmark-stage.
-- PR-5k (cohort-17, P0, in PR on frm/card-text-contract): luzia-like24's zigzag step cards sat on a contrast band whose light text they inherited while the theme's own css painted `.card-style--flush` in the light base preset: white cards, white copy. Fix: CardTextContract reads the theme css for card-style paints, sets the card group's text preset from the paint's luminance, and drops the opposite preset from descendants.
-- PR-5l (cohort-17, P2): the same flush cards carry no inner padding when the surface comes from the theme css (the copy touches the card edge). Fix: a scaffold rule gives a painted card style the md inset unless the card-body group already carries padding.
+- PR-5k (cohort-17, P0, merged #564): luzia-like24's zigzag step cards sat on a contrast band whose light text they inherited while the theme's own css painted `.card-style--flush` in the light base preset: white cards, white copy. Fix: CardTextContract reads the theme css for card-style paints, sets the card group's text preset from the paint's luminance, and drops the opposite preset from descendants.
+- PR-5l (cohort-17, P2, in PR on frm/painted-card-inset): the same flush cards carry no inner padding when the surface comes from the theme css (the copy touches the card edge). Fix: a scaffold rule gives a painted card style the md inset unless the card-body group already carries padding.
 - PR-2v (cohort-16, P1, merged #561): the flat 0.66em-per-character wordmark pin let "momentum" overrun its plate and left "STUDIO GESTALTEN" a quarter short. Fix: HeroComposition::wordmarkEm measures the name per glyph class (wide m/w, narrow i/l/t/f/r, case defaults) scaled by the heading face through HeroHeadlineFit, at 90cqi.
 - PR-2w (cohort-16, P2, merged #562): the facts row of the wordmark hero sits outside the copy group, so PR-2t left it at the content measure while the name and the action take the band. Fix: a descendant rule lifts the cap on `.hero-composition__facts` too.
 - PR-4r (cohort-16, P2, merged #563): luzia-like23's footer is the status-readout archetype (mono rows by design) from the hash pick, while the brief names "a footer band with a 3D object". Fix: image-plinth phrases join the stated-footer reader (PR-4l family), so the brief's own footer wins the pick.
@@ -514,6 +514,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 111 | PR-2v | #561 | merged | the wordmark pin measures the name per glyph and per heading face | https://gist.github.com/matiasbenedetto/cbb1df006456f1e6b4781536e737c50e |
 | 112 | PR-2w | #562 | merged | the wordmark facts row spans the band | https://gist.github.com/matiasbenedetto/d2e7a667f945bea1c305060749c1e822 |
 | 113 | PR-4r | #563 | merged | a stated footer object reaches image-plinth | https://gist.github.com/matiasbenedetto/c4a4677c30c977238cac7709a9aac806 |
+| 114 | PR-5k | #564 | merged | a css-painted card takes the text colour its surface can carry | https://gist.github.com/matiasbenedetto/1bcd4780bbb9b13f50ad66cbeab162b1 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -639,6 +640,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 120: PR-2v #561 merged. PR-2w in PR: the facts row outside the copy group takes the band; the dasstudio-like8 mirror's hairline spans edge to edge. Next: PR-4r mono footer face, then cohort-17.
 - 2026-09-06 turn 121: PR-2w #562 merged. PR-4r redefined after the probe (the mono footer is status-readout by design) and in PR: image-plinth phrases for the stated-footer reader; the luzia brief now resolves to image-plinth. The backlog is then empty apart from the parked rows. Next: cohort-17.
 - 2026-09-06 turn 122: PR-4r #563 merged. Cohort-17 built with images on ae74d814 (nine sites, no plan loss): eight sites at 4.5, luzia 4/4/3.5 with a P0. PR-5k in PR: card text contract; the luzia mirror's five step cards read. New row PR-5l (P2). The stated footer object, the per-glyph wordmark and the generic-name re-ask all held.
+- 2026-09-06 turn 123: PR-5k #564 merged. PR-5l in PR: an unmarked, unpadded card text wrapper takes the md inset; the luzia-like24 mirror's step cards carry their copy inset. The backlog is then empty apart from the parked rows. Next: cohort-18.
 
 ## 10. Parked / rejected
 

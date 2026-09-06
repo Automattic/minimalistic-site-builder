@@ -742,6 +742,7 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     assert_contains('.hero-composition--wordmark-stage .hero-composition__copy > * { max-width: none; }', $flat, 'every child of the copy group takes the band too (frm PR-2t)');
     assert_contains('.hero-composition--wordmark-stage .hero-composition__copy > p { max-width: 34rem; }', $flat, 'the line keeps its measure');
     assert_contains('.hero-composition--wordmark-stage .hero-composition__facts { max-width: none; }', $flat, 'the facts row outside the copy group takes the band too (frm PR-2w)');
+    assert_contains('.wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group:not(.card-body):not([style*="padding"]) { padding: var(--wp--preset--spacing--md, 1.5rem); }', $flat, 'an unmarked, unpadded card text wrapper takes the md inset (frm PR-5l)');
     $nameRule = substr($css, (int) strpos($css, $name), 500);
     assert_contains('white-space: normal;', $nameRule, 'a two-word name may wrap on a phone (frm PR-2r)');
     assert_contains('text-wrap: balance;', $nameRule);
