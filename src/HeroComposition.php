@@ -472,16 +472,67 @@ final class HeroComposition
      * @param array<string,mixed> $blueprint
      * @return array{layout_archetype:string,allowed_backgrounds:list<string>,default_background:string,fallback_family:string}
      */
-    public static function planProjection(array $blueprint): array
+    public static function planProjection(array $blueprint, ?string $statedBackground = null): array
     {
         $recipe = trim((string) ($blueprint['recipe'] ?? ''));
         $meta = self::metadata($recipe);
+        $allowed = array_values($meta['backgrounds']);
+        $default = (string) $meta['default_background'];
+        // frm PR-2q: a hero surface the brief states, when the recipe allows
+        // it, is the one surface the plan may deliver. fabrica's "hero is one
+        // dark photo panel with a giant lowercase wordmark" opened on the
+        // page ground twice.
+        if ($statedBackground !== null
+            && in_array($statedBackground, $allowed, true)
+            && !in_array('image', $allowed, true)) {
+            // A cover recipe keeps its picture: a "dark hero" there is the
+            // dimmed image, not a solid panel.
+            $allowed = [$statedBackground];
+            $default = $statedBackground;
+        }
         return [
             'layout_archetype' => (string) $meta['layout_archetype'],
-            'allowed_backgrounds' => array_values($meta['backgrounds']),
-            'default_background' => (string) $meta['default_background'],
+            'allowed_backgrounds' => $allowed,
+            'default_background' => $default,
             'fallback_family' => (string) $meta['fallback_family'],
         ];
+    }
+
+    /**
+     * Bounded phrases a brief uses to ask for a dark hero panel (frm PR-2q).
+     * They name the hero's own surface, not the page ground, which GroundKey
+     * reads on its own.
+     *
+     * @var list<string>
+     */
+    private const STATED_DARK_HERO_PHRASES = [
+        'dark hero panel', 'dark photo panel', 'dark hero band', 'hero is one dark panel', 'hero is a dark panel',
+        'near-black hero panel', 'black hero panel', 'dark panel hero', 'hero in a dark panel', 'hero on a dark panel',
+        'one dark photo panel', 'dark rounded hero panel',
+    ];
+
+    /** The hero surface a brief states in so many words, or null. */
+    public static function statedHeroSurface(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_DARK_HERO_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return 'contrast';
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedHeroSurfaceFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedHeroSurface($text) !== null) {
+                return self::statedHeroSurface($text);
+            }
+        }
+        return null;
     }
 
     /**

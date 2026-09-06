@@ -378,7 +378,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $meta = $project->readJson('meta.json');
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
-        $projection = HeroComposition::planProjection($blueprint);
+        $projection = self::projectionFor($project);
 
         $siteSpec = $project->readText('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
@@ -463,7 +463,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $siteSpec = $project->readJson('siteSpec.json');
         $pages = self::flattenPages($siteSpec);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
-        $frontProjection = HeroComposition::planProjection($blueprint);
+        $frontProjection = self::projectionFor($project);
         $allowOffsetGrid = self::allowOffsetGridFor($project);
         $actionContext = self::withPlannedSectionAnchors(
             self::primaryActionContext($siteSpec, $pages),
@@ -1220,9 +1220,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
             $front = (bool) $page['front'];
-            $projection = $front
-                ? HeroComposition::planProjection(DesignDirectionStep::heroBlueprintFor($project))
-                : null;
+            $projection = $front ? self::projectionFor($project) : null;
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
                 $page['sections'] = self::fallbackAfterGeneratedPlanLoss(
@@ -1270,9 +1268,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $siteSpec = $project->readJson('siteSpec.json');
         $pages = self::flattenPages($siteSpec);
         $frontBySlug = array_column($pages, 'front', 'slug');
-        $frontProjection = HeroComposition::planProjection(
-            DesignDirectionStep::heroBlueprintFor($project)
-        );
+        $frontProjection = self::projectionFor($project);
         $actionContext = self::primaryActionContext($siteSpec, $pages);
         $warnings = [];
         foreach ($failures as $slug => $diagnostic) {
@@ -1845,6 +1841,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             break;
         }
         return $raw;
+    }
+
+    /**
+     * The code-owned hero projection for this build (frm PR-2q): the recipe's
+     * blueprint, with the surface the brief states when the recipe allows it.
+     *
+     * @return array{layout_archetype:string,allowed_backgrounds:list<string>,default_background:string,fallback_family:string}
+     */
+    private static function projectionFor(Project $project): array
+    {
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        return HeroComposition::planProjection(
+            DesignDirectionStep::heroBlueprintFor($project),
+            HeroComposition::statedHeroSurfaceFor(is_array($meta) ? $meta : []),
+        );
     }
 
     /**
