@@ -2437,6 +2437,18 @@ final class DesignDirectionStep implements Step
                 . '; disposition the brief names rounded panels, so the model commitment yields to it';
             $direction['band_geometry'] = $statedGeometry;
         }
+        // frm PR-6b: a numbered row the brief states (PR-3w) needs a
+        // committed numeral to draw; parley's "four numbered feature cards"
+        // met a direction that committed none. The ghost figure is the
+        // quieter of the two forms, so it is the one a silent direction gets.
+        $statedNumbered = StepNumeral::statedNumberedFor($meta);
+        $committedNumeral = StepNumeral::explicit($direction['step_numeral'] ?? null);
+        if ($statedNumbered !== null && ($committedNumeral === null || $committedNumeral === 'none')) {
+            $repairs[] = 'designDirection.json: field step_numeral authored '
+                . self::describe($direction['step_numeral'] ?? null) . ' delivered "ghost"'
+                . '; disposition the brief names a numbered row, so a silent direction commits the ghost numeral';
+            $direction['step_numeral'] = 'ghost';
+        }
         return $direction;
     }
 
