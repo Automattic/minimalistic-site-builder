@@ -487,4 +487,36 @@ final class FooterMarkup
         }
         return implode(';', $kept);
     }
+
+    /**
+     * The fit-text identity line carries the site's name, not its title
+     * (frm PR-4p): calderr-like5 closed on "Noa — Web Design" where the
+     * header read "Noa". Any other text on the line is replaced by the
+     * name; inline markup on the line is dropped with it.
+     *
+     * @param list<string> $warnings
+     */
+    public static function withIdentityLineName(string $markup, string $siteName, array &$warnings): string
+    {
+        $siteName = trim($siteName);
+        if ($siteName === '') {
+            return $markup;
+        }
+        $out = preg_replace_callback(
+            '/(<h[1-6]\b[^>]*\bclass="[^"]*\bhas-fit-text\b[^"]*"[^>]*>)(.*?)(<\/h[1-6]>)/su',
+            static function (array $m) use ($siteName, &$warnings): string {
+                $authored = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                if ($authored === $siteName) {
+                    return $m[0];
+                }
+                $warnings[] = "file='theme/parts/footer.html'; block='heading'; authored=identity line "
+                    . Warnings::value($authored) . '; delivered=' . Warnings::value($siteName)
+                    . '; disposition=the fit-text identity line carries the site name, not the title';
+                return $m[1] . htmlspecialchars($siteName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . $m[3];
+            },
+            $markup,
+            1,
+        );
+        return $out ?? $markup;
+    }
 }

@@ -23,8 +23,8 @@ FIT-TEXT IDENTITY LINE (shared device, available to every composition): a
 single wp:heading carrying `"fitText":true` plus a real `"align":"full"` or
 `"align":"wide"` attribute — saved HTML mirroring the support as
 `class="wp-block-heading alignfull has-fit-text"` — renders its text at the
-exact width of the band. Its text is the spec's exact identity on ONE short
-line; never set a fontSize preset, raw font-size, or clamp() on it, never
+exact width of the band. Its text is the spec's `name` on ONE short line,
+never its `title` or a descriptor after a dash; never set a fontSize preset, raw font-size, or clamp() on it, never
 build it from wp:site-title (no fit-text support), and use at most ONE
 fit-text line per footer. When the assigned recipe names it as the focal
 gesture, build it at full contrast. Any other composition MAY instead close

@@ -72,6 +72,16 @@ final class FooterUnit extends AbstractMarkupUnit
             }
         }
         $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        // The identity line is the site name, never the title (frm PR-4p).
+        $spec = $input['site_spec'] ?? null;
+        if (is_string($spec)) {
+            $spec = json_decode($spec, true);
+        }
+        $before = $markup;
+        $markup = FooterMarkup::withIdentityLineName($markup, is_array($spec) ? (string) ($spec['name'] ?? '') : '', $warnings);
+        if ($markup !== $before) {
+            $repairs[] = self::repair('identity-line-site-name', $key);
+        }
         if ($archetype === 'color-field') {
             // The one massive panel never takes the accent (frm PR-4k).
             $before = $markup;
