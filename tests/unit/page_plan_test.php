@@ -576,6 +576,26 @@ test('PagePlanStep::normalize keeps the art-direction fields on a valid plan', f
     assert_contains('site header', $sections[0]['handoff']);
 });
 
+test('PagePlanStep::normalize lets a type that names an archetype set the layout (frm PR-3ah)', function () {
+    $repairs = [];
+    $warnings = [];
+    $out = PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'clients', 'title' => 'Trusted by', 'type' => 'logo-strip', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
+        plan_section(['slug' => 'faq', 'title' => 'FAQ', 'type' => 'faq', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
+    ], true, null, [], $warnings, 'home', $repairs);
+    assert_eq('logo-strip', $out[1]['layout_archetype'], 'the type names the archetype');
+    assert_eq('centered-stack', $out[2]['layout_archetype'], 'a plain type is not an archetype name');
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_contains("path=\"pages[slug='home'].sections[1].layout_archetype\"; authored=\"centered-stack\"; delivered=\"logo-strip\"", implode("\n", $repairs));
+
+    // The front hero keeps its projection even when typed with an archetype word.
+    $repairs = [];
+    $out = PagePlanStep::normalize([plan_section(['type' => 'centered-stack'])], true, null, [], $warnings, 'home', $repairs);
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_true(!str_contains(implode("\n", $repairs), 'names an archetype'));
+});
+
 test('PagePlanStep::normalize rejects an unknown layout_archetype', function () {
     assert_throws(function () {
         PagePlanStep::normalize([plan_section(['layout_archetype' => 'fancy-mosaic'])]);
