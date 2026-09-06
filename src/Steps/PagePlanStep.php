@@ -3655,7 +3655,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $banded = 0;
         foreach ($sections as $section) {
             $background = strtolower(trim((string) ($section['background'] ?? '')));
-            if ($background !== '' && $background !== 'base') {
+            // A full-bleed cover always delivers one image band: normalize()
+            // forces its surface to 'image' whatever the planner wrote (frm
+            // PR-3ab). Counting it here, before that coercion, keeps the
+            // mechanical restraint and the validator in agreement; parley-like2
+            // lost a ten-section plan when the restraint counted two beats and
+            // normalize() then found three.
+            $cover = trim((string) ($section['layout_archetype'] ?? '')) === 'full-bleed-cover';
+            if ($cover || ($background !== '' && $background !== 'base')) {
                 $banded++;
             }
         }

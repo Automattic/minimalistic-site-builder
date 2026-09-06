@@ -260,3 +260,27 @@ test('surface restraint leaves short pages and already restrained pages byte-ide
         assert_eq([], $warnings);
     }
 });
+
+
+test('a full-bleed cover planned on base counts as a beat, so the restraint demotes the tinted band before normalize forces the cover to image (frm PR-3ab)', function () {
+    // parley-like2: hero cover on image, a product cover the planner left on
+    // base, and a tinted closing panel. The restraint saw two beats, normalize
+    // coerced the product cover to image and found three, and the whole plan
+    // fell to one synthesized section.
+    $plan = pacing_plan(9);
+    $shape = [['full-bleed-cover', 'image'], ['logo-strip', 'base'], ['equal-card-grid', 'base'], ['asymmetric-split', 'base'], ['bento-grid', 'base'], ['pricing-tiers', 'base'], ['full-bleed-cover', 'base'], ['faq-split', 'base'], ['cta-panel', 'tinted']];
+    foreach ($shape as $i => [$archetype, $background]) {
+        $plan[$i]['layout_archetype'] = $archetype;
+        $plan[$i]['background'] = $background;
+    }
+    $warnings = [];
+    $out = PagePlanStep::withSurfaceRestraint($plan, 'home', $warnings, true);
+    assert_eq('base', $out[8]['background'], 'the tinted closing panel yields to the two covers');
+    assert_eq('base', $out[6]['background'], 'the product cover keeps its planned value here; normalize forces image');
+    assert_eq(1, count(array_filter($warnings, static fn (string $w): bool => str_contains($w, 'demoted an excess color band'))));
+
+    $normalizeWarnings = [];
+    $normalized = PagePlanStep::normalize($out, true, null, [], $normalizeWarnings, 'home');
+    assert_eq(9, count($normalized), 'the whole plan survives normalize');
+    assert_eq('image', $normalized[6]['background'], 'normalize forced the cover surface');
+});
