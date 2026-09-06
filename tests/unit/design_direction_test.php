@@ -2600,11 +2600,22 @@ test('a stated light page with no stated hero opens on its ground: the cover rec
     $note = null;
     $warnings = [];
     assert_eq('cinematic-safe-zone', DesignDirectionStep::selectHeroRecipe(['prompt' => 'Light page with a full-bleed cinematic photo hero.'], 'x', $seed, $warnings, $note));
+    // (frm PR-2m: a stated-only stable pick yields on its own, so the
+    // unrationed expectation is the pool minus those recipes.)
+    $unrationed = HeroComposition::select('field-notes', $seed, []);
+    $statedOnly = in_array($unrationed, HeroComposition::STATED_ONLY_RECIPES, true);
+    if ($statedOnly) {
+        $unrationed = HeroComposition::selectExcluding('field-notes', $seed, [], HeroComposition::STATED_ONLY_RECIPES);
+    }
     foreach (['Create a dark landing page for an AI studio.', 'Create a site for a Georgian restaurant.'] as $brief) {
         $warnings = [];
         $note = null;
-        assert_eq(HeroComposition::select('field-notes', $seed, []), DesignDirectionStep::selectHeroRecipe(['prompt' => $brief], 'field-notes', $seed, $warnings, $note), 'no ration: ' . $brief);
-        assert_eq(null, $note);
+        assert_eq($unrationed, DesignDirectionStep::selectHeroRecipe(['prompt' => $brief], 'field-notes', $seed, $warnings, $note), 'no ration: ' . $brief);
+        if ($statedOnly) {
+            assert_contains('stated device', (string) $note);
+        } else {
+            assert_eq(null, $note);
+        }
     }
 
     // A caller who pinned cover-image keeps it: the ration never overrides design_constraints.
@@ -2635,4 +2646,54 @@ test('a letterform tradition the brief states outranks the seed (frm PR-5f)', fu
     ]), 'the user\'s words decide when the rewrite dropped the phrase');
     assert_eq('transitional', DesignDirectionStep::statedTypeRegisterFor(['prompt' => 'serif headings on a dark ground']));
     assert_eq(null, DesignDirectionStep::statedTypeRegisterFor([]));
+});
+
+
+test('the marquee-name hero comes only from a brief that names it; a hash pick of it yields (frm PR-2m)', function () {
+    $hit = null;
+    foreach (range(1, 400) as $i) {
+        if (Automattic\SiteBuild\HeroComposition::select("marquee-site-{$i}", 'Committed seed') === 'marquee-name') {
+            $hit = "marquee-site-{$i}";
+            break;
+        }
+    }
+    assert_true($hit !== null, 'the hash lands on marquee-name for some identifier');
+
+    $w = [];
+    $note = null;
+    $quiet = DesignDirectionStep::selectHeroRecipe([], $hit, 'Committed seed', $w, $note);
+    assert_true($quiet !== 'marquee-name', "an unstated brief never opens on the giant name (got {$quiet})");
+    assert_true(in_array($quiet, Automattic\SiteBuild\HeroComposition::RECIPES, true));
+    assert_contains('stable pick', (string) $note);
+    assert_contains('stated device', (string) $note);
+    assert_eq([], $w);
+    assert_eq($quiet, DesignDirectionStep::selectHeroRecipe([], $hit, 'Committed seed', $w, $note), 'the yield is stable');
+
+    $stated = DesignDirectionStep::selectHeroRecipe(
+        ['original_prompt' => 'A playful portfolio with one giant marquee of my name behind the hero.'],
+        $hit,
+        'Committed seed',
+        $w,
+        $note,
+    );
+    assert_eq('marquee-name', $stated, 'the brief that names it keeps it');
+
+    // On a stated light page the quiet pick is a foreground recipe, never a cover band (frm PR-2h).
+    $note = null;
+    $lit = DesignDirectionStep::selectHeroRecipe(['prompt' => 'Light page, tight sans headings, featured work as large image cards.'], $hit, 'Committed seed', $w, $note);
+    assert_true($lit !== 'marquee-name');
+    assert_eq(['foreground-image'], Automattic\SiteBuild\HeroComposition::metadata($lit)['media_modes'], "a light page opens on its ground (got {$lit})");
+
+    // A site whose hash pick is not marquee-name keeps its seat byte for byte.
+    $other = null;
+    foreach (range(1, 400) as $i) {
+        if (Automattic\SiteBuild\HeroComposition::select("plain-site-{$i}", 'Committed seed') !== 'marquee-name') {
+            $other = "plain-site-{$i}";
+            break;
+        }
+    }
+    $before = Automattic\SiteBuild\HeroComposition::select($other, 'Committed seed');
+    $note = null;
+    assert_eq($before, DesignDirectionStep::selectHeroRecipe([], $other, 'Committed seed', $w, $note));
+    assert_eq(null, $note);
 });

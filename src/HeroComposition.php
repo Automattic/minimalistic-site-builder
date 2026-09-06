@@ -548,6 +548,44 @@ final class HeroComposition
      *
      * @throws \InvalidArgumentException when caller constraints leave no valid recipe
      */
+    /**
+     * Recipes that only a brief may ask for (frm PR-2m): a giant name
+     * scrolling behind the hero is the cohesion brief's own device, and
+     * the stable hash handed it to luzia-like16, whose brief names no such
+     * thing. The stated path still returns them; the hash pick yields.
+     *
+     * @var list<string>
+     */
+    public const STATED_ONLY_RECIPES = ['marquee-name'];
+
+    /**
+     * The stable pick from the compatible pool minus the excluded recipes
+     * (frm PR-2m), hashed the same way as select(). Falls back to select()
+     * when the exclusion would empty the pool.
+     *
+     * @param array<string,mixed> $constraints
+     * @param list<string> $excluded
+     */
+    public static function selectExcluding(
+        string $stableIdentifier,
+        string $conceptSeed,
+        array $constraints,
+        array $excluded,
+    ): string {
+        $constraints = self::validateConstraints($constraints);
+        $pool = array_values(array_diff(self::compatible($constraints), $excluded));
+        if ($pool === []) {
+            return self::select($stableIdentifier, $conceptSeed, $constraints);
+        }
+        $identity = mb_strtolower(trim($stableIdentifier), 'UTF-8');
+        $context = json_encode(
+            [$identity, $conceptSeed, $constraints, $excluded],
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+        );
+        $index = (int) (hexdec(substr(hash('sha256', $context), 0, 8)) % count($pool));
+        return $pool[$index];
+    }
+
     public static function select(string $stableIdentifier, string $conceptSeed, array $constraints = []): string
     {
         $constraints = self::validateConstraints($constraints);
