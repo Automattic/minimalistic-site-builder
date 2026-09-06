@@ -2397,7 +2397,7 @@ final class DesignDirectionStep implements Step
     ];
 
     /** Grade words that contradict stated colour photography. */
-    private const MONOCHROME_GRADE = '/\b(?:monochrome|monochromatic|black[- ]and[- ]white|black & white|b&w|grayscale|greyscale|duotone|desaturated|silver[- ]toned)\b/iu';
+    private const MONOCHROME_GRADE = '/\b(?:monochrome|monochromatic|black[- ]and[- ]white|black & white|b&w|grayscale|greyscale|duotone|desaturated|silver[- ]toned|drained(?: toward| towards| of)?(?: warm| cool)? gr[ae]ys?|washed[- ]out|gr[ae]y[- ]toned|near[- ]gr[ae]y)\b/iu';
 
     /** Whether a brief asks for colour photography in so many words. */
     public static function statedColourPhotography(string $brief): bool
