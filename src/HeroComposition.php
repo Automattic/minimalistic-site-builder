@@ -66,6 +66,12 @@ final class HeroComposition
      */
     public static function wordmarkEm(string $text, ?array $theme = null): float
     {
+        // The theme may set every heading uppercase (frm PR-2x): the pin
+        // measures the name the way it renders, or "Studio Blank" measured
+        // in mixed case wraps as "STUDIO BLANK" and overruns the viewport.
+        if ($theme !== null && self::headingsUppercase($theme)) {
+            $text = mb_strtoupper($text, 'UTF-8');
+        }
         $upperScale = $theme === null ? 1.0 : HeroHeadlineFit::characterEmFor($theme, true) / self::WORDMARK_UPPER_EM;
         $lowerScale = $theme === null ? 1.0 : HeroHeadlineFit::characterEmFor($theme, false) / self::WORDMARK_LOWER_EM;
         $em = 0.0;
@@ -89,6 +95,18 @@ final class HeroComposition
             $em += $width * $scale;
         }
         return max(0.3, round($em, 2));
+    }
+
+    /** Whether the theme renders headings (or the H1) in uppercase. */
+    public static function headingsUppercase(array $theme): bool
+    {
+        foreach (['heading', 'h1'] as $element) {
+            $transform = $theme['styles']['elements'][$element]['typography']['textTransform'] ?? null;
+            if (is_string($transform) && strtolower(trim($transform)) === 'uppercase') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The one portrait plate of portrait-backdrop (frm W2d). */

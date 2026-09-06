@@ -671,6 +671,11 @@ test('the wordmark-stage recipe sets the site name giant as the one headline, wi
     assert_eq(9.84, HeroComposition::wordmarkEm('STUDIO GESTALTEN'));
     $wide = ['settings' => ['typography' => ['fontFamilies' => [['slug' => 'heading', 'name' => 'Unbounded', 'fontFamily' => 'Unbounded']]]]];
     assert_true(HeroComposition::wordmarkEm('Das Studio', $wide) > 6.5, 'a wide heading face scales the advances up');
+    $upper = ['settings' => ['typography' => ['fontFamilies' => [['slug' => 'heading', 'name' => 'Anybody', 'fontFamily' => 'Anybody']]]], 'styles' => ['elements' => ['heading' => ['typography' => ['textTransform' => 'uppercase']]]]];
+    assert_true(HeroComposition::headingsUppercase($upper));
+    assert_true(!HeroComposition::headingsUppercase($wide));
+    assert_eq(7.4, HeroComposition::wordmarkEm('Studio Blank', $upper), 'an uppercase theme measures the name as STUDIO BLANK (frm PR-2x)');
+    assert_eq(HeroComposition::wordmarkEm('STUDIO BLANK', $upper), HeroComposition::wordmarkEm('Studio Blank', $upper));
     assert_contains('"fontSize":"min(18rem, max(calc(90cqi / 5.24), min(calc(90cqi / 3.08), 3rem)))"', $bound, 'the whole name on one line, or the longest word at up to 3rem on a phone (frm PR-2r, PR-2v)');
     assert_contains('style="font-size:min(18rem, max(calc(90cqi / 5.24), min(calc(90cqi / 3.08), 3rem)))"', $bound);
     assert_true(!str_contains($bound, 'has-display-font-size'));
