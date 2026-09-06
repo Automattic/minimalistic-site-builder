@@ -2371,6 +2371,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
         [$theme, $emphasisWarnings] = self::removeEmphasisHookCustomCss($theme);
         array_push($motionWarnings, ...$emphasisWarnings);
+        [$theme, $presetWarnings] = self::removePresetVariableCustomCss($theme);
+        array_push($motionWarnings, ...$presetWarnings);
         [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
         [$theme, $fontFaceWarnings] = self::removeForeignFontFaces($theme);
         return [
@@ -2603,6 +2605,53 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                             . ' — the emphasis kit paints it';
                     }
                     $node[$key] = $repaired;
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
+    }
+
+    /**
+     * Drop every custom-CSS declaration that redefines a WordPress preset
+     * variable (frm PR-4w). luzia-like38's theme.json css wrote
+     * `.has-contrast-background-color{--wp--preset--color--contrast:var(--wp--preset--color--base)}`,
+     * and because core paints that class with the same variable, every dark
+     * band turned base with its base ink still on it: two sections of
+     * invisible text. The palette, spacing and type presets are build-owned
+     * tokens; a rule may read them, never reassign them.
+     *
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removePresetVariableCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$repaired, $dropped] = CssChecks::dropDeclarations(
+                        $value,
+                        static fn (array $declaration): bool =>
+                            str_starts_with(strtolower($declaration['property']), '--wp--preset--'),
+                    );
+                    foreach ($dropped as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value(trim($declaration['raw']))
+                            . '; delivered removed; disposition preset variables are build-owned tokens;'
+                            . ' a rule may read them, never reassign them (core paints .has-*-background-color'
+                            . ' with the same variable, so a redefinition erases the band under its own ink)';
+                    }
+                    if ($dropped !== []) {
+                        $node[$key] = $repaired;
+                    }
                     continue;
                 }
                 if (is_array($value)) {

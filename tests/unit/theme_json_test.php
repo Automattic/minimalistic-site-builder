@@ -3984,6 +3984,30 @@ test('theme-json never ships a font face from a foreign host', function () {
 });
 
 
+test('theme.json custom CSS loses every declaration that reassigns a preset variable (frm PR-4w)', function () {
+    // luzia-like38: the model redefined the contrast variable on the contrast band itself.
+    $theme = ['styles' => [
+        'css' => '.has-primary-background-color,.has-contrast-background-color{--wp--preset--color--contrast:var(--wp--preset--color--base);color:var(--wp--preset--color--base);} .card{padding:var(--wp--preset--spacing--md)}',
+        'blocks' => ['core/group' => ['css' => '.band{--wp--preset--spacing--xl:0;--tone:1}']],
+    ]];
+    [$out, $warnings] = ThemeJsonStep::removePresetVariableCustomCss($theme);
+    assert_eq('.has-primary-background-color,.has-contrast-background-color{color:var(--wp--preset--color--base);} .card{padding:var(--wp--preset--spacing--md)}', $out['styles']['css'], 'the reassignment goes, the read and the ink stay');
+    assert_eq('.band{--tone:1}', $out['styles']['blocks']['core/group']['css'], 'a local custom property that is not a preset stays');
+    assert_eq(2, count($warnings));
+    assert_contains('styles.css: authored declaration', $warnings[0]);
+    assert_contains('--wp--preset--color--contrast:var(--wp--preset--color--base)', $warnings[0]);
+    assert_contains('build-owned tokens', $warnings[0]);
+    assert_contains('styles.blocks.core/group.css', $warnings[1]);
+    [$same, $none] = ThemeJsonStep::removePresetVariableCustomCss(['styles' => ['css' => 'body{margin:0}']]);
+    assert_eq('body{margin:0}', $same['styles']['css']);
+    assert_eq([], $none);
+
+    // repairScaffold runs it.
+    [$scaffolded, $scaffoldWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_true(!str_contains(json_encode($scaffolded['styles']), '--wp--preset--color--contrast:'), 'repairScaffold drops the reassignment');
+    assert_true(count(array_filter($scaffoldWarnings, static fn (string $w): bool => str_contains($w, 'build-owned tokens'))) === 2);
+});
+
 test('theme.json custom CSS loses every rule on the emphasis hook at any depth, with a warning per declaration (frm PR-5g)', function () {
     $theme = ['styles' => [
         'css' => '.section-badge{gap:.5em} .emph{position:relative;white-space:nowrap}',
