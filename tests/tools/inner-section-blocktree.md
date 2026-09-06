@@ -48,7 +48,7 @@ where each `<block>` is:
 Supported blocks:
 
 - Structure: `core/group` (attrs: `layout` as `{"type":"constrained"}` or `{"type":"flex","orientation":"vertical"|"horizontal","justifyContent":…}`, `tagName`, `anchor`, `backgroundColor`, `textColor`, `style`), `core/columns` with `core/column` children (attrs: `width` as a CSS length string on column), `core/cover` (attrs: `url`, `alt`, `dimRatio`, `overlayColor`, `minHeight`), `core/media-text` (attrs: `mediaUrl`, `mediaAlt`, `mediaType` `"image"`, `mediaPosition`), `core/spacer` (attrs: `height` as a CSS length string), `core/separator`, `core/details` (attrs: `summary`).
-- Text: `core/heading` (attrs: `content`, `level` 1–6, `textAlign`), `core/paragraph` (attrs: `content`, `align`, `fontSize`, `textColor`), `core/list` with `core/list-item` children (attrs: `ordered` on list; `content` on list-item), `core/quote` (attrs: `citation`; the quoted paragraphs are innerBlocks), `core/pullquote` (attrs: `value`, `citation`), `core/table` (attrs: `body` as rows of cells).
+- Text: `core/heading` (attrs: `content`, `level` 1–6), `core/paragraph` (attrs: `content`, `align`, `fontSize`, `textColor`), `core/list` with `core/list-item` children (attrs: `ordered` on list; `content` on list-item), `core/quote` (attrs: `citation`; the quoted paragraphs are innerBlocks), `core/pullquote` (attrs: `value`, `citation`), `core/table` (attrs: `body` as rows of cells).
 - Media: `core/image` (attrs: `url`, `alt`, `sizeSlug`, `aspectRatio`), `core/gallery` with `core/image` children.
 - Actions: `core/buttons` with `core/button` children (attrs on button: `text`, `url`, `className` `"is-style-outline"` for a secondary button).
 
@@ -56,6 +56,8 @@ Attribute conventions:
 
 - Colors and font sizes are theme preset slugs from the design direction, never hex or px: `"backgroundColor": "base"`, `"textColor": "contrast"`, `"fontSize": "large"`.
 - Spacing goes in `style.spacing` using preset slugs: `{"style": {"spacing": {"padding": {"top": "var:preset|spacing|50", "bottom": "var:preset|spacing|50"}}}}`.
+- Text alignment on a heading or paragraph is `{"style": {"typography": {"textAlign": "center"}}}`; there is no top-level `textAlign`.
+- `innerBlocks` is a sibling of `attrs`, never inside it. A paragraph, heading, list-item, button, image and spacer have no children: their `innerBlocks` is `[]`.
 - Use `level` on headings to follow the outline's heading hierarchy. Use `h1` only when this section owns the page's primary heading.
 - Every image needs meaningful `alt` text written as a usable image-generation prompt: subject, setting, composition, lighting, palette or grade, framing. Use `"url": "{{image}}"` as the placeholder for every image; the build assigns real images later.
 - LINKS: a button or link to another page of this site uses that page's path verbatim from the outline (e.g. `"/classes/"`). Never `"#"`.

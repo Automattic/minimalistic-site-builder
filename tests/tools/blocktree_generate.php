@@ -18,10 +18,6 @@ declare(strict_types=1);
 require __DIR__ . '/../../autoload.php';
 require __DIR__ . '/SpecRenderer.php';
 
-use Automattic\SiteBuild\BlockSerializer\Json\JsonArray;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\ClaudeCliLlm;
@@ -90,33 +86,6 @@ $llm = new ClaudeCliLlm($model);
 $renderer = new SpecRenderer($registry);
 $serializer = new Serializer($registry);
 
-/**
- * Decode the model's JSON with the repo's JS-faithful decoder so `{}` survives,
- * and turn each block into a SpecRenderer spec carrying both forms of attrs.
- *
- * @return list<array{name:string,attrs:array<string,mixed>,typed:JsonObject,innerBlocks:list<array<mixed>>}>
- */
-$toSpecs = function (JsonArray $blocks) use (&$toSpecs): array {
-    $out = [];
-    foreach ($blocks->items() as $block) {
-        if (!$block instanceof JsonObject) {
-            throw new \RuntimeException('block must be an object');
-        }
-        $attrs = $block->get('attrs') ?? new JsonObject();
-        $inner = $block->get('innerBlocks') ?? new JsonArray();
-        if (!$attrs instanceof JsonObject || !$inner instanceof JsonArray) {
-            throw new \RuntimeException('attrs must be an object and innerBlocks an array');
-        }
-        $out[] = [
-            'name' => (string) JsonNative::value($block->get('name')),
-            'attrs' => JsonNative::objectToArray($attrs),
-            'typed' => $attrs,
-            'innerBlocks' => $toSpecs($inner),
-        ];
-    }
-    return $out;
-};
-
 /** Every block name in the tree, flattened. @return list<string> */
 $names = function (array $blocks) use (&$names): array {
     $out = [];
@@ -140,12 +109,7 @@ for ($i = 1; $i <= $runs; $i++) {
     file_put_contents("$outDir/$sectionSlug-$i.json", $raw);
     $specs = null;
     try {
-        $root = (new JsonDecoder($raw))->decode();
-        $blocks = $root instanceof JsonObject ? $root->get('blocks') : null;
-        if (!$blocks instanceof JsonArray) {
-            throw new \RuntimeException('top level must be {"blocks": [...]}');
-        }
-        $specs = $toSpecs($blocks);
+        $specs = SpecRenderer::fromJson($raw);
     } catch (\Throwable $e) {
         printf("%-4d %-8s %s\n", $i, 'FAIL', $e->getMessage());
         continue;
