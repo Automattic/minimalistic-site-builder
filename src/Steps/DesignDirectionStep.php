@@ -2347,6 +2347,42 @@ final class DesignDirectionStep implements Step
         'hero in a frame', 'hero inset from the edge', 'inset from the viewport', 'page in a frame',
     ];
 
+    /**
+     * Bounded phrases a brief uses to ask for rounded bands (frm PR-4n):
+     * fabrica's "rounded near-black panels", luzia's "dark rounded band".
+     *
+     * @var list<string>
+     */
+    private const STATED_ROUNDED_PHRASES = [
+        'rounded panels', 'rounded panel', 'rounded near-black panels', 'rounded dark panels', 'rounded dark panel',
+        'rounded bands', 'rounded band', 'rounded dark band', 'dark rounded band', 'dark rounded bands',
+        'rounded plates', 'rounded plate', 'rounded sections', 'rounded colour bands', 'rounded color bands',
+    ];
+
+    /** The band geometry a brief states in so many words, or null. */
+    public static function statedBandGeometry(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_ROUNDED_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return 'rounded';
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedBandGeometryFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedBandGeometry($text) !== null) {
+                return self::statedBandGeometry($text);
+            }
+        }
+        return null;
+    }
+
     /** The canvas a brief states in so many words, or null. */
     public static function statedCanvas(string $brief): ?string
     {
@@ -2391,6 +2427,15 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedCanvas)
                 . '; disposition the brief names its canvas, so the model commitment yields to it';
             $direction['canvas'] = $statedCanvas;
+        }
+        // frm PR-4n: rounded panels the brief states commit the rounded band geometry.
+        $statedGeometry = self::statedBandGeometryFor($meta);
+        if ($statedGeometry !== null && ($direction['band_geometry'] ?? null) !== $statedGeometry) {
+            $repairs[] = 'designDirection.json: field band_geometry authored '
+                . self::describe($direction['band_geometry'] ?? null) . ' delivered '
+                . self::describe($statedGeometry)
+                . '; disposition the brief names rounded panels, so the model commitment yields to it';
+            $direction['band_geometry'] = $statedGeometry;
         }
         return $direction;
     }

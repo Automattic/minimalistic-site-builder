@@ -2736,3 +2736,21 @@ test('a canvas the brief states outranks the model commitment, never a caller co
     assert_eq([], $repairs);
     assert_eq(['canvas' => 'full-bleed'], DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed'], ['prompt' => 'a dark landing page'], false, $repairs), 'a silent brief changes nothing');
 });
+
+
+test('rounded panels the brief states commit the rounded band geometry (frm PR-4n)', function () {
+    assert_eq('rounded', DesignDirectionStep::statedBandGeometry('Light grey page with rounded near-black panels: the hero is one dark photo panel'));
+    assert_eq('rounded', DesignDirectionStep::statedBandGeometry('a dark rounded band with zigzag numbered steps'));
+    assert_eq(null, DesignDirectionStep::statedBandGeometry('Create a website for a Georgian restaurant.'));
+    assert_eq(null, DesignDirectionStep::statedBandGeometry('a cover hero in a rounded frame'), 'a rounded frame is the canvas, not the bands');
+    $meta = ['original_prompt' => 'Light grey page with rounded near-black panels'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'band_geometry' => 'square'], $meta, false, $repairs);
+    assert_eq('rounded', $out['band_geometry']);
+    assert_eq('full-bleed', $out['canvas'], 'rounded panels do not frame the canvas');
+    assert_eq(1, count($repairs));
+    assert_contains('field band_geometry authored "square" delivered "rounded"', $repairs[0]);
+    $repairs = [];
+    assert_eq(['band_geometry' => 'rounded'], DesignDirectionStep::withStatedDirection(['band_geometry' => 'rounded'], $meta, false, $repairs), 'already rounded: no repair');
+    assert_eq([], $repairs);
+});
