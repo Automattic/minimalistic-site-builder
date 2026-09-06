@@ -158,6 +158,29 @@ final class SiteSpecStep implements Step
             ]);
             try {
                 $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+                // A category word is not a name (frm PR-0d): calderr-like6
+                // was named "Portfolio" and the giant wordmark read generic.
+                // One fresh sample with the rule quoted; a second generic
+                // answer ships with a warning rather than a third call.
+                $generic = is_array($spec) ? trim((string) ($spec['name'] ?? '')) : '';
+                if ($generic !== '' && self::genericName($generic)) {
+                    $retry = $this->llm->completeJson(
+                        $rendered . "\n\nRETRY: your previous answer named the site \"{$generic}\", which is a generic"
+                        . ' category word, not a name. Give the site a real proper name (invent one if the prompt states'
+                        . ' none, and list "name" in "invented"); keep every other fact as before.',
+                        $this->withOptions(['log_label' => $this->id() . '-name-retry']),
+                    );
+                    $retried = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
+                    if ($retried !== '' && !self::genericName($retried)) {
+                        $spec = $retry;
+                        $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered \"{$retried}\""
+                            . '; disposition a generic category word is not a site name, so one fresh sample replaced it';
+                    } else {
+                        $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered as authored"
+                            . '; disposition a generic category word is not a site name, and the retry answered '
+                            . ($retried === '' ? 'nothing usable' : "\"{$retried}\"");
+                    }
+                }
             } catch (GeneratedJsonException $e) {
                 // Only terminal generated-content failures degrade. Transport,
                 // sender-contract, and programming exceptions remain fatal.
@@ -192,6 +215,28 @@ final class SiteSpecStep implements Step
                 . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
+    }
+
+    /**
+     * Category words a model offers as a site name when the prompt states
+     * none (frm PR-0d). Compared whole, lowercase, after a leading article.
+     *
+     * @var list<string>
+     */
+    private const GENERIC_NAMES = [
+        'portfolio', 'website', 'web site', 'site', 'homepage', 'home page', 'home', 'landing page', 'studio',
+        'design studio', 'agency', 'company', 'business', 'brand', 'shop', 'store', 'blog', 'personal site',
+        'personal website', 'web design', 'web designer', 'designer', 'freelancer', 'consultant', 'untitled',
+        'new site', 'my site', 'my website', 'my portfolio', 'design portfolio', 'developer portfolio',
+    ];
+
+    /** Whether a site name is a generic category word rather than a name. */
+    public static function genericName(string $name): bool
+    {
+        $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $name)), 'UTF-8');
+        $text = (string) preg_replace('/^(?:the|my|a|an|our)\s+/u', '', $text);
+        $text = trim((string) preg_replace('/[^\p{L}\p{N} ]+/u', '', $text));
+        return $text !== '' && in_array($text, self::GENERIC_NAMES, true);
     }
 
     /**

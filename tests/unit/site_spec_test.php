@@ -970,3 +970,41 @@ test('site-spec falls back to the prompt when original_prompt is unusable', func
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+
+test('a generic category word is not a site name (frm PR-0d)', function () {
+    foreach (['Portfolio', 'portfolio', 'The Portfolio', 'My Website', 'Design Studio', 'Agency', 'Untitled'] as $generic) {
+        assert_true(SiteSpecStep::genericName($generic), "{$generic} is generic");
+    }
+    foreach (['Noa', 'Atlas', 'Studio Basis', 'Meridian', 'Portfolio Kitchen', 'Bread & Salt', 'Alexandra Popescu', ''] as $name) {
+        assert_true(!SiteSpecStep::genericName($name), "{$name} is a name");
+    }
+});
+
+
+test('site-spec re-asks once when the model names the site with a category word (frm PR-0d)', function () {
+    $base = ['title' => 'Web Designer Portfolio', 'description' => 'd', 'site_type' => 'portfolio', 'topic' => 't', 'area' => 'a', 'audience' => 'u', 'visual_vibe' => 'v', 'persona_name' => '', 'language' => 'en'];
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Portfolio'] + $base);
+    $llm->queueJson(['name' => 'Mara Veldkamp'] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('Mara Veldkamp', $project->readJson('siteSpec.json')['name']);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_contains('RETRY: your previous answer named the site "Portfolio"', $llm->calls[1]['prompt']);
+    assert_eq('site-spec-name-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    $warnings = json_encode($project->readJson('warnings.json'));
+    assert_contains('field name authored \\"Portfolio\\" delivered \\"Mara Veldkamp\\"', $warnings);
+
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Portfolio'] + $base);
+    $llm->queueJson(['name' => 'My Website'] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('Portfolio', $project->readJson('siteSpec.json')['name'], 'a second generic answer ships as authored');
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_contains('delivered as authored', json_encode($project->readJson('warnings.json')));
+
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Atlas'] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(1, $llm->completeJsonCalls, 'a proper name costs one call');
+});
