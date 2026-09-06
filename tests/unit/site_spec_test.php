@@ -1226,6 +1226,49 @@ test('site-spec re-asks once when the model invents a placeholder persona (frm P
     assert_true(!str_contains($llm->calls[1]['prompt'], 'Your persona_name'), 'a stated persona is not re-asked');
 });
 
+test('an empty persona on a brief that states a personal site is a placeholder (frm PR-0m)', function () {
+    assert_true(SiteSpecStep::personalBrief('Create a personal portfolio for a web designer in Amsterdam.'));
+    assert_true(SiteSpecStep::personalBrief('A portfolio for a freelance photographer in Lisbon'));
+    assert_true(!SiteSpecStep::personalBrief('Create a website for a Georgian restaurant.'));
+    assert_true(!SiteSpecStep::personalBrief('An agency portfolio with twelve case studies'), 'a company portfolio is not a person');
+
+    $base = ['title' => 'Web Designer Portfolio', 'description' => 'd', 'site_type' => 'personal portfolio', 'topic' => 't', 'area' => 'a', 'audience' => 'u', 'visual_vibe' => 'v', 'language' => 'en'];
+    $fixture = static function (): array {
+        $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('meta.json', ['prompt' => 'Create a personal portfolio for a web designer in Amsterdam. Off-white page in one cobalt blue.', 'multi_page' => false]);
+        return [$project, new FakeLlm()];
+    };
+
+    // calderr-like27: a generic name AND an empty persona take one retry that asks for both.
+    [$project, $llm] = $fixture();
+    $llm->queueJson(['name' => 'Portfolio', 'persona_name' => '', 'invented' => ['name']] + $base);
+    $llm->queueJson(['name' => 'Studio Vermeulen', 'persona_name' => 'Marieke Vermeulen', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_eq('site-spec-name-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    assert_contains('Your persona_name was empty, but the prompt describes a personal site about one person', $llm->calls[1]['prompt']);
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('Marieke Vermeulen', $spec['persona_name']);
+    assert_eq('Studio Vermeulen', $spec['name']);
+
+    // A real name with an empty persona takes the persona retry alone.
+    [$project, $llm] = $fixture();
+    $llm->queueJson(['name' => 'Studioblock', 'persona_name' => '', 'invented' => ['name']] + $base);
+    $llm->queueJson(['name' => 'Studio Vermeulen', 'persona_name' => 'Marieke Vermeulen', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_eq('site-spec-persona-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    assert_contains('RETRY: your previous answer left persona_name empty', $llm->calls[1]['prompt']);
+    assert_eq('Marieke Vermeulen', $project->readJson('siteSpec.json')['persona_name']);
+
+    // A brief that names no person leaves an empty persona alone.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Hearth', 'persona_name' => '', 'invented' => ['name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(1, $llm->completeJsonCalls, 'a bakery brief has no persona to fill');
+});
+
 test('statedNameNear never restores a generated name to an initialism in the brief (frm PR-0j)', function () {
     $brief = 'Create a portfolio for a designer in Lisbon. Light page, FAQ, and a dark CTA plus footer band with a 3D object.';
     assert_eq(null, SiteSpecStep::statedNameNear($brief, 'Carta'), 'CTA is a thing in the brief, not a brand');

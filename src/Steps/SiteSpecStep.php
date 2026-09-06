@@ -169,6 +169,16 @@ final class SiteSpecStep implements Step
                 $placeholder = is_array($spec) && self::placeholderPersona($spec)
                     ? trim((string) $spec['persona_name'])
                     : '';
+                // A brief that states a personal site and a spec with no
+                // persona at all is the same miss (frm PR-0m): calderr-like26
+                // and -27 answered an empty persona_name on "a personal
+                // portfolio for a web designer", and no retry could fire.
+                $emptyPersona = $placeholder === '' && is_array($spec)
+                    && trim((string) ($spec['persona_name'] ?? '')) === ''
+                    && self::personalBrief($prompt);
+                if ($emptyPersona) {
+                    $placeholder = '(empty)';
+                }
                 if ($generic !== '' && self::genericName($generic)) {
                     // When the persona is a placeholder too, the one retry
                     // asks for both (frm PR-0l): calderr-like25's "Studio
@@ -176,8 +186,11 @@ final class SiteSpecStep implements Step
                     // name retry took precedence and the persona was never
                     // re-asked.
                     $personaClause = $placeholder !== ''
-                        ? " Your persona_name \"{$placeholder}\" is not a person's full name either: this is a personal"
-                            . ' site about one person, so give that person a plausible full name (a given name and a'
+                        ? ($emptyPersona
+                            ? ' Your persona_name was empty, but the prompt describes a personal site about one person:'
+                            : " Your persona_name \"{$placeholder}\" is not a person's full name either: this is a personal"
+                                . ' site about one person, so')
+                            . ' give that person a plausible full name (a given name and a'
                             . ' family name that fit the language and place), name the site after that person or their'
                             . ' studio, and list both in "invented".'
                         : '';
@@ -210,10 +223,14 @@ final class SiteSpecStep implements Step
                     }
                 } elseif ($placeholder !== '') {
                     $retry = $this->llm->completeJson(
-                        $rendered . "\n\nRETRY: your previous answer invented the persona \"{$placeholder}\", which is not"
-                        . " a person's full name. This is a personal site about one person: give that person a plausible"
-                        . ' full name (a given name and a family name that fit the language and place), name the site after'
-                        . ' that person or their studio, list both in "invented", and keep every other fact as before.',
+                        $rendered . "\n\nRETRY: "
+                        . ($emptyPersona
+                            ? 'your previous answer left persona_name empty, but the prompt describes a personal site about one person.'
+                            : "your previous answer invented the persona \"{$placeholder}\", which is not a person's full name."
+                                . ' This is a personal site about one person:')
+                        . ' Give that person a plausible full name (a given name and a family name that fit the language'
+                        . ' and place), name the site after that person or their studio, list both in "invented", and keep'
+                        . ' every other fact as before.',
                         $this->withOptions(['log_label' => $this->id() . '-persona-retry']),
                     );
                     $retriedPersona = is_array($retry) ? trim((string) ($retry['persona_name'] ?? '')) : '';
@@ -352,6 +369,31 @@ final class SiteSpecStep implements Step
         }
         foreach ($words as $word) {
             if (in_array($word, self::GENERIC_WORDS, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Bounded phrases a brief uses to say the site is about one person (frm
+     * PR-0m). Read as whole words, lowercase; a match makes an empty persona
+     * a placeholder the retry must fill.
+     *
+     * @var list<string>
+     */
+    private const PERSONAL_BRIEF_PHRASES = [
+        'personal portfolio', 'personal site', 'personal website', 'personal blog', 'personal page', 'portfolio site for a',
+        'portfolio for a', 'portfolio of a', 'portfolio for an', 'portfolio of an', 'cv site', 'resume site', 'résumé site',
+        'my portfolio', 'my personal',
+    ];
+
+    /** Whether a brief states, in so many words, a site about one person. */
+    public static function personalBrief(string $prompt): bool
+    {
+        $text = mb_strtolower((string) preg_replace('/\s+/u', ' ', $prompt), 'UTF-8');
+        foreach (self::PERSONAL_BRIEF_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
                 return true;
             }
         }
