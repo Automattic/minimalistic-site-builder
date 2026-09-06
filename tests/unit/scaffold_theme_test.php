@@ -741,6 +741,7 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     $flat = preg_replace('/\\s+/', ' ', $css);
     assert_contains('.hero-composition--wordmark-stage .hero-composition__copy > * { max-width: none; }', $flat, 'every child of the copy group takes the band too (frm PR-2t)');
     assert_contains('.hero-composition--wordmark-stage .hero-composition__copy > p { max-width: 34rem; }', $flat, 'the line keeps its measure');
+    assert_contains('.hero-composition--wordmark-stage .hero-composition__facts { max-width: none; }', $flat, 'the facts row outside the copy group takes the band too (frm PR-2w)');
     $nameRule = substr($css, (int) strpos($css, $name), 500);
     assert_contains('white-space: normal;', $nameRule, 'a two-word name may wrap on a phone (frm PR-2r)');
     assert_contains('text-wrap: balance;', $nameRule);
