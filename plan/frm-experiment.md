@@ -433,6 +433,10 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 92 | #542 | W4 (PR-4l) | Read a stated wordmark footer in more words (frm) | merged | gist 070c3850eca4db83395bfc7ce39b23a2: the nine briefs replayed against the cohort-10 footers (fabrica, dasstudio and calderr now read sunken-wordmark); no build | 3658458d |
 | 93 | #543 | W2 (PR-2p) | Let a canvas the brief states outrank the model commitment (frm) | merged | gist f3588980ff3467ea88284f285ee22de5: the nine briefs replayed (only parley states a canvas) + the parley-like direction replayed through the helper (full-bleed to framed); no build | 3f87c8bc |
 | 94 | #544 | W4 (PR-4n) | Commit the rounded band geometry a brief states (frm) | merged | gist 19f8d939534d0c963d0f8c52d3738a09: the nine briefs replayed against the cohort-10 band geometry (fabrica and luzia read rounded; both had committed rounded already, so the reader makes it deterministic); no build | c80020fb |
+| 95 | #545 | W6 (PR-6b) | Commit a numeral for a stated numbered row (frm) | merged | gist eff48ae515d3c5811146c8cd3ed05728: the nine cohort-10 directions replayed (only parley moves from none to ghost); no build | 2abc9efe |
+| 96 | #546 | W3 (PR-3ab) | Count a full-bleed cover as a surface beat before normalize coerces it (frm) | merged | gist 8b7b3a05cac9de5454603cd19e12fea6: the recorded parley-like2 plan recovered through the repaired path (ten sections, the closing panel demoted); cohort-12 parley-like3 has nine sections | 266f21a6 |
+| 97 | #547 | W0 (PR-0c) | Name the type and photo grade in the fabrica brief (frm) | merged | fabrica-like4 evidence build: Schibsted Grotesk Display with saturated colour photography on a light page | 4ba0a1d0 |
+| 98 | #548 | W2 (PR-2r) | Let a two-word wordmark wrap large on a phone (frm) | merged | gist 255bb137a80bba3eb52bc5b891c58b5e: dasstudio-like4 at 390 before (32px) / after mirror (48px, scrollWidth 390) and desktop (one line, 95px) | d9f3dfaa |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -542,6 +546,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 104: PR-6b #545 merged. Cohort-11 built with images on 2abc9efe (nine sites; every image completed). Second set moved: fabrica 2/2/3 to 3.5/3.5/4, dasstudio 3/3.5/3.5 to 4/4/4, calderr 3.5/4/4 to 4.5/4.5/4.5; parley fell to 1.5/3.5/3 because its ten-section plan collapsed (PR-3ab, P0, next, branch frm/cover-counts-as-beat). The five original sites hold 4.5 (zova motion 4: three stacked dark panels).
 - 2026-09-06 turn 105: PR-3ab #546 merged. Cohort-12 built with images on 266f21a6 (nine sites, every image completed, no plan loss): parley back to nine sections at 4.5, dasstudio and calderr 4.5, fabrica 3.5/3/4 (serif + monochrome on a brief that names neither). Rows: PR-0c fabrica brief names its type and grade (next, branch frm/fabrica-brief-type), PR-2q stated dark hero panel (P2).
 - 2026-09-06 turn 106: PR-0c #547 merged; fabrica-like4 (one evidence build) now sets Schibsted Grotesk Display with saturated colour photography on a light page. Next: PR-2r on branch frm/wordmark-phone-wrap (a two-word wordmark wraps large on a phone).
+- 2026-09-06 turn 107: PR-2r #548 merged. Next: PR-2q on branch frm/stated-dark-hero-panel (a stated dark hero panel commits the contrast surface through the plan projection), then cohort-13 of nine sites.
 
 ## 10. Parked / rejected
 
