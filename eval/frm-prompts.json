@@ -21,7 +21,7 @@
       "slug": "zova-like",
       "site_type": "saas",
       "reference": "https://zova-saas.framer.ai/",
-      "prompt": "Create a clean SaaS landing page for a finance analytics product for small teams. White page with a pale blue gradient panel hero, dashboard mockup, four-column feature row separated by hairlines, a sticky split with tabs, three pricing tiers with the middle one highlighted, a photo testimonial, FAQ, and a newsletter footer. Floating pill nav with a black arrow CTA."
+      "prompt": "Create a clean SaaS landing page for a finance analytics product for small teams. White page, geometric sans type, with a pale blue gradient panel hero, dashboard mockup, four-column feature row separated by hairlines, a sticky split with tabs, three pricing tiers with the middle one highlighted, a photo testimonial, FAQ, and a newsletter footer. Floating pill nav with a black arrow CTA."
     },
     {
       "id": "luzia-like",
