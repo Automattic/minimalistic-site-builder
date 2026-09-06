@@ -362,6 +362,12 @@ final class SiteSpecStep implements Step
             if (!self::looksLikeProperNoun($run[0]['word'], $run[0]['initial'])) {
                 continue;
             }
+            // An initialism in a brief (CTA, FAQ, SEO) names a thing, not a
+            // brand (frm PR-0j): luzia-like34's "Carta" was restored to the
+            // "CTA" of "a dark CTA plus footer band".
+            if (self::isInitialism($run[0]['word'])) {
+                continue;
+            }
             foreach ($run as $token) {
                 if (preg_match('/^\p{Lu}/u', $token['word']) !== 1) {
                     continue 2;
@@ -394,6 +400,12 @@ final class SiteSpecStep implements Step
             return false;
         }
         return self::isBrandShaped($word) || !$sentenceInitial;
+    }
+
+    /** Two to five uppercase letters and nothing else: CTA, FAQ, SEO, SaaS is not one (it has lowercase). */
+    private static function isInitialism(string $word): bool
+    {
+        return preg_match('/^\p{Lu}{2,5}$/u', $word) === 1;
     }
 
     /** Inner capital or digit — PepeneBun, iPhone, 3M-shaped tokens. */
