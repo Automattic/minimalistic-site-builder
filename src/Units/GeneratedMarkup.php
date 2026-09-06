@@ -3581,6 +3581,70 @@ final class GeneratedMarkup
         return $document->render();
     }
 
+    /**
+     * A price figure without a price is a scope line (frm PR-3ae): the
+     * pricing fragment asks for the scope as a plain paragraph when no price
+     * is given, but fabrica-like11 set "Custom pricing" three times in the
+     * figure class, so three plans shouted the same non-figure. A paragraph
+     * marked price-figure whose text carries no digit and no currency loses
+     * the class and its scale.
+     *
+     * @param list<array<string,string>> $repairs
+     * @param list<string> $warnings
+     */
+    public static function demotePricelessFigure(string $markup, string $part, array &$repairs = [], array &$warnings = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $demoted = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('price-figure', $classes, true)) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($text === '' || preg_match('/\p{N}|[$€£¥₹₩₽]|\b(?:free|gratis)\b/iu', $text) === 1) {
+                continue;
+            }
+            $kept = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'price-figure'));
+            if ($kept === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $kept);
+            }
+            $document->setAttrs($index, $attrs);
+            // One splice rewrites the opening tag; an emptied class attribute goes with it.
+            $own = $document->ownHtml($index);
+            if (preg_match('/<p\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = array_values(array_filter(preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [], static fn (string $t): bool => $t !== 'price-figure'));
+                    return $tokens === [] ? '' : ' class="' . implode(' ', $tokens) . '"';
+                }, $opening, 1) ?? $opening;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $demoted[] = $text;
+            $warnings[] = "file='theme/parts/{$part}.html'; block='paragraph'; authored=price-figure \"" . mb_strimwidth($text, 0, 60, '…', 'UTF-8')
+                . '"; delivered=plain scope line; disposition=a figure without a price or a currency is a scope line, not a figure';
+        }
+        if ($demoted === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'priceless-figure-demoted',
+            'part' => $part,
+            'authored' => count($demoted) . ' price figure(s) without a price: ' . implode(' | ', array_map(static fn (string $t): string => mb_strimwidth($t, 0, 40, '…', 'UTF-8'), $demoted)),
+            'delivered' => 'plain scope lines',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
     private static function describePaint(mixed $value): string
     {
         return is_string($value) ? '"' . mb_strimwidth($value, 0, 60, '…', 'UTF-8') . '"' : 'set';
