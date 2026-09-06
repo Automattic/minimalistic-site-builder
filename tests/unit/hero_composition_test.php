@@ -693,3 +693,22 @@ test('a stated cover hero in more words reaches cinematic-safe-zone (frm PR-2o)'
     );
     assert_eq('cinematic-safe-zone', $recipe);
 });
+
+
+test('a stated dark hero panel commits the contrast surface for a recipe that allows it (frm PR-2q)', function () {
+    assert_eq('contrast', HeroComposition::statedHeroSurface('the hero is one dark photo panel with a giant lowercase wordmark'));
+    assert_eq('contrast', HeroComposition::statedHeroSurface('a dark hero panel with the copy left'));
+    assert_eq(null, HeroComposition::statedHeroSurface('Dark hero with a full-bleed high-contrast portrait'), 'a dark cover hero is the image surface, not a panel');
+    assert_eq(null, HeroComposition::statedHeroSurface('Light grey page with rounded near-black panels'), 'panels elsewhere are band geometry');
+    assert_eq('contrast', HeroComposition::statedHeroSurfaceFor(['original_prompt' => 'hero is one dark photo panel', 'prompt' => 'an agency site']));
+    assert_eq(null, HeroComposition::statedHeroSurfaceFor([]));
+
+    $plain = HeroComposition::planProjection(HeroBlueprint::defaultFor('wordmark-stage'));
+    assert_eq('base', $plain['default_background']);
+    assert_eq(['base', 'tinted', 'contrast'], $plain['allowed_backgrounds']);
+    $dark = HeroComposition::planProjection(HeroBlueprint::defaultFor('wordmark-stage'), 'contrast');
+    assert_eq('contrast', $dark['default_background']);
+    assert_eq(['contrast'], $dark['allowed_backgrounds'], 'the stated surface is the one the plan may deliver');
+    $cover = HeroComposition::planProjection(HeroBlueprint::defaultFor('cinematic-safe-zone'), 'contrast');
+    assert_eq(HeroComposition::planProjection(HeroBlueprint::defaultFor('cinematic-safe-zone')), $cover, 'a recipe whose backgrounds exclude the stated surface is untouched');
+});
