@@ -384,6 +384,21 @@ test('CTA warnings verify theme binding and local override inheritance', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('CTA warnings stay silent for a delivered solid construction whose label ink contrast-fix wrote', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['cta_style' => 'solid']);
+    [$theme] = ThemeJsonStep::repairCtaStyle([
+        'version' => 3,
+        'styles' => ['elements' => ['button' => ['typography' => ['fontWeight' => '700']]]],
+    ], 'solid');
+    // contrast-fix's readable label on the accent, in the spelling it writes.
+    $theme['styles']['elements']['button']['color']['text'] = 'var(--wp--preset--color--contrast)';
+    $project->writeJson('theme/theme.json', $theme);
+
+    assert_eq([], ThemeValidator::ctaWarnings($project), 'the delivered construction is the committed one');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings flag long paragraphs at heading-scale presets', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
