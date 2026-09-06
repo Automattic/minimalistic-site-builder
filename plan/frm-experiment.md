@@ -226,8 +226,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-0c (second set, brief refinement): the fabrica brief names no type and no photo grade, and the direction picked a serif with monochrome photography in three builds; the reference is a bold grotesque with moody colour photography. The brief now says so, the way the original briefs name their type; no pipeline change.
 - PR-2r (second set, P1): dasstudio-like4 at 390 sets ATELIER STUDIO at 32px because the wordmark pin keeps the whole name on one line in a 326px container; the reference wraps the name to two large lines on a phone. Fix: the pin takes two terms, the whole name on one line where the container is wide and the longest word at up to 3rem where it is narrow, and the heading may wrap at the space.
 - PR-2q (second set, P2): fabrica's reference sets the wordmark hero in a dark rounded panel; the recipe delivers it on the base surface. Fix: a stated dark hero panel commits the contrast surface for wordmark-stage.
-- PR-7i (cohort-22, P2, in PR on frm/portrait-on-mockup-site): zova-like33's testimonial pictures came back as abstract avatar tiles because the site-wide ui-mockup kind clause rode on every image request. Fix: ImageKind::namesPerson and portraitClause; the composer gives a person subject on a ui-mockup site a photographic-portrait clause instead of the interface clause.
-- PR-0g (cohort-22, P3): calderr-like13's spec named the site "Atelier"; add atelier, workshop, practice and collective to the generic name list.
+- PR-7i (cohort-22, P2, merged #573): zova-like33's testimonial pictures came back as abstract avatar tiles because the site-wide ui-mockup kind clause rode on every image request. Fix: ImageKind::namesPerson and portraitClause; the composer gives a person subject on a ui-mockup site a photographic-portrait clause instead of the interface clause.
+- PR-0g (cohort-22, P3, in PR on frm/generic-name-atelier): calderr-like13's spec named the site "Atelier"; add atelier, workshop, practice and collective to the generic name list.
 - PR-4t (cohort-21, P2, merged #572): zova-like32's brief opens "White page" and the seed committed a warm tint, so the page shipped cream. Fix: GroundTint::statedInBrief reads a stated page tint (white or grey page = neutral; warm cream, ice white, lavender, sage, blush) and DesignDirectionStep lets it outrank the seed with a repair, the way the stated ground and type do.
 - PR-4u (cohort-21, P3, parked): a stated panel colour for the panel-stage hero. BandColor::valid keeps the band in the base's tint family (BIGR-919), so a pale-blue panel on a neutral page needs a stated exception through the band floor and the theme palette; wider than a P3 warrants inside this loop.
 - PR-0f (cohort-20, P2, merged #571): zova-like31 was set entirely in monospace because the concept seed committed the mono register and the brief stated no type. Fix: the zova brief names "geometric sans type", so the stated-type reader (PR-5f) outranks the seed, the way PR-0c fixed fabrica's grotesque.
@@ -578,6 +578,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 120 | PR-3ae | #570 | merged | a price figure without a price becomes a plain scope line | https://gist.github.com/matiasbenedetto/114451a6e760346d88b93144356905aa |
 | 121 | PR-0f | #571 | merged | the zova brief names geometric sans type | https://gist.github.com/matiasbenedetto/ca0f5ae9fe5b62fddf4e71d6c48444e1 |
 | 122 | PR-4t | #572 | merged | a stated page tint outranks the seed | https://gist.github.com/matiasbenedetto/0f7ce945659bb8b63e8d54d0db232e0b |
+| 123 | PR-7i | #573 | merged | a person on a ui-mockup site takes a portrait clause | https://gist.github.com/matiasbenedetto/efba1caaabb48e3db799501414646f6f |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -712,6 +713,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 129: PR-3ae #570 merged. Cohort-20 built with images on 5a3bbe1a (nine sites, no plan loss, no horizontal overflow): eight at 4.5, zova 4/3.5/4 (all-mono seed). PR-0f in PR: the zova brief names geometric sans type. Next: cohort-21.
 - 2026-09-06 turn 130: PR-0f #571 merged. Cohort-21 built with images on c64a3b28 (nine sites, no plan loss, no overflow): eight at 4.5, zova 4/4/4.5 (cream page on a white brief; the sans holds). PR-4t in PR: stated page tint outranks the seed; four briefs read neutral, parley warm. New row PR-4u (P3).
 - 2026-09-06 turn 131: PR-4t #572 merged; PR-4u parked (band and base share a tint family by design). Cohort-22 built with images on d3d7593e (nine sites, no plan loss, no overflow): every site at 4.5 overall; the stated tint, the sans and the portrait hero all held. PR-7i in PR: a person on a ui-mockup site takes a portrait clause. New row PR-0g (P3).
+- 2026-09-06 turn 132: PR-7i #573 merged. PR-0g in PR: atelier, workshop, practice and collective join the generic name lists; "Atelier Bloom" and "Atelier Lisbon" stay names. The backlog is then empty apart from the parked rows. Next: cohort-23.
 
 ## 10. Parked / rejected
 
