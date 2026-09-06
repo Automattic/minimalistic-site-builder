@@ -3512,6 +3512,75 @@ final class GeneratedMarkup
         return $document->render();
     }
 
+    /**
+     * An empty step plate carries no paint of its own (frm PR-3ad): the
+     * zigzag fragment used to ask for the band preset, whose class wins over
+     * the theme's translucent tint, so luzia-like25's dark process band
+     * showed light blank cards where two steps had no picture. The theme
+     * tints the plate from the band; the block loses its background paint.
+     *
+     * @param list<array<string,string>> $repairs
+     */
+    public static function stripStepPlatePaint(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $stripped = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'group') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('step-plate', $classes, true)) {
+                continue;
+            }
+            $painted = isset($attrs['backgroundColor']) || isset($attrs['gradient'])
+                || isset($attrs['style']['color']['background']) || isset($attrs['style']['color']['gradient']);
+            if (!$painted) {
+                continue;
+            }
+            unset($attrs['backgroundColor'], $attrs['gradient'], $attrs['style']['color']['background'], $attrs['style']['color']['gradient']);
+            if (isset($attrs['style']['color']) && $attrs['style']['color'] === []) {
+                unset($attrs['style']['color']);
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            $own = $document->ownHtml($index);
+            if (preg_match('/<div\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $kept = array_values(array_filter($tokens, static fn (string $t): bool
+                        => $t !== 'has-background'
+                        && preg_match('/^has-[a-z0-9-]+-(?:background-color|gradient-background)$/', $t) !== 1));
+                    return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+                }, $opening, 1) ?? $opening;
+                $clean = preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $c): string {
+                    $decls = array_values(array_filter(array_map('trim', explode(';', $c[1])), static fn (string $d): bool
+                        => $d !== '' && preg_match('/^background(?:-color|-image)?\s*:/i', $d) !== 1));
+                    return $decls === [] ? '' : ' style="' . implode(';', $decls) . '"';
+                }, $clean) ?? $clean;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $stripped++;
+        }
+        if ($stripped === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'step-plate-paint-stripped',
+            'part' => $part,
+            'authored' => $stripped . ' painted step plate(s)',
+            'delivered' => 'plates tinted by the theme from the band',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
     private static function describePaint(mixed $value): string
     {
         return is_string($value) ? '"' . mb_strimwidth($value, 0, 60, '…', 'UTF-8') . '"' : 'set';
