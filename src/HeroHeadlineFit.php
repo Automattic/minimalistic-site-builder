@@ -275,30 +275,107 @@ final class HeroHeadlineFit
                 continue;
             }
             $available = ($phoneViewportPx - 2 * self::PHONE_GUTTER_PX) * self::PHONE_SAFETY;
-            if ($phoneSize * $wordEm <= $available) {
+            $terms = [];
+            if ($phoneSize * $wordEm > $available) {
+                $vw = floor(($available / $phoneViewportPx * 100) / $wordEm * 10) / 10;
+                if ($vw > 0) {
+                    $terms[] = $vw . 'vw';
+                    $notes[] = sprintf(
+                        "section heading phone-fit: h%d '%s' (~%.2fem) would overflow a %dpx viewport at the %s minimum; %svw joins the preset",
+                        $level,
+                        $word,
+                        $wordEm,
+                        (int) $phoneViewportPx,
+                        $slug,
+                        $vw,
+                    );
+                }
+            }
+            // A heading inside a column row is bounded by its column too
+            // (frm PR-5m): dasstudio-like11's ENVIRONMENTAL in a four-column
+            // row overran a 307px column and gave the page a horizontal
+            // scroll. The phone term never bites on a wide viewport, so a
+            // fixed pixel term from the wide width and the column count does.
+            $column = self::columnWordBoundPx($doc, $i, $theme, $slug, $wordEm);
+            if ($column !== null) {
+                $terms[] = $column['px'] . 'px';
+                $notes[] = sprintf(
+                    "section heading column-fit: h%d '%s' (~%.2fem) would overflow a %dpx column at the %s maximum; %dpx joins the preset",
+                    $level,
+                    $word,
+                    $wordEm,
+                    $column['column'],
+                    $slug,
+                    $column['px'],
+                );
+            }
+            if ($terms === []) {
                 continue;
             }
-            $vw = floor(($available / $phoneViewportPx * 100) / $wordEm * 10) / 10;
-            if ($vw <= 0) {
-                continue;
-            }
-            $size = 'min(var(--wp--preset--font-size--' . $slug . '), ' . $vw . 'vw)';
+            $size = 'min(var(--wp--preset--font-size--' . $slug . '), ' . implode(', ', $terms) . ')';
             unset($attrs['fontSize']);
             $attrs = self::withPinnedFontSize($attrs, $size);
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
             $changed = true;
-            $notes[] = sprintf(
-                "section heading phone-fit: h%d '%s' (~%.2fem) would overflow a %dpx viewport at the %s minimum; %svw joins the preset",
-                $level,
-                $word,
-                $wordEm,
-                (int) $phoneViewportPx,
-                $slug,
-                $vw,
-            );
         }
         return ['markup' => $changed ? $doc->render() : $markup, 'notes' => $notes];
+    }
+
+    private const COLUMN_GAP_PX = 24.0;
+    private const COLUMN_SAFETY = 0.92;
+    private const WIDE_FALLBACK_PX = 1280.0;
+    /** The desktop reference viewport; a wide row never exceeds it minus the root gutters. */
+    private const DESKTOP_VIEWPORT_PX = 1366.0;
+    private const DESKTOP_GUTTER_PX = 24.0;
+
+    /**
+     * The pixel size at which a heading's longest word still fits the column
+     * it sits in on a wide viewport, or null when the preset's maximum
+     * already fits or the heading is not inside a column row (frm PR-5m).
+     *
+     * @return array{px:int,column:int}|null
+     */
+    private static function columnWordBoundPx(BlockMarkup $doc, int $index, array $theme, string $slug, float $wordEm): ?array
+    {
+        $column = null;
+        for ($node = $doc->parent($index); $node !== null; $node = $doc->parent($node)) {
+            if ($doc->name($node) === 'column') {
+                $column = $node;
+                break;
+            }
+        }
+        if ($column === null) {
+            return null;
+        }
+        $row = $doc->parent($column);
+        if ($row === null || $doc->name($row) !== 'columns') {
+            return null;
+        }
+        $siblings = array_values(array_filter($doc->children($row), static fn (int $c): bool => $doc->name($c) === 'column'));
+        $count = count($siblings);
+        if ($count < 2) {
+            return null;
+        }
+        $wide = self::WIDE_FALLBACK_PX;
+        $wideSize = $theme['settings']['layout']['wideSize'] ?? null;
+        if (is_string($wideSize) && preg_match('/^\s*([0-9.]+)px\s*$/', $wideSize, $m) === 1) {
+            $wide = (float) $m[1];
+        }
+        $wide = min($wide, self::DESKTOP_VIEWPORT_PX - 2 * self::DESKTOP_GUTTER_PX);
+        $inner = $wide - ($count - 1) * self::COLUMN_GAP_PX;
+        $width = $doc->attrs($column)['width'] ?? null;
+        $share = is_string($width) && preg_match('/^\s*([0-9.]+)%\s*$/', $width, $m) === 1
+            ? max(0.05, min(1.0, (float) $m[1] / 100))
+            : 1 / $count;
+        $columnPx = $inner * $share;
+        $available = $columnPx * self::COLUMN_SAFETY;
+        $max = self::presetMaxPx($theme, $slug);
+        if ($max === null || $max <= 0 || $wordEm <= 0 || $max * $wordEm <= $available) {
+            return null;
+        }
+        $px = (int) floor($available / $wordEm);
+        return $px > 0 ? ['px' => $px, 'column' => (int) round($columnPx)] : null;
     }
 
     /** The preset slug the theme gives a heading level, or the level's fallback. */
