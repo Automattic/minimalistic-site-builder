@@ -238,6 +238,17 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedGround) . '; disposition the brief names its ground, so the seed yields to it';
             $seedGround = $statedGround;
         }
+        // A page tint the brief states outranks the seed's the same way
+        // (frm PR-4t): zova-like32's "White page" met a seed that committed
+        // a warm cream.
+        $statedTint = self::statedTintFor($meta);
+        $tintRepair = null;
+        if ($statedTint !== null && $seedTint !== $statedTint) {
+            $tintRepair = 'designDirection.json: field ground_tint seed committed '
+                . self::describe($seedTint === '' ? null : $seedTint) . ' delivered '
+                . self::describe($statedTint) . '; disposition the brief names its page tint, so the seed yields to it';
+            $seedTint = $statedTint;
+        }
         // A letterform tradition the brief states outranks the seed's the
         // same way (frm PR-5f): cohesion-like14 set a serif display on a
         // "bold black type" brief because the seed chose a serif tradition.
@@ -327,7 +338,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = array_values(array_filter([$groundRepair, $typeRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
+        $repairs = array_values(array_filter([$groundRepair, $tintRepair, $typeRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
@@ -2521,6 +2532,22 @@ final class DesignDirectionStep implements Step
                 continue;
             }
             $stated = ConceptSeeds::statedTypeRegister($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTintFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = GroundTint::statedInBrief($text);
             if ($stated !== null) {
                 return $stated;
             }

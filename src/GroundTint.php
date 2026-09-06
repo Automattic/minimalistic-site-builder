@@ -36,6 +36,40 @@ final class GroundTint
      *
      * @param array{0:int,1:int,2:int} $rgb
      */
+    /**
+     * Bounded phrases a brief uses to name its page tint (frm PR-4t): zova's
+     * "White page" met a seed that committed a warm cream. Read as whole
+     * words, first match wins, the way GroundKey reads a stated ground.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_PHRASES = [
+        'warm' => ['warm white', 'cream page', 'cream ground', 'warm cream', 'ivory page', 'beige page', 'sand page', 'warm grey page', 'warm gray page', 'warm off-white'],
+        'cool' => ['cool white', 'cool grey page', 'cool gray page', 'ice white', 'blue-white page', 'cool ground', 'blue-grey page', 'blue-gray page'],
+        'violet' => ['lavender page', 'lilac page', 'violet ground', 'violet-tinted page'],
+        'green' => ['sage page', 'mint page', 'green-tinted page', 'sage ground'],
+        'blush' => ['blush page', 'pink page', 'rose-tinted page', 'blush ground'],
+        // Neutral last: "ice white page" names a cool tint before it names a page.
+        'neutral' => [
+            'white page', 'pure white', 'plain white', 'white ground', 'neutral white', 'white background',
+            'light grey page', 'light gray page', 'grey page', 'gray page', 'neutral grey', 'neutral gray',
+        ],
+    ];
+
+    /** The page tint a brief names in so many words, or null. */
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_PHRASES as $tint => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $tint;
+                }
+            }
+        }
+        return null;
+    }
+
     public static function chromaOf(array $rgb): float
     {
         return (max($rgb) - min($rgb)) / 255;

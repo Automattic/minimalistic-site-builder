@@ -2804,3 +2804,15 @@ test('colour photography the brief states outranks a monochrome grade and a duot
     assert_eq($silent, DesignDirectionStep::withStatedDirection($silent, ['prompt' => 'a dark editorial page'], false, $repairs), 'a silent brief changes nothing');
     assert_eq([], $repairs);
 });
+
+
+test('a page tint the brief states outranks the seed tint (frm PR-4t)', function () {
+    assert_eq('neutral', GroundTint::statedInBrief('Create a clean SaaS landing page. White page, geometric sans type, with a pale blue gradient panel hero.'));
+    assert_eq('neutral', GroundTint::statedInBrief('Light grey page, bold grotesque type, moody colour photography'));
+    assert_eq('warm', GroundTint::statedInBrief('a warm cream ground with brass accents'));
+    assert_eq('cool', GroundTint::statedInBrief('an ice white page with cobalt type'));
+    assert_eq(null, GroundTint::statedInBrief('Near-black ground, serif headlines'), 'a dark ground names no tint');
+    assert_eq(null, GroundTint::statedInBrief('white space around every card'), 'white space is not a page');
+    assert_eq('neutral', DesignDirectionStep::statedTintFor(['original_prompt' => 'White page with a panel hero', 'prompt' => 'a cream page']));
+    assert_eq(null, DesignDirectionStep::statedTintFor(['prompt' => 'a dark editorial page']));
+});
