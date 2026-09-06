@@ -278,6 +278,11 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        // A card the theme css paints keeps text that surface can carry (frm PR-5k).
+        $cardText = CardTextContract::enforce($markup, $this->key($input), $input['theme_json'] ?? null);
+        $markup = $cardText['markup'];
+        array_push($repairs, ...$cardText['repairs']);
+        array_push($warnings, ...$cardText['warnings']);
         $section = $this->section($input);
         $band = BandSurfaceContract::enforce(
             $markup,
