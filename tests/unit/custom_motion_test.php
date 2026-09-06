@@ -37,6 +37,33 @@ test('custom-motion validate accepts scoped rules with custom-motion keyframes',
     assert_eq([], CustomMotionStep::validate(CM_VALID_CSS));
 });
 
+test('custom-motion validate accepts the class anywhere in the first compound (frm PR-8o)', function () {
+    // spector-like38 wrote these for a counter request; the whole sheet was
+    // rejected as unscoped although each selector matches tagged elements only.
+    foreach ([
+        'h1.custom-motion',
+        '.wp-block-site-title.custom-motion',
+        'p.custom-motion.has-caption-font-size',
+        '.wp-block-heading.custom-motion:hover',
+        '*.custom-motion',
+        'div[data-x].custom-motion > span',
+    ] as $selector) {
+        $problems = CustomMotionStep::validate("{$selector} { transform: translateY(0); }");
+        assert_eq([], array_values(array_filter($problems, static fn (string $p): bool => str_contains($p, 'not scoped'))), $selector);
+    }
+    foreach ([
+        'h1',
+        '.wp-block-site-title',
+        'body .custom-motion',
+        'h1 .custom-motion',
+        '.custom-motionless',
+        '.hero > .custom-motion',
+    ] as $selector) {
+        $problems = CustomMotionStep::validate("{$selector} { transform: translateY(0); }");
+        assert_contains('selector not scoped under .custom-motion', implode('; ', $problems), $selector);
+    }
+});
+
 test('custom-motion validate rejects shape-owned radius declarations in rules and keyframes', function () {
     $cases = [
         'direct shorthand' => '.custom-motion img { border-radius: 50% !important; }',

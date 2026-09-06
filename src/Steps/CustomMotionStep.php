@@ -437,9 +437,18 @@ final class CustomMotionStep implements Step
         }
 
         // Every remaining rule selector must live under the dedicated class.
+        // The class may sit anywhere in the FIRST compound (frm PR-8o):
+        // `h1.custom-motion` or `.wp-block-site-title.custom-motion` matches
+        // only tagged elements, the same as `.custom-motion`, and the model
+        // wrote those on spector-like38 and cohesion-like40 for a request
+        // the kit then carried while the sheet was rejected whole.
         $isScoped = static fn (string $selector): bool =>
             preg_match('/^\.' . self::CLASS_NAME . '(?![\w])/', $selector) === 1
-            || preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) === 1;
+            || preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) === 1
+            || preg_match(
+                '/^(?:[a-zA-Z][\w-]*|\*)?(?:\.[\w-]+|\[[^\]]*\]|:{1,2}[\w-]+(?:\([^)]*\))?)*\.' . self::CLASS_NAME . '(?![\w-])/',
+                $selector,
+            ) === 1;
         foreach (CssChecks::unscopedSelectors($rules, $isScoped) as $selector) {
             $problems[] = "selector not scoped under ." . self::CLASS_NAME . ": {$selector}";
         }
