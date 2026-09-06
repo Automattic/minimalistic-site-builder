@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
@@ -2840,6 +2841,19 @@ test('colour photography the brief states outranks a monochrome grade and a duot
     assert_eq([], $repairs);
 });
 
+
+test('a hue budget the brief states outranks the seed economy (frm PR-4v)', function () {
+    assert_eq('monochrome', ColorEconomy::statedInBrief('Off-white page with every letter and line in one cobalt blue: a short intro paragraph top-left.'));
+    assert_eq('monochrome', ColorEconomy::statedInBrief('a monochrome navy portfolio'));
+    assert_eq('monochrome', ColorEconomy::statedInBrief('set in one ink on cream paper'));
+    assert_eq('single-accent', ColorEconomy::statedInBrief('warm page with one orange accent'), 'a colour named as the accent keeps its accent');
+    assert_eq('single-accent', ColorEconomy::statedInBrief('one accent colour on a white page'));
+    assert_eq('multicolor', ColorEconomy::statedInBrief('a rainbow palette for a kids festival'));
+    assert_eq(null, ColorEconomy::statedInBrief('tone of voice, one more thing'), 'a silent brief decides nothing');
+    assert_eq(null, ColorEconomy::statedInBrief('Create a website for a Georgian restaurant.'));
+    assert_eq('monochrome', DesignDirectionStep::statedEconomyFor(['original_prompt' => 'every line in one cobalt blue', 'prompt' => 'a colourful page']));
+    assert_eq(null, DesignDirectionStep::statedEconomyFor(['prompt' => 'a dark editorial page']));
+});
 
 test('a page tint the brief states outranks the seed tint (frm PR-4t)', function () {
     assert_eq('neutral', GroundTint::statedInBrief('Create a clean SaaS landing page. White page, geometric sans type, with a pale blue gradient panel hero.'));

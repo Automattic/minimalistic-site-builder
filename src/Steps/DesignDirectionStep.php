@@ -275,6 +275,18 @@ final class DesignDirectionStep implements Step
                 . self::describe($statedType) . '; disposition the brief names its letterform tradition, so the seed yields to it';
             $seedTypeRegister = $statedType;
         }
+        // A hue budget the brief states outranks the seed's the same way
+        // (frm PR-4v): calderr-like20's "every letter and line in one cobalt
+        // blue" met three single-accent seeds, and the palette floor then
+        // rotated the accent to a violet the brief never asked for.
+        $statedEconomy = self::statedEconomyFor($meta);
+        $economyRepair = null;
+        if ($statedEconomy !== null && $seedColorEconomy !== $statedEconomy) {
+            $economyRepair = 'designDirection.json: field color_economy seed committed '
+                . self::describe($seedColorEconomy === '' ? null : $seedColorEconomy) . ' delivered '
+                . self::describe($statedEconomy) . '; disposition the brief names its hue budget, so the seed yields to it';
+            $seedColorEconomy = $statedEconomy;
+        }
         $heroRepair = null;
         $recipe = self::selectHeroRecipe(
             $meta,
@@ -353,7 +365,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = array_values(array_filter([$groundRepair, $tintRepair, $typeRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
+        $repairs = array_values(array_filter([$groundRepair, $tintRepair, $typeRepair, $economyRepair, $heroRepair], static fn (?string $r): bool => $r !== null));
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
@@ -2753,6 +2765,22 @@ final class DesignDirectionStep implements Step
                 continue;
             }
             $stated = ConceptSeeds::statedTypeRegister($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedEconomyFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = ColorEconomy::statedInBrief($text);
             if ($stated !== null) {
                 return $stated;
             }
