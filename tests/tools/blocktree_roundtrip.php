@@ -13,48 +13,39 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/../../autoload.php';
+require __DIR__ . '/SpecRenderer.php';
 
 use Automattic\SiteBuild\BlockSerializer\Attributes\AttributeNormalizer;
-use Automattic\SiteBuild\BlockSerializer\CommentSerializer;
-use Automattic\SiteBuild\BlockSerializer\NormalizedBlock;
 use Automattic\SiteBuild\BlockSerializer\Parser\BlockNode;
 use Automattic\SiteBuild\BlockSerializer\Parser\DefaultParser;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategyRegistry;
 use Automattic\SiteBuild\BlockSerializer\ParagraphFixer;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
+use Automattic\SiteBuild\Tools\SpecRenderer;
 
 $registry = new BlockRegistry();
-$saves = new SaveStrategyRegistry($registry);
-$normalizer = new AttributeNormalizer($registry, $saves);
-$comments = new CommentSerializer($registry);
+$normalizer = new AttributeNormalizer($registry, new SaveStrategyRegistry($registry));
+$renderer = new SpecRenderer($registry);
 $serializer = new Serializer($registry);
 $paragraphs = new ParagraphFixer();
 
-/** Reduce a parsed block to {name, attrs, children}; the markup is discarded. */
-$toSpec = function (BlockNode $node, string $path) use (&$toSpec, &$render, $normalizer): array {
+/** Reduce a parsed block to {name, attrs, innerBlocks}; the markup is discarded. */
+$toSpec = function (BlockNode $node, string $path) use (&$toSpec, $normalizer, $renderer): array {
     $inner = [];
     foreach ($node->innerBlocks as $i => $child) {
         $inner[] = $toSpec($child, $path . '/' . $i);
     }
     // normalize() sources this block's attributes from its children's markup,
     // so the children must already be rebuilt from their own specs.
-    $innerHtml = implode("\n\n", array_map($render, $inner));
+    $innerHtml = implode("\n\n", array_map(fn ($c) => $renderer->block($c), $inner));
     $block = $normalizer->normalize($node, $innerHtml, $path);
     return [
         'name' => $node->name,
-        'typed' => $block->typedAttributes,
         'attrs' => $block->attributes,
-        'children' => $inner,
+        'typed' => $block->typedAttributes,
+        'innerBlocks' => $inner,
     ];
-};
-
-/** Rebuild markup from the spec alone. No source bytes are consulted. */
-$render = function (array $spec) use (&$render, $saves, $comments): string {
-    $inner = implode("\n\n", array_map($render, $spec['children']));
-    $content = $saves->save($spec['name'], $spec['attrs'], $inner, '');
-    $delimAttrs = $comments->attributes(new NormalizedBlock($spec['name'], $spec['typed'], $spec['attrs']));
-    return $comments->delimit($spec['name'], $delimAttrs, $content);
 };
 
 // Arguments are files, or directories to walk for block documents.
@@ -85,14 +76,12 @@ foreach ($files as $file) {
     try {
         // Same pre-pass the Serializer runs before parsing.
         $doc = DefaultParser::parse($paragraphs->fix($input)->html);
-        $out = [];
+        $specs = [];
         foreach ($doc->nodes() as $i => $node) {
             if (!$node instanceof BlockNode) { continue; }
-            $out[] = $render($toSpec($node, (string) $i));
+            $specs[] = $toSpec($node, (string) $i);
         }
-        // The Serializer normalizes its own output the same way; sourcing a
-        // paragraph's content yields the whole <p>, which nests on re-render.
-        $rebuilt = $paragraphs->fix(implode("\n\n", $out))->html;
+        $rebuilt = $renderer->document($specs);
     } catch (\Throwable $e) {
         $fail++; $failed[$file] = 'excepción: ' . $e->getMessage();
         continue;
