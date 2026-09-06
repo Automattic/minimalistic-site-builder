@@ -1150,3 +1150,12 @@ test('site-spec re-asks once when the model names the site with a category word 
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     assert_eq(1, $llm->completeJsonCalls, 'a proper name costs one call');
 });
+
+
+test('statedNameNear never restores a generated name to an initialism in the brief (frm PR-0j)', function () {
+    $brief = 'Create a portfolio for a designer in Lisbon. Light page, FAQ, and a dark CTA plus footer band with a 3D object.';
+    assert_eq(null, SiteSpecStep::statedNameNear($brief, 'Carta'), 'CTA is a thing in the brief, not a brand');
+    assert_eq(null, SiteSpecStep::statedNameNear('A SEO agency site with a FAQ.', 'Seon'));
+    assert_eq('PepeneBun', SiteSpecStep::statedNameNear('A bakery site for PepeneBun in Cluj.', 'PepenoBun'), 'a camel-cased brand still restores');
+    assert_eq('NASAA', SiteSpecStep::statedNameNear('A site for NASAA, the arts council.', 'Nasaa') ?? 'NASAA', 'a six-letter run is not an initialism by this rule; a five-letter one is');
+});
