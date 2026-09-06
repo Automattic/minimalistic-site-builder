@@ -145,6 +145,13 @@ final class ImagePromptComposer
         // the grade and rides with it; unlike the grade it also applies to a
         // transparent asset, whose whole point may be an isolated 3D object.
         $kindClause = ImageKind::promptClause($imageKind, $transparent);
+        // A person on a ui-mockup site is a photograph, not a screen (frm
+        // PR-7i): the framed-screen kit already exempts these files, and the
+        // request now says so too.
+        if (!$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
+            && ImageKind::namesPerson($subject . ' ' . $pageContext)) {
+            $kindClause = ImageKind::portraitClause();
+        }
         if ($kindClause !== '') {
             $gradeClause = trim($gradeClause . ' ' . $kindClause);
         }

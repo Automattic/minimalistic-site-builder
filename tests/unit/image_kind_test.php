@@ -215,3 +215,17 @@ test('every picture in a hero part goes through the vision check, whatever its f
     $png['filename'] = 'object.png';
     assert_true(!\Automattic\SiteBuild\ImageQa::applies($png), 'a transparent asset never is');
 });
+
+
+test('a person on a ui-mockup site takes the portrait clause instead of the interface clause (frm PR-7i)', function () {
+    assert_true(ImageKind::namesPerson('A stylized abstract user avatar tile: a simple rounded geometric figure silhouette'));
+    assert_true(ImageKind::namesPerson('portrait of the founder at her desk'));
+    assert_true(!ImageKind::namesPerson('A dashboard with a rising area chart'));
+    $portrait = ImagePromptComposer::compose('A stylized abstract user avatar tile on a pale panel', 'testimonial card beside a quote', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
+    assert_contains('a photographic portrait of one real person', $portrait);
+    assert_true(!str_contains($portrait, 'a framed product interface rendered as clean abstract shapes'), 'the interface clause yields');
+    $screen = ImagePromptComposer::compose('A dashboard with a rising area chart', 'product tour', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
+    assert_contains('a framed product interface rendered as clean abstract shapes', $screen, 'a screen keeps the interface clause');
+    $clay = ImagePromptComposer::compose('portrait of the founder', 'testimonial', 'photorealistic', '', '', false, null, 'card-landscape', '3d-object');
+    assert_true(!str_contains($clay, 'photographic portrait'), 'only the ui-mockup kind yields; a 3D-object site keeps its objects');
+});
