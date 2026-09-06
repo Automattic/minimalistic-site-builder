@@ -173,6 +173,25 @@ final class ImageKind
      */
     private const PERSON_PATTERN = '/\b(?:portrait|headshot|head-and-shoulders|person|people|woman|women|man|men|face|faces|founder|founders|team photo|avatar|smiling)\b/iu';
 
+    /** Whether a subject or slot names a person (the testimonial portrait beside a quote). */
+    public static function namesPerson(string $text): bool
+    {
+        return preg_match(self::PERSON_PATTERN, $text) === 1;
+    }
+
+    /**
+     * The render instruction for a person on a `ui-mockup` site (frm PR-7i):
+     * zova-like33's testimonial pictures came back as abstract avatar tiles
+     * because the site-wide kind clause asked every picture for an
+     * interface. A person is a photograph whatever the site's kind.
+     */
+    public static function portraitClause(): string
+    {
+        return 'Imagery kind for this picture: a photographic portrait of one real person, head and shoulders,'
+            . ' natural light, a real room softly out of focus behind them; not an interface, not an icon,'
+            . ' not a silhouette, not an abstract or geometric avatar, no text.';
+    }
+
     /**
      * Whether one images.json row is a product screen the kit should frame.
      * A transparent asset, the site logo, and any picture whose subject or
