@@ -691,6 +691,12 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--wordmark-stage .hero-composition__copy > * {
             max-width: none;
         }
+        /* The facts row sits outside the copy group in the delivered markup
+           (frm PR-2w), capped by the root's constrained layout; it takes the
+           band like the name above it. */
+        .hero-composition--wordmark-stage .hero-composition__facts {
+            max-width: none;
+        }
         .hero-composition--wordmark-stage .hero-composition__wordmark {
             margin-block: 0 0.35em;
             line-height: 0.88;

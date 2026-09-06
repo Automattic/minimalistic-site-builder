@@ -226,8 +226,8 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-0c (second set, brief refinement): the fabrica brief names no type and no photo grade, and the direction picked a serif with monochrome photography in three builds; the reference is a bold grotesque with moody colour photography. The brief now says so, the way the original briefs name their type; no pipeline change.
 - PR-2r (second set, P1): dasstudio-like4 at 390 sets ATELIER STUDIO at 32px because the wordmark pin keeps the whole name on one line in a 326px container; the reference wraps the name to two large lines on a phone. Fix: the pin takes two terms, the whole name on one line where the container is wide and the longest word at up to 3rem where it is narrow, and the heading may wrap at the space.
 - PR-2q (second set, P2): fabrica's reference sets the wordmark hero in a dark rounded panel; the recipe delivers it on the base surface. Fix: a stated dark hero panel commits the contrast surface for wordmark-stage.
-- PR-2v (cohort-16, P1, in PR on frm/wordmark-glyph-widths): the flat 0.66em-per-character wordmark pin let "momentum" overrun its plate and left "STUDIO GESTALTEN" a quarter short. Fix: HeroComposition::wordmarkEm measures the name per glyph class (wide m/w, narrow i/l/t/f/r, case defaults) scaled by the heading face through HeroHeadlineFit, at 90cqi.
-- PR-2w (cohort-16, P2): the facts row of the wordmark hero sits outside the copy group, so PR-2t left it at the content measure while the name and the action take the band. Fix: a descendant rule lifts the cap on `.hero-composition__facts` too.
+- PR-2v (cohort-16, P1, merged #561): the flat 0.66em-per-character wordmark pin let "momentum" overrun its plate and left "STUDIO GESTALTEN" a quarter short. Fix: HeroComposition::wordmarkEm measures the name per glyph class (wide m/w, narrow i/l/t/f/r, case defaults) scaled by the heading face through HeroHeadlineFit, at 90cqi.
+- PR-2w (cohort-16, P2, in PR on frm/wordmark-facts-band): the facts row of the wordmark hero sits outside the copy group, so PR-2t left it at the content measure while the name and the action take the band. Fix: a descendant rule lifts the cap on `.hero-composition__facts` too.
 - PR-4r (cohort-16, P2): luzia-like23's footer sets its facts and links in the theme's mono face as a spec listing on a playful 3D site. Fix: the mono family is reserved for a committed mono device; a footer paragraph on `has-mono-font-family` returns to the body face unless the direction names a mono device.
 - PR-5j (cohort-15, P0, merged #557): spector-like23's H1 took the theme's one gradient preset as a background box (style.color.gradient), and the light copy washed out on the gradient's cream end. Fix: GeneratedMarkup::stripHeadingPaint removes backgroundColor, gradient and custom paint from every heading block with its classes and inline background, in the hero and section units, with a warning per heading.
 - PR-0d (cohort-15, P1, merged #558): calderr-like6's spec named the site "Portfolio" (title "Web Designer Portfolio"), so the giant wordmark reads as a category word. Fix: the site-spec step rejects a name that is a generic category word (portfolio, studio, agency, website, company, brand, shop, blog, home) and re-asks once with the rule quoted; the prompt already says "a real NAME, never a generic descriptor".
@@ -500,6 +500,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 108 | PR-0d | #558 | merged | a generic category word is not a site name; one re-ask | https://gist.github.com/matiasbenedetto/614eb527029728d68b708bf3121bc2ab |
 | 109 | PR-4o-2 | #559 | merged | drained-grey phrases count as a monochrome grade | https://gist.github.com/matiasbenedetto/78969605024b81fca9084c0646b2703e |
 | 110 | PR-4p-2 | #560 | merged | the identity-line bind keeps a case-only difference | https://gist.github.com/matiasbenedetto/7391aa1c08dd77d9506871b71a017768 |
+| 111 | PR-2v | #561 | merged | the wordmark pin measures the name per glyph and per heading face | https://gist.github.com/matiasbenedetto/cbb1df006456f1e6b4781536e737c50e |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -622,6 +623,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 117: PR-0d #558 merged. PR-8k closed as not a defect (letterform). PR-4o-2 in PR: drained-grey phrases join the monochrome grade check. Next: PR-4p-2, then cohort-16.
 - 2026-09-06 turn 118: PR-4o-2 #559 merged. PR-4p-2 in PR: the identity-line bind compares case-insensitively and keeps the authored case. The backlog is then empty apart from the parked rows (W3f, PR-3l, PR-5e). Next: cohort-16 of nine sites.
 - 2026-09-06 turn 119: PR-4p-2 #560 merged. Cohort-16 built with images on 2a99f9b6 (nine sites, no plan loss): every site at 4.5 overall, luzia 4; the generic-name re-ask, the heading paint strip and the identity-line bind all held. PR-2v in PR: per-glyph wordmark widths; fabrica and dasstudio mirrors fit the band. New rows PR-2w (P2), PR-4r (P2).
+- 2026-09-06 turn 120: PR-2v #561 merged. PR-2w in PR: the facts row outside the copy group takes the band; the dasstudio-like8 mirror's hairline spans edge to edge. Next: PR-4r mono footer face, then cohort-17.
 
 ## 10. Parked / rejected
 
