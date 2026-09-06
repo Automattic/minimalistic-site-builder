@@ -1254,7 +1254,18 @@ final class HeroComposition
             // Container units, not viewport units (frm W2e): the copy group is
             // capped at the content size, so the name fills the group's own
             // inline size on every screen instead of wrapping at the cap.
-            $size = 'min(18rem, calc(92cqi / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '') . '))';
+            $longest = 1;
+            foreach (preg_split('/\s+/u', $siteName, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+                $longest = max($longest, mb_strlen($word, 'UTF-8'));
+            }
+            // Two terms (frm PR-2r): the whole name on one line where the
+            // container is wide, and on a narrow container the longest word
+            // at up to 3rem, so a two-word name wraps to two large lines on
+            // a phone instead of shrinking to one small one. The max() picks
+            // the line term on desktop (it exceeds 3rem there) and the word
+            // term on a phone (the line term falls below it).
+            $size = 'min(18rem, max(calc(92cqi / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '')
+                . '), min(calc(92cqi / ' . number_format($longest * self::WORDMARK_CHAR_EM, 2, '.', '') . '), 3rem)))';
             $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
             $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-display-font-size'));
             if (!in_array(self::WORDMARK_CLASS, $classes, true)) {

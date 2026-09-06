@@ -665,8 +665,8 @@ test('the wordmark-stage recipe sets the site name giant as the one headline, wi
     $bound = HeroComposition::bindWordmarkHeadline($slogan, 'Das Studio', 'page-home--hero', $repairs);
     assert_contains('>Das Studio</h1>', $bound);
     assert_contains('"className":"hero-composition__wordmark"', $bound);
-    assert_contains('"fontSize":"min(18rem, calc(92cqi / 6.60))"', $bound, 'ten characters at 0.66em');
-    assert_contains('style="font-size:min(18rem, calc(92cqi / 6.60))"', $bound);
+    assert_contains('"fontSize":"min(18rem, max(calc(92cqi / 6.60), min(calc(92cqi / 3.96), 3rem)))"', $bound, 'ten characters on one line, or the six-letter word at up to 3rem on a phone (frm PR-2r)');
+    assert_contains('style="font-size:min(18rem, max(calc(92cqi / 6.60), min(calc(92cqi / 3.96), 3rem)))"', $bound);
     assert_true(!str_contains($bound, 'has-display-font-size'));
     assert_eq(['wordmark-name-bound', 'wordmark-size-pinned'], array_column($repairs, 'code'));
     $again = [];

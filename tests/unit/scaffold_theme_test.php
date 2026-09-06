@@ -734,7 +734,9 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     assert_contains('container-type: inline-size;', substr($css, (int) strpos($css, $rule), 200));
     $name = '.hero-composition--wordmark-stage .hero-composition__wordmark {';
     assert_contains($name, $css);
-    assert_contains('white-space: nowrap;', substr($css, (int) strpos($css, $name), 400), 'the name stays on one line at its pinned size');
+    $nameRule = substr($css, (int) strpos($css, $name), 500);
+    assert_contains('white-space: normal;', $nameRule, 'a two-word name may wrap on a phone (frm PR-2r)');
+    assert_contains('text-wrap: balance;', $nameRule);
     assert_contains('.hero-composition--wordmark-stage .hero-composition__facts {', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

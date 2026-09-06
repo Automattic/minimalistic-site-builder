@@ -682,9 +682,12 @@ final class ScaffoldThemeStep implements Step
             margin-block: 0 0.35em;
             line-height: 0.88;
             letter-spacing: -0.04em;
-            white-space: nowrap;
+            /* The pin keeps the whole name on one line where the container
+               is wide and lets a two-word name wrap to two large lines on a
+               phone (frm PR-2r); each word fits by construction. */
+            white-space: normal;
             overflow-wrap: normal;
-            text-wrap: nowrap;
+            text-wrap: balance;
         }
         .hero-composition--wordmark-stage .hero-composition__copy > p {
             max-width: 34rem;
