@@ -677,7 +677,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 133 | PR-4v | #584 | merged | a hue budget the brief states outranks the seed economy; monochrome keeps the cobalt accent | https://gist.github.com/matiasbenedetto/8949d4f087f0efe0b7326afafdf268ec |
 | 134 | PR-0k | #585 | merged | an invented persona that is not a full name is re-asked once; the site name follows the person | https://gist.github.com/matiasbenedetto/871a47e917b28a95e372ab082970b7d4 |
 | 135 | PR-8o | #586 | merged | the custom-motion scope check accepts the class anywhere in the first compound | https://gist.github.com/matiasbenedetto/d8f98127eee99316806a697f386a78c6 |
-| 136 | PR-3ah | | in PR | a section type that names an archetype sets the layout | (gist after the evidence build) |
+| 136 | PR-3ah | | in PR | a section type that names an archetype sets the layout | https://gist.github.com/matiasbenedetto/aa8a6efbf355b7122e9c243ea4890bd2 |
 
 ## 9. Iteration log (one line per loop turn)
 
