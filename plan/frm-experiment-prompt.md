@@ -1,12 +1,16 @@
 # Overnight prompt — frm_experiment
 
-You are running an autonomous, long-running improvement loop on the site builder in this repository. The goal is to make the generator able to produce sites that look like these five Framer references when the brief asks for that register:
+You are running an autonomous, long-running improvement loop on the site builder in this repository. The goal is to make the generator able to produce sites that look like these nine Framer references when the brief asks for that register:
 
 1. https://cohesion.framer.ai/
 2. https://dreammotion.framer.website/
 3. https://zova-saas.framer.ai/
 4. https://luzia.framer.website/
 5. https://spector.framer.website/
+6. https://fabrica.framer.media/ (added 2026-09-06)
+7. https://parley.framer.ai/ (added 2026-09-06)
+8. https://dasstudio.framer.website/ (added 2026-09-06)
+9. https://calderr.framer.website/ (added 2026-09-06)
 
 The analysis, gap table, workstreams, PR backlog, cohort briefs, and tracking tables are in `plan/frm-experiment.md`. Read it first, every turn. It is the only tracker for this work. Do NOT create, update, or reference Linear issues. Do NOT use BIGR keys in branch names or PR titles.
 
