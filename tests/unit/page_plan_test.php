@@ -2447,3 +2447,40 @@ test('a planned site-navigation section is removed because the header carries th
     assert_eq($filtered, PagePlanStep::removeHeaderNavigationSections($filtered, $warnings, 'home'));
     assert_eq($again, $warnings, 'a second pass adds no warning');
 });
+
+
+test('page-plan recovers the original plan when the model repair answers with a fraction of it (frm PR-3ag)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_repair_shrink_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+    $archetypes = ['full-bleed-cover', 'centered-stack', 'asymmetric-split', 'equal-card-grid', 'list-with-thumbnails', 'centered-stack'];
+    $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image', 'contrast'];
+    $sections = [];
+    foreach ($archetypes as $index => $archetype) {
+        $sections[] = plan_section([
+            'slug' => "section-{$index}",
+            'title' => "Section {$index}",
+            'type' => $index === 0 ? 'hero' : 'content',
+            'layout_archetype' => $archetype,
+            'background' => $backgrounds[$index],
+            'handoff' => 'Sits between its assigned neighbors.',
+        ]);
+    }
+    $llm = new FakeLlm();
+    // Six bands on six sections is rejected; the repair answers with the hero alone.
+    $llm->queueJson(['sections' => $sections]);
+    $llm->queueJson(['sections' => [$sections[0]]]);
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_true(count($delivered) >= 5, 'the six planned sections come back through the mechanical backstop, not three padded ones; got ' . count($delivered));
+    assert_eq('section-1', $delivered[1]['slug'], 'the original sections keep their identity');
+    $warnings = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains('the model repair answered with 1 section(s), so the original plan was recovered mechanically', $warnings);
+    assert_true(!str_contains($warnings, 'reviewed generic briefs were appended'), 'no generic padding');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
