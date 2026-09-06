@@ -676,7 +676,7 @@ final class ScaffoldThemeStep implements Step
            under it, and the optional facts ledger runs as a hairline row on
            the trailing side. The heading face and case come from the theme. */
         .hero-composition--wordmark-stage .hero-composition__copy {
-            max-width: none;
+            container-type: inline-size;
         }
         .hero-composition--wordmark-stage .hero-composition__wordmark {
             margin-block: 0 0.35em;

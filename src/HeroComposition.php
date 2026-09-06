@@ -1223,9 +1223,9 @@ final class HeroComposition
      * Bind the wordmark-stage headline to the site name and pin its size
      * (frm W2e). The level-1 heading in the copy region carries the site
      * name exactly, takes the wordmark class, and gets one explicit size
-     * that fills the measure on every screen: the viewport width divided by
-     * the name's estimated em length, capped so a short name never runs
-     * past 18rem. The headline fit leaves an explicit size alone, so the pin
+     * that fills the measure on every screen: the copy group's inline size
+     * (a container) divided by the name's estimated em length, capped so a
+     * short name never runs past 18rem. The headline fit leaves an explicit size alone, so the pin
      * survives; the theme's own case transform still applies.
      *
      * @param list<array<string,mixed>> $repairs
@@ -1251,7 +1251,10 @@ final class HeroComposition
             }
             $text = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
             $chars = max(1, mb_strlen($siteName, 'UTF-8'));
-            $size = 'min(18rem, calc(92vw / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '') . '))';
+            // Container units, not viewport units (frm W2e): the copy group is
+            // capped at the content size, so the name fills the group's own
+            // inline size on every screen instead of wrapping at the cap.
+            $size = 'min(18rem, calc(92cqi / ' . number_format($chars * self::WORDMARK_CHAR_EM, 2, '.', '') . '))';
             $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
             $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-display-font-size'));
             if (!in_array(self::WORDMARK_CLASS, $classes, true)) {
