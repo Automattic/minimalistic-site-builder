@@ -179,6 +179,12 @@ final class ScaffoldThemeStep implements Step
             margin-right: 0 !important;
             align-self: stretch;
         }
+        /* A card whose text wrapper is not marked card-body and carries no
+           padding of its own takes the md inset (frm PR-5l): luzia-like24's
+           painted flush cards set their copy flush against the card edge. */
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group:not(.card-body):not([style*="padding"]) {
+            padding: var(--wp--preset--spacing--md, 1.5rem);
+        }
         /* The overlap panel deliberately retains a one-rem reveal on each side.
            Its explicit width keeps the fixed margins inside the card box. */
         .wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {
