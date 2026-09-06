@@ -2666,6 +2666,11 @@ test('a letterform tradition the brief states outranks the seed (frm PR-5f)', fu
     assert_eq('transitional', ConceptSeeds::statedTypeRegister('Near-black ground, serif display headings with two-tone emphasis.'));
     assert_eq('mono', ConceptSeeds::statedTypeRegister('monospace labels everywhere'));
     assert_eq('geometric', ConceptSeeds::statedTypeRegister('a geometric sans for the display'));
+    // The calderr brief names the hero name's face (frm PR-5o); a hyphenated sans-serif never reads as a serif.
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('Off-white page with every letter in one cobalt blue: a giant serif name as the hero headline, hairline rules with small labels between sections.'));
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('a serif headline over a photo'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('a giant sans-serif name as the hero headline'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('the sans wordmark set huge'));
     assert_eq(null, ConceptSeeds::statedTypeRegister('Create a website for a Georgian restaurant.'), 'a silent brief decides nothing');
     assert_eq(null, ConceptSeeds::statedTypeRegister('a boldness of flavour, monotone walls'), 'a phrase must be a whole word');
     foreach (['grotesque', 'transitional', 'mono', 'geometric', 'slab', 'didone', 'display-serif', 'script', 'condensed', 'humanist'] as $register) {

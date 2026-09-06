@@ -78,8 +78,18 @@ final class ConceptSeeds
         'grotesque'     => [
             'bold black type', 'bold black sans', 'grotesk', 'grotesque', 'bold sans', 'tight sans', 'sans-serif headings',
             'sans headings', 'sans display', 'black sans', 'heavy sans', 'swiss type', 'neo-grotesque',
+            // A brief that names the hero name or headline's face names the
+            // tradition too (frm PR-5o).
+            'sans name', 'sans headline', 'sans headlines', 'sans wordmark', 'sans title', 'giant sans', 'sans-serif name',
+            'sans-serif headline', 'sans-serif wordmark',
         ],
-        'transitional'  => ['serif headings', 'serif display', 'serif type', 'editorial serif', 'classic serif', 'bookish serif'],
+        'transitional'  => [
+            'serif headings', 'serif display', 'serif type', 'editorial serif', 'classic serif', 'bookish serif',
+            // calderr-like20 asked for "a giant serif name as the hero
+            // headline" and the seed's grotesque won (frm PR-5o).
+            'serif name', 'serif headline', 'serif headlines', 'serif wordmark', 'serif title', 'giant serif', 'big serif',
+            'large serif', 'serif hero',
+        ],
     ];
 
     /** The letterform tradition a brief names in so many words, or null. */
