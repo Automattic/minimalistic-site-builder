@@ -49,9 +49,9 @@ function step_temperatures(): array
 }
 
 /** Resolve one step's temperature (delegates to StepDefaults). */
-function llm_temperature(string $envSuffix, ?float $default): ?float
+function llm_temperature(string $envSuffix, ?float $default, bool $inheritGlobal = true): ?float
 {
-    return StepDefaults::temperature($envSuffix, $default);
+    return StepDefaults::temperature($envSuffix, $default, $inheritGlobal);
 }
 
 /**

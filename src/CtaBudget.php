@@ -35,9 +35,6 @@ final class CtaBudget
      */
     public static function apply(string $markup, int $keep, ?string $preferLabel = null): array
     {
-        if (!str_contains($markup, 'wp:button')) {
-            return ['markup' => $markup, 'kept' => 0, 'demoted' => 0, 'notes' => []];
-        }
         $doc = BlockMarkup::parse($markup);
         if (
             $doc->unclosedIndices() !== []
@@ -84,17 +81,16 @@ final class CtaBudget
             return ['markup' => $markup, 'kept' => $kept, 'demoted' => 0, 'notes' => []];
         }
 
-        /** @var array<int|string,array{row:?int,indices:list<int>}> $byRow demoted buttons grouped by their wp:buttons row */
+        /** @var array<int|string,list<int>> $byRow demoted button indices per wp:buttons row (int key) or solo button ('solo:N') */
         $byRow = [];
         foreach ($demote as $button) {
-            $key = $button['row'] ?? 'solo:' . $button['index'];
-            $byRow[$key]['row'] = $button['row'];
-            $byRow[$key]['indices'][] = $button['index'];
+            $byRow[$button['row'] ?? 'solo:' . $button['index']][] = $button['index'];
         }
 
         $ops = [];
         $notes = [];
-        foreach ($byRow as ['row' => $row, 'indices' => $indices]) {
+        foreach ($byRow as $key => $indices) {
+            $row = is_int($key) ? $key : null;
             $rowAttrs = $row === null ? [] : ($doc->attrs($row) ?? []);
             $paragraphs = [];
             foreach ($indices as $i) {

@@ -305,7 +305,7 @@ final class SiteSpecStep implements Step
             if (mb_substr($lowerPhrase, 0, 1) !== mb_substr($lowerName, 0, 1)) {
                 continue;
             }
-            // Byte-based: one accent slip costs 2 and still fits the budget.
+            // Byte-based: one accent slip costs 2 and spends the whole budget on its own.
             if (levenshtein($lowerPhrase, $lowerName) <= 2) {
                 $candidates[$phrase] = true;
             }
@@ -337,10 +337,7 @@ final class SiteSpecStep implements Step
     private static function replaceIdentityToken(mixed $value, string $from, string $to): mixed
     {
         if (is_array($value)) {
-            array_walk_recursive($value, static function (mixed &$item) use ($from, $to): void {
-                $item = self::replaceIdentityToken($item, $from, $to);
-            });
-            return $value;
+            return array_map(static fn (mixed $item): mixed => self::replaceIdentityToken($item, $from, $to), $value);
         }
         if (!is_string($value)) {
             return $value;

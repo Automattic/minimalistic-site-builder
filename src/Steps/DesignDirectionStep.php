@@ -672,7 +672,7 @@ final class DesignDirectionStep implements Step
      * prose. Passing them through is what makes the vocabularies levers rather
      * than bookkeeping.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
+     * @param array{text:string,ground?:?string,register?:?string,accent?:?string,tint?:?string,type_register?:?string,color_economy?:?string} $seed
      * @param list<string> $choice the report lines describing how this seed was picked
      * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
      */

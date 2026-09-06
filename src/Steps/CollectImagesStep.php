@@ -399,9 +399,6 @@ final class CollectImagesStep implements Step
     public static function foldGuessedAssetPaths(string $content, array $assetsOnDisk): array
     {
         $folded = [];
-        if (!str_contains($content, '/wp-content/themes/')) {
-            return ['content' => $content, 'folded' => $folded];
-        }
         $fold = static function (string $value) use ($assetsOnDisk, &$folded): ?string {
             // The value is already bounded by its quotes, so a basename may
             // carry spaces; slugification below turns them into hyphens.
@@ -414,7 +411,7 @@ final class CollectImagesStep implements Step
                 return null;
             }
             $extension = strtolower(pathinfo($basename, PATHINFO_EXTENSION)) === 'png' ? 'png' : 'jpg';
-            $to = 'theme:./assets/' . ProjectStore::slugify(pathinfo($basename, PATHINFO_FILENAME)) . '.' . $extension;
+            $to = 'theme:./assets/' . ProjectStore::slugify(pathinfo($basename, PATHINFO_FILENAME), 'image') . '.' . $extension;
             $folded[$value] = $to;
             return $to;
         };
@@ -872,7 +869,7 @@ final class CollectImagesStep implements Step
      */
     private static function synthesizeFilename(string $subject, string $literal): string
     {
-        $slug = rtrim(substr(ProjectStore::slugify($subject), 0, 40), '-') ?: 'image';
+        $slug = rtrim(substr(ProjectStore::slugify($subject, 'image'), 0, 40), '-');
         return $slug . '-' . substr(sha1($literal), 0, 8) . '.jpg';
     }
 

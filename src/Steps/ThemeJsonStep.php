@@ -14,6 +14,7 @@ use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
@@ -3130,8 +3131,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $byPath[$m[1]][] = $repair;
         }
         foreach ($byPath as $path => $rows) {
-            $before = ContrastFixStep::pathValue($authored, $path);
-            $after = ContrastFixStep::pathValue($delivered, $path);
+            $before = JsonDecoder::path($authored, $path);
+            $after = JsonDecoder::path($delivered, $path);
             if (self::sameJsonValue($before, $after)) {
                 continue;
             }
