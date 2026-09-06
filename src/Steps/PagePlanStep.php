@@ -1661,6 +1661,24 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!in_array($archetype, self::ARCHETYPES, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
                     . implode(', ', self::ARCHETYPES);
+            } elseif (
+                in_array(strtolower($type), self::ARCHETYPES, true)
+                && strtolower($type) !== $archetype
+                && !($front && count($out) === 0)
+            ) {
+                // A type that names an archetype in so many words is the
+                // stated layout (frm PR-3ah): dasstudio-like22 typed its
+                // clients row `logo-strip` and laid it out as a centered
+                // stack, so the author wrote a list of client categories.
+                // The first section on the front page keeps the code-assigned
+                // hero projection.
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
+                    $archetype,
+                    strtolower($type),
+                    'the section type names an archetype, so the layout follows it',
+                );
+                $archetype = strtolower($type);
             }
             $background = trim((string) ($section['background'] ?? ''));
             if (!in_array($background, self::BACKGROUNDS, true)) {
