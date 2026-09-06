@@ -175,6 +175,13 @@ final class FooterComposition
             'footer band with the name', 'footer with the wordmark', 'wordmark set huge in the footer',
             'name set huge', 'footer with a big wordmark', 'giant wordmark', 'huge wordmark',
         ],
+        // frm PR-4r: luzia's brief names "a footer band with a 3D object" and
+        // the hash pick landed on status-readout, a mono spec listing.
+        'image-plinth' => [
+            'footer band with a 3d object', 'footer with a 3d object', 'footer band with an object', 'footer with an object',
+            'object in the footer', '3d object in the footer', 'footer with a 3d render', 'footer band with a render',
+            'plinth footer', 'footer plinth', 'footer with a product shot', 'footer band with a product shot',
+        ],
         'newsletter-columns' => ['newsletter footer', 'newsletter signup footer', 'footer with link columns', 'link columns footer', 'four-column footer', '4-col footer', 'four column footer'],
         'contact-sheet' => ['contact sheet footer', 'footer with contact details', 'contact details footer'],
         'cover-coda' => ['photo footer', 'footer with a photo', 'image footer', 'footer band with a photo', 'footer band with an image'],

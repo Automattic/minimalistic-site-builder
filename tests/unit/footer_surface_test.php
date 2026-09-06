@@ -249,3 +249,10 @@ test('a stated wordmark footer in more words reaches sunken-wordmark (frm PR-4l)
     assert_eq(null, FooterComposition::statedInBrief('the hero is a huge uppercase wordmark with a one-line tagline'), 'a wordmark hero is not a footer');
     assert_eq(null, FooterComposition::statedInBrief('one dark photo panel with a giant lowercase wordmark'), 'a lowercase wordmark hero is not a footer');
 });
+
+
+test('a footer band with a 3D object the brief names reaches image-plinth (frm PR-4r)', function () {
+    assert_eq('image-plinth', FooterComposition::statedInBrief('Playful personal portfolio with floating colorful 3D objects, a dark process zigzag, and a dark CTA plus footer band with a 3D object.'));
+    assert_eq('image-plinth', FooterComposition::statedInBrief('closing with a plinth footer'));
+    assert_eq(null, FooterComposition::statedInBrief('floating colorful 3D objects in the hero'), 'objects elsewhere do not name the footer');
+});
