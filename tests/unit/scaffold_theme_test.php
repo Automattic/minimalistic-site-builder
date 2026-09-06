@@ -750,3 +750,32 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('scaffold-theme makes the ink follow a fill inside a dark band (frm PR-4x)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+    // dasstudio-like24: card items on a contrast band took the model's base
+    // fill and kept the band's base ink. Inside a dark band a card item gets a
+    // translucent plate and inherits the band's ink instead.
+    assert_contains(
+        ":is(.has-contrast-background-color, .has-primary-background-color) .item-pattern__item:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless):not(.has-background) {\n"
+            . "    background-color: color-mix(in srgb, currentColor 8%, transparent);\n"
+            . '}',
+        $css,
+    );
+    // A block that paints itself base or band inside a dark band, without an ink of its own, takes contrast ink.
+    assert_contains(
+        ":is(.has-contrast-background-color, .has-primary-background-color) :is(.has-base-background-color, .has-band-background-color):not(.has-text-color) {\n"
+            . "    color: var(--wp--preset--color--contrast);\n"
+            . '}',
+        $css,
+    );
+    // A block that paints itself contrast or primary without an ink of its own takes base ink; covers own their overlay ink.
+    assert_contains(
+        ":is(.has-contrast-background-color, .has-primary-background-color):not(.has-text-color):not(.wp-block-cover) {\n"
+            . "    color: var(--wp--preset--color--base);\n"
+            . '}',
+        $css,
+    );
+});
