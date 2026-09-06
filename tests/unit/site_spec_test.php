@@ -1152,6 +1152,57 @@ test('site-spec re-asks once when the model names the site with a category word 
 });
 
 
+test('an invented persona that is not a full name is a placeholder (frm PR-0k)', function () {
+    $invented = static fn (string $persona): array => ['persona_name' => $persona, 'invented' => ['name', 'persona_name']];
+    foreach (['Amsterdam Designer', 'Maven', 'Studio Nox', 'Web Designer', 'The Designer', 'Berlin Design Studio'] as $placeholder) {
+        assert_true(SiteSpecStep::placeholderPersona($invented($placeholder)), "{$placeholder} is a placeholder");
+    }
+    foreach (['Miriam van der Berg', 'Marina Chen', 'Alexia Popescu', "Siobhan O'Neill", 'Jean-Luc Moreau'] as $person) {
+        assert_true(!SiteSpecStep::placeholderPersona($invented($person)), "{$person} is a person");
+    }
+    assert_true(!SiteSpecStep::placeholderPersona(['persona_name' => 'Maven', 'invented' => ['name']]), 'a stated persona is never judged');
+    assert_true(!SiteSpecStep::placeholderPersona(['persona_name' => '', 'invented' => ['persona_name']]), 'a non-personal site has no persona');
+    assert_true(!SiteSpecStep::placeholderPersona([]));
+});
+
+test('site-spec re-asks once when the model invents a placeholder persona (frm PR-0k)', function () {
+    $base = ['title' => 'Web Designer Portfolio', 'description' => 'd', 'site_type' => 'personal portfolio', 'topic' => 't', 'area' => 'a', 'audience' => 'u', 'visual_vibe' => 'v', 'language' => 'en'];
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Amsterdam Design Studio', 'persona_name' => 'Amsterdam Designer', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Studio Miriam', 'persona_name' => 'Miriam van der Berg', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('Miriam van der Berg', $spec['persona_name']);
+    assert_eq('Studio Miriam', $spec['name']);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_contains('RETRY: your previous answer invented the persona "Amsterdam Designer"', $llm->calls[1]['prompt']);
+    assert_eq('site-spec-persona-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    assert_contains('field persona_name authored \\"Amsterdam Designer\\" delivered \\"Miriam van der Berg\\"', json_encode($project->readJson('warnings.json')));
+
+    // A second placeholder ships as authored with a warning, not a third call.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Maven', 'persona_name' => 'Maven', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Maven Studio', 'persona_name' => 'Maven', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('Maven', $project->readJson('siteSpec.json')['persona_name']);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_contains('delivered as authored', json_encode($project->readJson('warnings.json')));
+
+    // A stated persona costs one call even when it is one word.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Cher', 'persona_name' => 'Cher', 'invented' => []] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(1, $llm->completeJsonCalls, 'a stated persona is never re-asked');
+
+    // A generic site name still takes the name retry, never both.
+    [$project, $llm] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Portfolio', 'persona_name' => 'Maven', 'invented' => ['name', 'persona_name']] + $base);
+    $llm->queueJson(['name' => 'Mara Veldkamp', 'persona_name' => 'Mara Veldkamp', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_eq('site-spec-name-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+});
+
 test('statedNameNear never restores a generated name to an initialism in the brief (frm PR-0j)', function () {
     $brief = 'Create a portfolio for a designer in Lisbon. Light page, FAQ, and a dark CTA plus footer band with a 3D object.';
     assert_eq(null, SiteSpecStep::statedNameNear($brief, 'Carta'), 'CTA is a thing in the brief, not a brand');

@@ -163,6 +163,12 @@ final class SiteSpecStep implements Step
                 // One fresh sample with the rule quoted; a second generic
                 // answer ships with a warning rather than a third call.
                 $generic = is_array($spec) ? trim((string) ($spec['name'] ?? '')) : '';
+                // An invented persona that is not a person's full name is a
+                // placeholder (frm PR-0k): calderr-like20 shipped "Amsterdam
+                // Designer" and the site "Amsterdam Design Studio" followed it.
+                $placeholder = is_array($spec) && self::placeholderPersona($spec)
+                    ? trim((string) $spec['persona_name'])
+                    : '';
                 if ($generic !== '' && self::genericName($generic)) {
                     $retry = $this->llm->completeJson(
                         $rendered . "\n\nRETRY: your previous answer named the site \"{$generic}\", which is a generic"
@@ -179,6 +185,29 @@ final class SiteSpecStep implements Step
                         $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered as authored"
                             . '; disposition a generic category word is not a site name, and the retry answered '
                             . ($retried === '' ? 'nothing usable' : "\"{$retried}\"");
+                    }
+                } elseif ($placeholder !== '') {
+                    $retry = $this->llm->completeJson(
+                        $rendered . "\n\nRETRY: your previous answer invented the persona \"{$placeholder}\", which is not"
+                        . " a person's full name. This is a personal site about one person: give that person a plausible"
+                        . ' full name (a given name and a family name that fit the language and place), name the site after'
+                        . ' that person or their studio, list both in "invented", and keep every other fact as before.',
+                        $this->withOptions(['log_label' => $this->id() . '-persona-retry']),
+                    );
+                    $retriedPersona = is_array($retry) ? trim((string) ($retry['persona_name'] ?? '')) : '';
+                    $retriedName = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
+                    if (
+                        is_array($retry) && $retriedPersona !== '' && !self::placeholderPersona($retry)
+                        && $retriedName !== '' && !self::genericName($retriedName)
+                    ) {
+                        $spec = $retry;
+                        $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered \"{$retriedPersona}\""
+                            . " (site name \"{$generic}\" to \"{$retriedName}\"); disposition an invented persona must be a"
+                            . " person's full name, so one fresh sample replaced it";
+                    } else {
+                        $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered as authored"
+                            . "; disposition an invented persona must be a person's full name, and the retry answered "
+                            . ($retriedPersona === '' ? 'nothing usable' : "\"{$retriedPersona}\"");
                     }
                 }
             } catch (GeneratedJsonException $e) {
@@ -274,6 +303,38 @@ final class SiteSpecStep implements Step
         'labs', 'media', 'marketing', 'personal', 'professional', 'online', 'and', 'of', 'the',
         'atelier', 'workshop', 'practice',
     ];
+
+    /**
+     * Whether an invented persona is a placeholder rather than a person's
+     * full name (frm PR-0k): one word ("Maven"), or any category word
+     * ("Amsterdam Designer", "Studio Nox"). A persona the prompt stated is
+     * never judged: the model lists only invented keys in `invented`.
+     *
+     * @param array<mixed> $spec
+     */
+    public static function placeholderPersona(array $spec): bool
+    {
+        $persona = $spec['persona_name'] ?? '';
+        if (!is_string($persona) || trim($persona) === '') {
+            return false;
+        }
+        $invented = $spec['invented'] ?? [];
+        if (!is_array($invented) || !in_array('persona_name', $invented, true)) {
+            return false;
+        }
+        $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $persona)), 'UTF-8');
+        $text = trim((string) preg_replace('/[^\p{L}\p{N}\' -]+/u', '', $text));
+        $words = preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (count($words) < 2) {
+            return true;
+        }
+        foreach ($words as $word) {
+            if (in_array($word, self::GENERIC_WORDS, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /** Whether a site name is a generic category word rather than a name. */
     public static function genericName(string $name): bool
