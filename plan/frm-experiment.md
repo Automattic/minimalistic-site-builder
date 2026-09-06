@@ -410,6 +410,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 91 | #541 | W2 (PR-2o) | Read a stated cover hero in more words (frm) | merged | gist c4856ba18107f04d086e61494829b9b9: the nine briefs replayed (parley now reads cinematic-safe-zone) + the parley-like selection with its own meta and seed (portrait-backdrop to cinematic-safe-zone); no build | db2041bc |
 | 92 | #542 | W4 (PR-4l) | Read a stated wordmark footer in more words (frm) | merged | gist 070c3850eca4db83395bfc7ce39b23a2: the nine briefs replayed against the cohort-10 footers (fabrica, dasstudio and calderr now read sunken-wordmark); no build | 3658458d |
 | 93 | #543 | W2 (PR-2p) | Let a canvas the brief states outrank the model commitment (frm) | merged | gist f3588980ff3467ea88284f285ee22de5: the nine briefs replayed (only parley states a canvas) + the parley-like direction replayed through the helper (full-bleed to framed); no build | 3f87c8bc |
+| 94 | #544 | W4 (PR-4n) | Commit the rounded band geometry a brief states (frm) | merged | gist 19f8d939534d0c963d0f8c52d3738a09: the nine briefs replayed against the cohort-10 band geometry (fabrica and luzia read rounded; both had committed rounded already, so the reader makes it deterministic); no build | c80020fb |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -515,6 +516,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 100: PR-2o #541 merged. Next: PR-4l on branch frm/wordmark-footer-phrases, then PR-2p (stated framed canvas) and PR-4n (stated rounded panels), then cohort-11 of nine sites.
 - 2026-09-06 turn 101: PR-4l #542 merged. Next: PR-2p on branch frm/stated-canvas (a stated rounded frame commits the framed canvas through DesignDirectionStep::withStatedDirection), then PR-4n on the same helper, then cohort-11.
 - 2026-09-06 turn 102: PR-2p #543 merged (DesignDirectionStep::withStatedDirection; CI watches now stop early, so the run is polled in the foreground). Next: PR-4n on branch frm/stated-rounded-panels, then PR-6b, then cohort-11.
+- 2026-09-06 turn 103: PR-4n #544 merged. Next: PR-6b on branch frm/stated-numbered-commits-numeral, then cohort-11 (nine sites) and its critique.
 
 ## 10. Parked / rejected
 

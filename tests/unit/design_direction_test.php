@@ -2754,3 +2754,18 @@ test('rounded panels the brief states commit the rounded band geometry (frm PR-4
     assert_eq(['band_geometry' => 'rounded'], DesignDirectionStep::withStatedDirection(['band_geometry' => 'rounded'], $meta, false, $repairs), 'already rounded: no repair');
     assert_eq([], $repairs);
 });
+
+
+test('a stated numbered row commits the ghost numeral when the direction committed none (frm PR-6b)', function () {
+    $meta = ['original_prompt' => 'four numbered feature cards with one raised, a split of a feature list beside an app mockup'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'band_geometry' => 'square', 'step_numeral' => 'none'], $meta, false, $repairs);
+    assert_eq('ghost', $out['step_numeral']);
+    assert_eq(1, count($repairs));
+    assert_contains('field step_numeral authored "none" delivered "ghost"', $repairs[0]);
+    $repairs = [];
+    assert_eq('chip', DesignDirectionStep::withStatedDirection(['step_numeral' => 'chip'], $meta, false, $repairs)['step_numeral'], 'a committed numeral stands');
+    assert_eq([], $repairs);
+    assert_eq('none', DesignDirectionStep::withStatedDirection(['step_numeral' => 'none'], ['prompt' => 'a dark landing page'], false, $repairs)['step_numeral'], 'a silent brief changes nothing');
+    assert_eq([], $repairs);
+});
