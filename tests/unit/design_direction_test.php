@@ -2699,3 +2699,14 @@ test('the marquee-name hero comes only from a brief that names it; a hash pick o
     assert_eq($before, DesignDirectionStep::selectHeroRecipe([], $other, 'Committed seed', $w, $note));
     assert_eq(null, $note);
 });
+
+
+test('a phrase that names the page outranks a loose colour word named later (frm PR-4m)', function () {
+    assert_eq('light', GroundKey::statedInBrief('Create a site for a digital agency. Light grey page with rounded near-black panels: the hero is one dark photo panel.'));
+    assert_eq('light', GroundKey::statedInBrief('Off-white page with a near-black footer band.'));
+    assert_eq('dark', GroundKey::statedInBrief('Dark page with white cards and on-white captions.'), 'the page phrase wins over the loose words either way');
+    assert_eq('dark', GroundKey::statedInBrief('white text on a dark ground'), 'the reviewed dark-first order holds for loose words');
+    assert_eq('dark', GroundKey::statedInBrief('Near-black ground, serif display headings'), 'a page-level dark phrase still reads dark');
+    assert_eq('light', GroundKey::statedInBrief('Light page, then a dark page later in the story'), 'the earliest page phrase wins when both appear');
+    assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant.'));
+});

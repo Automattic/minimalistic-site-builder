@@ -404,6 +404,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 86 | #536 | W2 (PR-2m) | Make the marquee-name hero a stated-only recipe (frm) | merged | gist 2e49dd1b12dfcd693bf3ba4baefc263a: luzia-like16 before crop + selection replay on 33 builds (one delivered recipe changes) | d324cc52 |
 | 87 | #537 | W0 (PR-0b) | Add the four second-set reference briefs (frm) | merged | briefs, reference list, token sheet 1b, prompt lines; cohort-10 built nine sites on it | 91d398fc |
 | 88 | #538 | W2e | Add the wordmark-stage hero recipe (frm) | merged | gist c80bb55678b157ef324bc29e4d019adf: dasstudio-like baseline hero (portrait plate) / dasstudio-like2 evidence build (Studio Noir set giant, one line, facts ledger) on desktop and at 390; the first probe wrapped the name, the pin moved to container units | d3522a93 |
+| 89 | #539 | W5 (PR-5i) | Phone-fit section headings by their longest word (frm) | merged | gist 5afc0c9ab6cab7ceefec975d620c02c3: dasstudio-like2 at 390 probed before (scrollWidth 455, the h2 word CONVERSATION at 56.6px) / after (twelve pins mirrored with inline styles, scrollWidth 390) + replay of the pins | d670e795 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -504,6 +505,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-06 turn 95: PR-2m #536 merged (marquee-name is a stated-only hero recipe). The user asked to continue the loop with four more references beside the original five: fabrica.framer.media, parley.framer.ai, dasstudio.framer.website, calderr.framer.website. Captured all four at 1440px and 390px, read their tokens (section 1b), wrote their briefs (section 5, rows 6 to 9) as PR-0b on branch frm/refs-second-set. Next: build cohort-10 with all nine briefs and record the baseline rows of the four new sites.
 - 2026-09-06 turn 96: PR-0b #537 merged. Cohort-10 built with images on the PR-0b commit (nine sites; 102/102 images). The four new sites scored as baseline-2 rows in section 7: fabrica 2/2/3, parley 3/3.5/3.5, dasstudio 3/3.5/3.5, calderr 3.5/4/4. Common gap: three of the four references open on a giant wordmark or name, which no hero recipe covers. New rows under W2e / second set: W2e wordmark-stage hero (P0, next), PR-4m ground phrase precedence, PR-2o stated cover hero phrases, PR-4l wordmark footer phrases, PR-4n stated rounded panels, PR-6b stated numbered row commits a numeral. The five original sites of cohort-10 are reviewed on the next turn.
 - 2026-09-06 turn 97: W2e #538 merged (wordmark-stage hero: the site name set giant, container-pinned, optional facts ledger; stated phrases for the three second-set briefs). Next: PR-5i on branch frm/section-heading-phone-fit (P0: section heading word overflow at 390), then PR-4m, PR-2o, PR-4l.
+- 2026-09-06 turn 98: PR-5i #539 merged (section headings get a measured phone pin). Next: PR-4m on branch frm/ground-page-phrase (a page-level ground phrase outranks a loose colour word), then PR-2o and PR-4l.
 
 ## 10. Parked / rejected
 
