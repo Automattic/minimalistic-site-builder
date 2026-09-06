@@ -228,6 +228,8 @@ final class SiteSpecStep implements Step
         'design studio', 'agency', 'company', 'business', 'brand', 'shop', 'store', 'blog', 'personal site',
         'personal website', 'web design', 'web designer', 'designer', 'freelancer', 'consultant', 'untitled',
         'new site', 'my site', 'my website', 'my portfolio', 'design portfolio', 'developer portfolio',
+        // frm PR-0g: calderr-like13 was named "Atelier".
+        'atelier', 'workshop', 'practice', 'collective', 'the studio', 'the atelier', 'design practice',
     ];
 
     /**
@@ -241,6 +243,7 @@ final class SiteSpecStep implements Step
         'digital', 'brand', 'branding', 'company', 'business', 'shop', 'store', 'blog', 'home', 'page', 'freelance',
         'freelancer', 'consultant', 'consulting', 'services', 'solutions', 'group', 'collective', 'works', 'lab',
         'labs', 'media', 'marketing', 'personal', 'professional', 'online', 'and', 'of', 'the',
+        'atelier', 'workshop', 'practice',
     ];
 
     /** Whether a site name is a generic category word rather than a name. */

@@ -976,10 +976,10 @@ test('a generic category word is not a site name (frm PR-0d)', function () {
     foreach (['Portfolio', 'portfolio', 'The Portfolio', 'My Website', 'Design Studio', 'Agency', 'Untitled'] as $generic) {
         assert_true(SiteSpecStep::genericName($generic), "{$generic} is generic");
     }
-    foreach (['Noa', 'Atlas', 'Studio Basis', 'Meridian', 'Portfolio Kitchen', 'Bread & Salt', 'Alexandra Popescu', 'Studio Nox', 'Elevate Studio', ''] as $name) {
+    foreach (['Noa', 'Atlas', 'Studio Basis', 'Meridian', 'Portfolio Kitchen', 'Bread & Salt', 'Alexandra Popescu', 'Studio Nox', 'Elevate Studio', 'Atelier Bloom', 'Atelier Lisbon', ''] as $name) {
         assert_true(!SiteSpecStep::genericName($name), "{$name} is a name");
     }
-    foreach (['Studio Portfolio', 'Creative Design Agency', 'Web Design Studio', 'Digital Marketing Agency', 'The Design Lab'] as $generic) {
+    foreach (['Studio Portfolio', 'Creative Design Agency', 'Web Design Studio', 'Digital Marketing Agency', 'The Design Lab', 'Atelier', 'Design Practice', 'The Workshop'] as $generic) {
         assert_true(SiteSpecStep::genericName($generic), "{$generic} is made only of category words (frm PR-0e)");
     }
 });
