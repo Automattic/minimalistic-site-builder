@@ -151,6 +151,11 @@ final class ImagePromptComposer
         if (!$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
             && ImageKind::namesPerson($subject . ' ' . $pageContext)) {
             $kindClause = ImageKind::portraitClause();
+            // The site-wide grade of a ui-mockup site describes interface
+            // renders (flat diffuse light, no shadows); on a person it drew
+            // flat illustrated figures (frm PR-7l). The portrait clause
+            // carries the look on its own.
+            $gradeClause = '';
         }
         if ($kindClause !== '') {
             $gradeClause = trim($gradeClause . ' ' . $kindClause);
