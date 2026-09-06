@@ -1,5 +1,5 @@
 {
-  "$comment": "Cohort briefs for the frm_experiment branch (see plan/frm-experiment.md). Each brief names the look it wants so the direction step can reach one of the five Framer reference registers. Build all: php bin/build-demos.php --file=eval/frm-prompts.json --with-images. Build one: add --only=<slug>.",
+  "$comment": "Cohort briefs for the frm_experiment branch (see plan/frm-experiment.md). Each brief names the look it wants so the direction step can reach one of the nine Framer reference registers. Build all: php bin/build-demos.php --file=eval/frm-prompts.json --with-images. Build one: add --only=<slug>.",
   "version": 1,
   "prompts": [
     {
@@ -36,6 +36,34 @@
       "site_type": "agency",
       "reference": "https://spector.framer.website/",
       "prompt": "Create a site for a design agency in New York. Dark hero with a full-bleed high-contrast portrait, metadata in the corners, a three-line uppercase display headline with a red-to-cream gradient, edge-to-edge spread navigation, a 2x2 full-bleed project grid, a MORE PROJECTS marquee, hairline-separated statement lines, an awards bento, huge stat counters, and a ghost wordmark footer."
+    },
+    {
+      "id": "fabrica-like",
+      "slug": "fabrica-like",
+      "site_type": "agency",
+      "reference": "https://fabrica.framer.media/",
+      "prompt": "Create a site for a digital design and marketing agency. Light grey page with rounded near-black panels: the hero is one dark photo panel with a giant lowercase wordmark, a short services list in one corner and a contact card in the other, then a client logo strip, a projects grid where every image carries a label bar, a proof row of two stats, a dark services band with accordion rows, testimonials with one big rating figure, a four-figure stat ledger, pricing, a team row, FAQ, journal cards, a dark closing panel that says let's talk, and a footer with a huge wordmark."
+    },
+    {
+      "id": "parley-like",
+      "slug": "parley-like",
+      "site_type": "saas",
+      "reference": "https://parley.framer.ai/",
+      "prompt": "Create a landing page for an AI assistant product for busy teams. Warm off-white page, one painted desert-sky cover hero in a rounded frame with a centered white headline that carries italic emphasis, a single orange accent on the buttons, a trusted-by logo row, four numbered feature cards with one raised, a split of a feature list beside an app mockup, testimonial cards, three pricing tiers with the middle one on a painted card, a large product mockup, FAQ, an integrations icon grid, a closing painted CTA panel, and a footer with a giant ghost wordmark."
+    },
+    {
+      "id": "dasstudio-like",
+      "slug": "dasstudio-like",
+      "site_type": "agency",
+      "reference": "https://dasstudio.framer.website/",
+      "prompt": "Create a site for a creative design studio in Berlin. White page, black grotesque type: the hero is a huge uppercase wordmark with a one-line tagline, two buttons and a small facts ledger on the right, then an edge-to-edge photo strip, a who-we-are statement with a side label, a logo grid, giant uppercase section titles with counts, a 2x2 project grid, services as accordion rows, a four-step flow, a photo band with two stats, testimonial cards, two pricing cards, FAQ, journal cards, a closing CTA, and a footer with a huge wordmark."
+    },
+    {
+      "id": "calderr-like",
+      "slug": "calderr-like",
+      "site_type": "portfolio",
+      "reference": "https://calderr.framer.website/",
+      "prompt": "Create a personal portfolio for a web designer in Amsterdam. Off-white page with every letter and line in one cobalt blue: a short intro paragraph top-left, a rounded blue panel of service pill tags top-right, a giant serif name as the hero headline, hairline rules with small labels between sections, a 2x2 grid of work images with blue captions, a client logo row, an about paragraph with four stats and a portrait, an experience ledger of roles and years, and a solid blue footer band with the name set huge."
     }
   ]
 }

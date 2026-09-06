@@ -11,6 +11,13 @@ Reference sites (analyzed 2026-09-04 at 1920px, tokens read from computed styles
 4. https://luzia.framer.website/ — freelancer portfolio, light with dark bands
 5. https://spector.framer.website/ — design agency, dark hero, editorial-brutalist
 
+Second reference set (added 2026-09-06 at the user's request, captured at 1440px and 390px):
+
+6. https://fabrica.framer.media/ — digital agency, light grey page with rounded near-black panels, giant section titles
+7. https://parley.framer.ai/ — AI assistant SaaS, warm off-white, painted desert hero, orange accent, italic emphasis
+8. https://dasstudio.framer.website/ — Berlin design studio, black uppercase grotesque on white, facts ledger, index numerals
+9. https://calderr.framer.website/ — personal portfolio, cobalt blue on off-white, giant serif name, hairline labels
+
 ## 1. Per-site token sheet
 
 | Token | Cohesion | DreamMotion | Zova | Luzia | Spector |
@@ -32,6 +39,24 @@ Reference sites (analyzed 2026-09-04 at 1920px, tokens read from computed styles
 | Footer | 4 link columns + credit + giant clipped wordmark | 3 columns + description + social + credit | newsletter + 3 columns + social | dark band: CTA + 3 columns + credit | ghost wordmark + minimal |
 | Imagery | 3D clay objects (transparent), memoji avatars, app screenshots | one cinematic graded photo series (dusk, pampas grass, mountains), UI mockups | line illustrations, UI dashboard mockups, one portrait | motion-blur photos, UI screenshots, 3D object | high-contrast portraits, product renders, gradient abstract |
 | Motion | scroll-stack cards, rotate on scroll, floating objects, active nav pill | word-by-word blur reveal, fade-up on scroll, typing demo, carousel | fade-up, sticky scroll tabs, cursor chips | fade-up, hover lift | scroll-scrubbed reveals, counters, marquee, mask reveals, staggered lines |
+
+
+### 1b. Second-set token sheet (read from the 2026-09-06 captures)
+
+| Token | Fabrica | Parley | Das Studio | Calderr |
+|---|---|---|---|---|
+| Ground | light grey #F2F2F2 page, near-black rounded panels | warm off-white #F7F5F0 | white | off-white #F4F3EF |
+| Text | black, grey muted; white on the panels | near-black, grey muted; white on the painted cover | black, grey muted | cobalt #0B2FD6 for every letter |
+| Accent | none (black pill CTA) | orange #F2891E buttons and chips | none (black pill CTA) | cobalt is the whole palette; one red badge |
+| Heading face | grotesque (Inter-like) 600, giant titles with full stops ("Projects.") | grotesque 500 with italic emphasis words | grotesque uppercase, very tight tracking | serif display (Instrument Serif-like) for the name and labels, grotesque body |
+| Display | wordmark ~220px in the hero panel, section titles ~120px | H1 ~64px centered on the cover | wordmark ~120px uppercase, section titles ~110px uppercase with a superscript count | name ~260px serif |
+| Radius | 24px panels, pill buttons | 24px cover frame and cards, pill CTA | square images, pill buttons | 16px blue panel, pill tags |
+| Header | wordmark, spread links, menu icon; light bar | wordmark left, links right, orange CTA | wordmark left, uppercase links right | none visible above the fold (intro paragraph + services panel) |
+| Hero | dark photo panel: giant lowercase wordmark + "Studio", services list in the corner, contact card, small paragraph | painted desert cover in a rounded frame, centered white H1 with italic words, orange CTA | huge uppercase wordmark, tagline, two buttons, facts ledger (response time, based in, creators), then a photo strip | intro paragraph top-left, blue panel of service pills top-right, giant serif name |
+| Sections seen | logo strip, projects with label bars, stat pair, dark services accordion, video band, testimonials with a rating figure, four-figure ledger, dark feature split, pricing, team, FAQ, journal, dark let's-talk panel | trusted-by row, numbered feature cards (01. to 04.) with one raised, list beside a mockup, testimonial cards, three tiers with the middle painted, big mockup, FAQ, integration icon grid, painted CTA | who-we-are with a side label, logo grid, 2x2 projects, services accordion, four-step flow, photo band with two stats, testimonial cards, two pricing cards, FAQ, journal, CTA | hairline with a label, 2x2 work grid with blue captions, logo row, about with four stats and a portrait, experience ledger, blue footer band |
+| Footer | huge wordmark + link columns | giant ghost wordmark + link columns | huge wordmark + newsletter + columns | solid blue band with the name set huge |
+| Imagery | dark moody photos, product close-ups, portraits | painted landscapes, app mockups, portraits | fashion and product photos, colour blocks | motion-blur portraits, red field, grain |
+| Motion | fade-up, marquee logo strip, accordion | fade-up, floating chips | fade-up, carousel strip | fade-up |
 
 ## 2. Patterns shared by 4 or more of the 5
 
@@ -130,6 +155,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-3x2 (cohort-8, P2): the media count of a project grid counts the band's own cover picture (dreammotion-like17 and -like18: five on a budget of four). Fix: the count reads the tile covers and image blocks only.
 - PR-1y (cohort-8, P2): the spector brief says "edge-to-edge spread navigation"; the plan types the section `menu` and the author draws an asymmetric split of four image cards. Fix: a stated spread navigation maps to the feature-row-hairlines archetype with link headings and no media (a stated-archetype reader for section types).
 - PR-2m (cohort-9, P1): luzia-like16 opened on the marquee-name hero by the stable hash; the giant name behind the hero is the cohesion brief's stated device, and the luzia brief names no such thing (luzia-like13 and -like15 got portrait-backdrop, -like14 panel-stage). Fix: marquee-name is a stated-only recipe; a hash pick of it yields to the same-seeded pick from the pool without it, and only that pick yields.
+- PR-0b (second set, 2026-09-06): add the four second-set briefs (fabrica-like, parley-like, dasstudio-like, calderr-like) to eval/frm-prompts.json, the reference list and the token sheet 1b to this plan, and the four URLs to the loop prompt. Then build cohort-10 with all nine briefs, record baseline rows for the four new sites in section 7, and file their gap rows.
 - PR-3h2: `logo-strip` as a row of text wordmarks in muted ink; never generated logo images, because a painted wordmark is the text-in-image defect (BIGR-768) by construction.
 - PR-3i: `newsletter-columns` footer composition; verify `sunken-wordmark` renders like the references.
 
@@ -199,6 +225,10 @@ Each brief names the look it wants so the direction step can reach the reference
 3. `zova-like` — "Create a clean SaaS landing page for a finance analytics product for small teams. White page with a pale blue gradient panel hero, dashboard mockup, four-column feature row separated by hairlines, a sticky split with tabs, three pricing tiers with the middle one highlighted, a photo testimonial, FAQ, and a newsletter footer. Floating pill nav with a black arrow CTA."
 4. `luzia-like` — "Create a portfolio for an independent brand and web designer in Lisbon. Light page, tight sans headings with muted-plus-dark two-tone lines, featured work as large image cards with tag pills, an award/quote/stat bento, three service cards with one highlighted in violet, a dark rounded band with zigzag numbered steps, FAQ, and a dark CTA plus footer band with a 3D object."
 5. `spector-like` — "Create a site for a design agency in New York. Dark hero with a full-bleed high-contrast portrait, metadata in the corners, a three-line uppercase display headline with a red-to-cream gradient, edge-to-edge spread navigation, a 2x2 full-bleed project grid, a MORE PROJECTS marquee, hairline-separated statement lines, an awards bento, huge stat counters, and a ghost wordmark footer."
+6. `fabrica-like` — the fabrica brief in eval/frm-prompts.json (light grey page, rounded near-black hero panel with a giant lowercase wordmark, label-bar project grid, dark services accordion, ledger, pricing, team, FAQ, journal, dark let's-talk panel, huge wordmark footer).
+7. `parley-like` — the parley brief (warm off-white, painted desert cover hero in a rounded frame with italic emphasis, orange accent, numbered feature cards, mockup split, three tiers with the middle painted, FAQ, integration grid, painted CTA, ghost wordmark footer).
+8. `dasstudio-like` — the dasstudio brief (white page, huge uppercase wordmark hero with a facts ledger, photo strip, side-label statement, logo grid, giant uppercase titles with counts, 2x2 projects, services accordion, four-step flow, photo band with stats, pricing pair, FAQ, journal, CTA, huge wordmark footer).
+9. `calderr-like` — the calderr brief (off-white page in one cobalt blue, intro paragraph and a blue pill panel above a giant serif name, hairline labels, 2x2 work grid with captions, logo row, about with four stats and a portrait, experience ledger, solid blue footer band with the name set huge).
 
 ## 6. Scoring (per cohort build)
 
@@ -454,6 +484,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 92: PR-3x2 #533 merged. Next: PR-1y on branch frm/no-nav-section: the spector header already carries the spread navigation (header-archetype--spread-nav on like14, like15 and like16), and the plan added a navigation/menu section each time; PagePlanStep::removeHeaderNavigationSections drops it beside the footer removal (whole-word navigation/nav identity; a restaurant menu stays).
 - 2026-09-05 turn 93: PR-1y #534 merged. Closing report: the backlog holds no open row; W3f, PR-3l and PR-5e stay parked with their reasons above (a kit script beyond one PR, a host substitution this environment cannot verify, a font sidebearing that is not markup). Definition of done: every listed workstream is merged with evidence (W0 #448, W1a #449, W2a #459, W3a #454, W3b #455, W3d #456, W4a #450, W5a #451, W6a #452, W7a #458, W8a #457); the final cohort table (cohort-8, 93ffa166) reads 4.5 on all five sites against the baseline row; a throwaway worktree merged origin/trunk (7fa2c663) into frm_experiment (f3d32f32) with no conflicts. The loop stops here per the prompt's stop rule. If it resumes, the first turn builds cohort-9 on the merged branch and critiques it; the parked rows stay parked unless the environment changes.
 - 2026-09-06 turn 94: loop resumed by the user after the cohort-8 live review. Cohort-9 built with images on 21ec145d (cohesion-like20, dreammotion-like19, zova-like20, luzia-like16, spector-like17; 66/66 images, one QA regeneration). Every earlier fix holds; the spector navigation band is gone (PR-1y). Fidelity 4.5 / 4.5 / 4.5 / 4 / 4.5 (section 7 cohort-9 rows). New row: PR-2m marquee-name is a stated-only hero recipe (P1, next, branch frm/marquee-name-stated-only).
+- 2026-09-06 turn 95: PR-2m #536 merged (marquee-name is a stated-only hero recipe). The user asked to continue the loop with four more references beside the original five: fabrica.framer.media, parley.framer.ai, dasstudio.framer.website, calderr.framer.website. Captured all four at 1440px and 390px, read their tokens (section 1b), wrote their briefs (section 5, rows 6 to 9) as PR-0b on branch frm/refs-second-set. Next: build cohort-10 with all nine briefs and record the baseline rows of the four new sites.
 
 ## 10. Parked / rejected
 
