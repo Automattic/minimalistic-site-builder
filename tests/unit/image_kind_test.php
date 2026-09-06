@@ -224,6 +224,7 @@ test('a person on a ui-mockup site takes the portrait clause instead of the inte
     $portrait = ImagePromptComposer::compose('A stylized abstract user avatar tile on a pale panel', 'testimonial card beside a quote', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
     assert_contains('a photographic portrait of one real person', $portrait);
     assert_true(!str_contains($portrait, 'a framed product interface rendered as clean abstract shapes'), 'the interface clause yields');
+    assert_true(!str_contains($portrait, 'Art direction for all site imagery: Cool, evenly lit interface renders'), 'the interface grade yields too (frm PR-7l)');
     $screen = ImagePromptComposer::compose('A dashboard with a rising area chart', 'product tour', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
     assert_contains('a framed product interface rendered as clean abstract shapes', $screen, 'a screen keeps the interface clause');
     $clay = ImagePromptComposer::compose('portrait of the founder', 'testimonial', 'photorealistic', '', '', false, null, 'card-landscape', '3d-object');
