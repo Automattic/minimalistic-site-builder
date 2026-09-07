@@ -812,6 +812,14 @@ final class ScaffoldThemeStep implements Step
         .wp-block-heading.has-fit-text {
             overflow: clip;
         }
+        /* The stated wordmark case reaches the footer identity line (frm
+           PR-2ae); the class outranks a theme heading transform. */
+        .wp-block-heading.has-fit-text.footer-wordmark--upper {
+            text-transform: uppercase;
+        }
+        .wp-block-heading.has-fit-text.footer-wordmark--lower {
+            text-transform: lowercase;
+        }
         /* marquee-name floating objects (frm W7c): the aria-hidden object
            group is taken out of the flow and pinned over the whole hero;
            each cutout takes a corner slot around the centered stack, above

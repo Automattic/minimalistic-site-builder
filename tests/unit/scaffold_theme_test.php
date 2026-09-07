@@ -766,6 +766,7 @@ test('scaffold-theme makes the wordmark-stage copy group a container so the pinn
     $name = '.hero-composition--wordmark-stage .hero-composition__wordmark {';
     // A stated wordmark case transforms the headline by class (frm PR-2ac).
     assert_contains('.hero-composition__wordmark.hero-composition__wordmark--upper {', $css);
+    assert_contains('.wp-block-heading.has-fit-text.footer-wordmark--upper {', $css, 'the footer identity line takes the stated case too (frm PR-2ae)');
     assert_contains('.hero-composition__wordmark.hero-composition__wordmark--lower {', $css);
     assert_contains($name, $css);
     $copyRule = substr($css, (int) strpos($css, '.hero-composition--wordmark-stage .hero-composition__copy {'), 700);

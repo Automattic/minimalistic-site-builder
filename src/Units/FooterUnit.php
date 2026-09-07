@@ -82,6 +82,15 @@ final class FooterUnit extends AbstractMarkupUnit
         if ($markup !== $before) {
             $repairs[] = self::repair('identity-line-site-name', $key);
         }
+        // The stated wordmark case reaches the identity line too (frm PR-2ae).
+        $markup = FooterMarkup::withIdentityLineCase(
+            $markup,
+            is_string($input['stated_wordmark_case'] ?? null) && $input['stated_wordmark_case'] !== ''
+                ? $input['stated_wordmark_case']
+                : null,
+            $key,
+            $repairs,
+        );
         if ($archetype === 'color-field') {
             // The one massive panel never takes the accent (frm PR-4k).
             $before = $markup;
