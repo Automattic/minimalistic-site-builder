@@ -452,3 +452,52 @@ test('a fixer failure rolls plugin-page cover repairs back too', function () {
     assert_contains('rolled back', $project->readText('logs/cover-contrast-report.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('planCover holds the hero dim ceiling and reaches its floor by a text flip instead (frm PR-2ab)', function () {
+    // parley-like23: white copy over a mid-light painting (luminance 0.46 to
+    // 0.61) under a 50% dark overlay, at the 7:1 floor a committed surface
+    // texture sets (Surface::contrastFloor); the free plan went to dim 80.
+    $painting = [[200, 190, 180], [215, 205, 195], [230, 222, 212]];
+    $texts = [['index' => 1, 'rgb' => COVER_WHITE, 'threshold' => 7.0], ['index' => 2, 'rgb' => COVER_WHITE, 'threshold' => 7.0]];
+    $free = CoverContrastStep::planCover($texts, BLACK_OVERLAY, 50, $painting, cover_candidates());
+    assert_true($free['dim'] > 60, "the free plan climbs past the ceiling, got {$free['dim']}");
+
+    $hero = CoverContrastStep::planCover($texts, BLACK_OVERLAY, 50, $painting, cover_candidates(), 60);
+    assert_true($hero['dim'] <= 60, "the hero plan stays under the ceiling, got {$hero['dim']}");
+    assert_eq(true, $hero['pass']);
+    assert_true($hero['swaps'] !== [] || $hero['overlay'] !== null, 'the floor is reached by a flip or a solid overlay, not by more dim');
+
+    // A cover that already passes under the ceiling is untouched either way.
+    $dark = [[30, 30, 30], [40, 40, 40], [60, 60, 60]];
+    $ok = CoverContrastStep::planCover([['index' => 1, 'rgb' => COVER_WHITE, 'threshold' => 3.0]], BLACK_OVERLAY, 50, $dark, cover_candidates(), 60);
+    assert_eq(50, $ok['dim']);
+    assert_eq([], $ok['swaps']);
+
+    // Best effort under the ceiling never exceeds it.
+    $noCandidates = ['base' => COVER_WHITE];
+    $bright = [[235, 235, 235], [240, 240, 240], [245, 245, 245]];
+    $effort = CoverContrastStep::planCover([['index' => 1, 'rgb' => COVER_WHITE, 'threshold' => 7.0]], BLACK_OVERLAY, 50, $bright, $noCandidates, 60);
+    assert_true($effort['dim'] <= 60, "best effort stays under the ceiling, got {$effort['dim']}");
+});
+
+test('a cover inside a hero composition root, or carrying the media hook, is the hero cover (frm PR-2ab)', function () {
+    $hero = \Automattic\SiteBuild\BlockMarkup::parse(
+        '<!-- wp:group {"className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":50,"align":"full"} --><div class="wp-block-cover alignfull"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hi</h1><!-- /wp:heading --></div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->'
+        . '<!-- wp:group {"anchor":"gallery","layout":{"type":"constrained"}} --><div id="gallery" class="wp-block-group">'
+        . '<!-- wp:cover {"url":"y.jpg","dimRatio":50,"className":"hero-composition__media","align":"full"} --><div class="wp-block-cover alignfull hero-composition__media"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Work</h2><!-- /wp:heading --></div></div><!-- /wp:cover -->'
+        . '<!-- wp:cover {"url":"z.jpg","dimRatio":50,"align":"full"} --><div class="wp-block-cover alignfull"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">More</h2><!-- /wp:heading --></div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->'
+    );
+    $covers = array_values(array_filter($hero->indices(), static fn (int $i): bool => $hero->name($i) === 'cover'));
+    assert_eq(3, count($covers));
+    assert_true(CoverContrastStep::isHeroCover($hero, $covers[0]), 'inside the hero composition root');
+    assert_true(CoverContrastStep::isHeroCover($hero, $covers[1]), 'carries the media hook');
+    assert_true(!CoverContrastStep::isHeroCover($hero, $covers[2]), 'a section cover is not the hero');
+});

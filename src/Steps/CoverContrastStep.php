@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Step;
@@ -334,7 +335,13 @@ final class CoverContrastStep implements Step
                 'contrast' => $helper->rgbFor('contrast'),
             ]);
 
-            $plan = self::planCover($texts, $overlay, $dim, $image, $candidates);
+            // The page-opening hero keeps its picture visible (frm PR-2l):
+            // HeroUnit caps the authored dim at 60, and this pass held the
+            // same line only by accident until parley-like23 shipped its
+            // painted cover at dim 80 (frm PR-2ab). Under the ceiling the
+            // plan reaches its floor with a text flip or the solid overlay.
+            $maxDim = self::isHeroCover($doc, $i) ? GeneratedMarkup::HERO_COVER_DIM_CEILING : self::MAX_DIM;
+            $plan = self::planCover($texts, $overlay, $dim, $image, $candidates, $maxDim);
             $luma = sprintf(
                 'image luminance %.2f–%.2f',
                 ContrastMath::luminance($image[0]),
@@ -403,16 +410,36 @@ final class CoverContrastStep implements Step
             $repairs++;
 
             $report[] = sprintf(
-                '[%s] cover block %d repaired: dimRatio %d → %d%s%s%s (%s)%s',
+                '[%s] cover block %d repaired: dimRatio %d → %d%s%s%s (%s)%s%s',
                 $rel, $i, $dim, $plan['dim'],
                 $plan['overlay'] === null ? '' : ", overlay → solid {$plan['overlay']} (designed overlay ineffective behind the content)",
                 $plan['swaps'] === [] ? '' : ', text → ' . implode(', ', array_unique($plan['swaps'])),
                 $linkFixes === [] ? '' : ', links → ' . implode(', ', array_unique($linkFixes)),
                 $luma,
+                $maxDim < self::MAX_DIM ? "; hero dim ceiling {$maxDim}" : '',
                 $plan['pass'] ? '' : ' — still below threshold at max dim, best effort'
             );
         }
         return $repairs;
+    }
+
+    /**
+     * Whether a cover is the page-opening hero's picture (frm PR-2ab): it
+     * carries the recipe's media hook, or sits inside a hero composition
+     * root. Both the theme part and the seeded page content are walked.
+     */
+    public static function isHeroCover(BlockMarkup $doc, int $index): bool
+    {
+        for ($i = $index; $i !== null; $i = $doc->parent($i)) {
+            $attrs = $doc->attrs($i) ?? [];
+            $classes = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+            foreach (preg_split('/\s+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                if ($token === 'hero-composition__media' || str_starts_with($token, 'hero-composition--')) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -437,11 +464,17 @@ final class CoverContrastStep implements Step
      * @param array<string, array{0:int,1:int,2:int}> $candidates slug => rgb
      * @return array{dim:int, swaps: array<int,string>, overlay: ?string, pass: bool}
      */
-    public static function planCover(array $texts, array $overlay, int $dim, array $image, array $candidates): array
-    {
+    public static function planCover(
+        array $texts,
+        array $overlay,
+        int $dim,
+        array $image,
+        array $candidates,
+        int $maxDim = self::MAX_DIM,
+    ): array {
         $start = max($dim, ContrastFix::COVER_DIM_FLOOR);
         $steps = [];
-        for ($d = $start; $d <= self::MAX_DIM; $d += 10) {
+        for ($d = $start; $d <= $maxDim; $d += 10) {
             $steps[] = $d;
         }
         if ($steps === []) {
@@ -500,8 +533,12 @@ final class CoverContrastStep implements Step
                 }
             }
         }
+        $solidSteps = array_values(array_filter([50, 60, 70, self::MAX_DIM], static fn (int $d): bool => $d <= $maxDim));
+        if ($solidSteps === []) {
+            $solidSteps = [$maxDim];
+        }
         foreach ($pairs as [$overlaySlug, $textSlug]) {
-            foreach ([50, 60, 70, self::MAX_DIM] as $d) {
+            foreach ($solidSteps as $d) {
                 $solid = [['rgb' => $candidates[$overlaySlug], 'alpha' => 1.0]];
                 $ok = true;
                 foreach ($texts as $t) {
