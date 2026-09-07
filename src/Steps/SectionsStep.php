@@ -1291,8 +1291,8 @@ final class SectionsStep implements Step
     }
 
     /**
-     * A lone glyph from a script the site's language does not use is never
-     * copy (frm PR-9b); each one leaves the delivered text with a warning.
+     * Repair attached non-Greek glyph slips (frm PR-9b), preserving standalone
+     * characters and scientific notation. Each removal leaves a warning.
      *
      * @param array<string,string> $files relative theme path => markup
      * @param list<string> $warnings
@@ -1308,7 +1308,7 @@ final class SectionsStep implements Step
             $files[$rel] = $stripped['markup'];
             $warnings[] = "file='theme/{$rel}'; block='text'; "
                 . "authored={$stripped['removed']} lone glyph(s) from a script the site's language does not use; "
-                . 'delivered=removed; disposition=a stray character inside Latin copy is a model slip, not a word';
+                . 'delivered=removed; disposition=an isolated non-Greek glyph attached to a Latin word was removed';
         }
         return $files;
     }

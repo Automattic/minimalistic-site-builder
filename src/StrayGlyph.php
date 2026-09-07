@@ -4,11 +4,11 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * A lone glyph from a script the site's language does not use (frm PR-9b):
+ * A non-Greek glyph attached to a Latin word (frm PR-9b):
  * calderr-like4's about heading shipped as "the long北 light of Amsterdam".
- * The model drops one such character now and then; it is never copy. A run
- * of two or more characters of one script is a word (a place name, a term)
- * and stays, and a site written in a non-Latin script is left alone.
+ * Standalone characters and Greek letters can be meaningful terminology
+ * or scientific notation, so they stay even on a Latin-language site.
+ * Runs of non-Latin characters and non-Latin sites are left alone too.
  */
 final class StrayGlyph
 {
@@ -20,14 +20,14 @@ final class StrayGlyph
     ];
 
     /**
-     * One character of a non-Latin script between Latin letters, digits,
-     * spaces or punctuation, with no neighbour of its own script. Explicit
+     * One non-Greek character attached to a preceding Latin letter, with no
+     * following non-Latin letter. Never strip standalone symbols. Explicit
      * code-point ranges, not \p{Script}: PCRE2 resolves a script class
      * through script extensions, which puts the middle dot (U+00B7) in Han.
      */
-    private const STRAY = '/(?<=[\p{Latin}\p{N}\s\p{P}])'
+    private const STRAY = '/(?<=\p{Latin})'
         . '[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{1100}-\x{11FF}\x{AC00}-\x{D7AF}\x{0400}-\x{04FF}'
-        . '\x{0370}-\x{03FF}\x{0600}-\x{06FF}\x{0590}-\x{05FF}\x{0E00}-\x{0E7F}\x{0900}-\x{097F}\x{0980}-\x{09FF}'
+        . '\x{0600}-\x{06FF}\x{0590}-\x{05FF}\x{0E00}-\x{0E7F}\x{0900}-\x{097F}\x{0980}-\x{09FF}'
         . '\x{0530}-\x{058F}\x{10A0}-\x{10FF}]'
         . '(?=[\p{Latin}\p{N}\s\p{P}]|$)/u';
 
