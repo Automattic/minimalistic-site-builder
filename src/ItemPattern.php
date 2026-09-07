@@ -34,6 +34,40 @@ final class ItemPattern
         'tag-cluster' => 'item-patterns/tag-cluster.md',
     ];
 
+    /** A card's category tag, one paragraph per tag (frm PR-3al); the theme paints the pill. */
+    public const TAG_PILL_CLASS = 'tag-pill';
+
+    /** The wrapping flex group that holds a card's tag pills. */
+    public const TAG_PILLS_CLASS = 'tag-pills';
+
+    /**
+     * Whether the brief states tag pills on its cards (frm PR-3al): luzia's
+     * "featured work as large image cards with tag pills". A pill phrase in
+     * a hero clause ("a panel of service pill tags") is the hero facts
+     * reader's, so the phrase must follow a card, work or project word in
+     * the same clause.
+     */
+    public static function statedTagPills(string $brief): bool
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        return preg_match(
+            '/(?<![\p{L}-])(?:cards?|tiles?|work|works|projects?|case studies|portfolio)(?:[^.;,]){0,60}?(?<![\p{L}-])(?:tag pills|pill tags|tags as pills|category pills|pill labels)(?![\p{L}-])/u',
+            $text,
+        ) === 1;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTagPillsFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedTagPills($text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static function isKnown(string $pattern): bool
     {
         return isset(self::RECIPES[$pattern]);

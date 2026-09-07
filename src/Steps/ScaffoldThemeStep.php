@@ -238,6 +238,31 @@ final class ScaffoldThemeStep implements Step
         .equal-cards p.cta-bottom {
             text-align: center;
         }
+        /* Tag pills on a card (frm PR-3al): one outlined chip per tag at the
+           caption size, wrapping in their group. The class is the only
+           thing the author writes; a model rule on it is dropped from the
+           theme.json css, so the pill reads the same on every site. */
+        .wp-block-group.tag-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--wp--preset--spacing--xs, 0.5rem);
+        }
+        p.tag-pill {
+            display: inline-block;
+            width: fit-content;
+            margin: 0;
+            padding: 0.3em 0.85em;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+            line-height: 1.2;
+            border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+            border-radius: 999px;
+            background: transparent;
+        }
+        /* The card-body reset above stretches every direct child to the
+           card's width; a pill set straight in the body keeps its own. */
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body > p.tag-pill {
+            width: fit-content;
+        }
         /* A demoted action (cta-budget): the page's planned buttons stay
            buttons, every other action is this link — the accent fill is what
            it lost, not the destination. */

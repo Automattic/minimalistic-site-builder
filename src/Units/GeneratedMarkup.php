@@ -5067,6 +5067,158 @@ final class GeneratedMarkup
      * @param list<array<string,mixed>> $repairs
      */
     /**
+     * The build owns a card's tag pills (frm PR-3al). luzia's "cards with
+     * tag pills" shipped as a bullet list (luzia-like40) and as accent-filled
+     * bars painted by the model's own `.tag-pill` rule (luzia-like54). A
+     * list whose class names tags, inside an item, becomes one `tag-pill`
+     * paragraph per item in a wrapping `tag-pills` group; a `tag-pill`
+     * paragraph loses its authored colours. The theme paints the pill.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function ownTagPills(string $markup, string $part, array &$repairs = [], bool $statedPills = false): string
+    {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $inItem = static function (int $index) use ($document): bool {
+            for ($node = $document->parent($index); $node !== null; $node = $document->parent($node)) {
+                $classes = preg_split('/\s+/', trim((string) (($document->attrs($node) ?? [])['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(ItemPattern::ITEM_MARKER, $classes, true)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        $changed = false;
+        // Pass one: strip authored colours from tag-pill paragraphs.
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(ItemPattern::TAG_PILL_CLASS, $classes, true)) {
+                continue;
+            }
+            $dropped = [];
+            foreach (['backgroundColor', 'textColor'] as $key) {
+                if (isset($attrs[$key])) {
+                    $slug = (string) $attrs[$key];
+                    $dropped[] = $key . " '{$slug}'";
+                    $document->removeClassTokenInOwnHtml($index, 'has-' . $slug . ($key === 'backgroundColor' ? '-background-color' : '-color'));
+                    unset($attrs[$key]);
+                }
+            }
+            if (isset($attrs['style']['color'])) {
+                $dropped[] = 'style.color';
+                unset($attrs['style']['color']);
+                if ($attrs['style'] === []) {
+                    unset($attrs['style']);
+                }
+            }
+            if ($dropped === []) {
+                continue;
+            }
+            $document->removeClassTokenInOwnHtml($index, 'has-text-color');
+            $document->removeClassTokenInOwnHtml($index, 'has-background');
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'code' => 'tag-pill-ink-owned',
+                'part' => $part,
+                'block' => 'paragraph.tag-pill',
+                'authored' => implode(', ', $dropped),
+                'delivered' => 'class only; the theme paints the pill',
+                'disposition' => 'repaired',
+            ];
+            $changed = true;
+        }
+        $rendered = $changed ? $document->render() : $markup;
+        // Pass two: a tag list inside an item becomes a pill group, and when
+        // the brief states pills, a project tile's dotted meta line
+        // ("Brand identity · Packaging · 2025") splits into pills too.
+        $document = BlockMarkup::parse($rendered);
+        $inTile = static function (int $index) use ($document): bool {
+            for ($node = $document->parent($index); $node !== null; $node = $document->parent($node)) {
+                if ($document->name($node) === 'cover') {
+                    return true;
+                }
+            }
+            return false;
+        };
+        $spans = [];
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['list', 'paragraph'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $className = (string) ($attrs['className'] ?? '');
+            $items = [];
+            if ($name === 'list') {
+                if (!$inItem($index) || preg_match('/(?:^|[\s-])tags?(?:$|[\s-])/', $className) !== 1) {
+                    continue;
+                }
+                foreach ($document->children($index) as $child) {
+                    if ($document->name($child) !== 'list-item') {
+                        continue;
+                    }
+                    $text = trim(html_entity_decode(strip_tags($document->innerHtml($child)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    if ($text !== '') {
+                        $items[] = $text;
+                    }
+                }
+            } else {
+                if (!$statedPills || preg_match('/(?:^|\s)project-meta(?:$|\s)/', $className) !== 1 || (!$inItem($index) && !$inTile($index))) {
+                    continue;
+                }
+                $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                $parts = array_values(array_filter(array_map('trim', preg_split('/\s*[·•|]\s*/u', $text) ?: []), static fn (string $t): bool => $t !== ''));
+                if (count($parts) < 2) {
+                    continue;
+                }
+                $items = $parts;
+            }
+            $end = $document->endOffset($index);
+            if ($items === [] || $end === null) {
+                continue;
+            }
+            $spans[] = ['start' => $document->openingOffset($index), 'end' => $end, 'items' => $items, 'block' => $name];
+        }
+        if ($spans === []) {
+            return $rendered;
+        }
+        usort($spans, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
+        foreach ($spans as $span) {
+            $closing = '<!-- /wp:' . $span['block'] . ' -->';
+            // endOffset is exclusive and includes the closing delimiter.
+            $length = $span['end'] - $span['start'];
+            if (substr($rendered, $span['end'] - strlen($closing), strlen($closing)) !== $closing) {
+                continue;
+            }
+            $pills = '';
+            foreach ($span['items'] as $text) {
+                $pills .= '<!-- wp:paragraph {"className":"' . ItemPattern::TAG_PILL_CLASS . '","fontSize":"caption"} -->'
+                    . '<p class="' . ItemPattern::TAG_PILL_CLASS . ' has-caption-font-size">' . htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>'
+                    . '<!-- /wp:paragraph -->';
+            }
+            $group = '<!-- wp:group {"className":"' . ItemPattern::TAG_PILLS_CLASS . '","layout":{"type":"flex","flexWrap":"wrap"}} -->'
+                . '<div class="wp-block-group ' . ItemPattern::TAG_PILLS_CLASS . '">' . $pills . '</div><!-- /wp:group -->';
+            $rendered = substr($rendered, 0, $span['start']) . $group . substr($rendered, $span['start'] + $length);
+            $repairs[] = [
+                'code' => $span['block'] === 'list' ? 'tag-list-to-pills' : 'project-meta-to-pills',
+                'part' => $part,
+                'block' => $span['block'],
+                'authored' => count($span['items']) . ($span['block'] === 'list' ? ' tag list items' : ' dotted meta terms'),
+                'delivered' => count($span['items']) . ' tag-pill paragraphs in a tag-pills group',
+                'disposition' => 'repaired',
+            ];
+        }
+        return $rendered;
+    }
+
+    /**
      * The dim a picture cover takes when the model names none (frm PR-2aj):
      * core's default is 100, a solid overlay that hides the picture.
      * dasstudio-like38 shipped four black work tiles that way. Forty is the

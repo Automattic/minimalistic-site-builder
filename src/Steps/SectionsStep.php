@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
@@ -1135,6 +1136,10 @@ final class SectionsStep implements Step
             'stated_wordmark_case' => (string) HeroComposition::statedWordmarkCaseFor(
                 $project->exists('meta.json') ? $project->readJson('meta.json') : [],
             ),
+            // Tag pills the brief states on its work cards (frm PR-3al).
+            'stated_tag_pills' => ItemPattern::statedTagPillsFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ) ? 'yes' : '',
         ];
 
         // Select the footer first: a singleton hero's lower edge must name the

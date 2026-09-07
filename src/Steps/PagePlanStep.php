@@ -738,6 +738,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ),
             $successfulRepairs,
         );
+        // Tag pills the brief states ride on the work cards' handoff (frm PR-3al).
+        $out = self::withStatedTagPills(
+            $out,
+            ItemPattern::statedTagPillsFor($project->exists('meta.json') ? $project->readJson('meta.json') : []),
+            $successfulRepairs,
+        );
 
         // A repeated list planned as an asymmetric split stacks every item's
         // picture in the trailing column (frm PR-3aq): cohesion-like47's four
@@ -1091,6 +1097,67 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param list<string> $repairs
      * @return array<int,array<string,mixed>>
      */
+    /** Section slugs, types and purposes that carry the brief's work cards. */
+    private const WORK_SECTION_PATTERN = '/\b(?:work|works|projects?|portfolio|case[- ]stud(?:y|ies)|showcase)\b/i';
+
+    /**
+     * Tag pills the brief states ride on the work cards' handoff (frm PR-3al):
+     * luzia's "featured work as large image cards with tag pills" shipped
+     * bullet lists on luzia-like40 and accent-filled bars on luzia-like54,
+     * because the author chose the tag markup each time. The handoff names
+     * the one markup the theme paints; GeneratedMarkup::ownTagPills folds
+     * whatever the author still writes into it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withStatedTagPills(array $pages, bool $stated, array &$repairs = []): array
+    {
+        if (!$stated) {
+            return $pages;
+        }
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            foreach ($sections as $key => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $pattern = trim((string) ($section['item_pattern'] ?? ''));
+                if ($pattern !== '' && $pattern !== ItemPattern::DEFAULT) {
+                    continue;
+                }
+                $identity = implode(' ', [
+                    (string) ($section['slug'] ?? ''),
+                    (string) ($section['type'] ?? ''),
+                    (string) ($section['title'] ?? ''),
+                ]);
+                if (preg_match(self::WORK_SECTION_PATTERN, $identity) !== 1) {
+                    continue;
+                }
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                if (str_contains($handoff, ItemPattern::TAG_PILL_CLASS)) {
+                    continue;
+                }
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: each card\'s category tags are one'
+                    . ' wp:paragraph per tag with "className":"' . ItemPattern::TAG_PILL_CLASS . '" and "fontSize":"caption",'
+                    . ' together in one wp:group with "className":"' . ItemPattern::TAG_PILLS_CLASS
+                    . '" and a wrapping flex layout, placed before the card heading; class only, no colour,'
+                    . ' background or list markup, because the theme paints the pill.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.handoff',
+                    $handoff === '' ? 'no handoff' : 'handoff without tag pills',
+                    'handoff names tag-pill paragraphs',
+                    'the brief states tag pills on its work cards',
+                );
+            }
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
     public static function withStatedHighlightCards(array $pages, ?string $clause, array &$repairs = []): array
     {
         if ($clause === null || trim($clause) === '') {
