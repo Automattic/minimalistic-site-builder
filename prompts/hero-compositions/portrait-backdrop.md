@@ -19,7 +19,9 @@ The blueprint's `media_aspect` decides the plate: `portrait` or `square`.
   `"align":"wide"` with two `wp:column`: the leading column at `"width":"60%"`
   holds the level-1 heading (two or three short lines, start-aligned); the
   trailing column at `"width":"40%"` holds at most ONE supporting paragraph
-  and at most one planned button. Nothing else in the root.
+  and at most one planned button. Nothing else in the root. The two columns
+  align to their top edge (author no `verticalAlignment`); the build keeps
+  the headline as the first text line whatever the trailing column's height.
 - The copy row is the whole copy budget: one level-1 heading, at most ONE
   supporting paragraph, at most one planned button. No caption, no credit
   line, no rules, no second image.
