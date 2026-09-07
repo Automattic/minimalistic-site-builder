@@ -356,7 +356,11 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::screenKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit(), self::labelKit()];
+        return [
+            self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::screenKit(),
+            self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit(),
+            self::labelKit(), self::bandKit(), self::treatmentKit(), self::numeralKit(),
+        ];
     }
 
     /** The committed section-label kit: paints the one badge above a section heading. */

@@ -51,6 +51,35 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalizer exports every emitted band, treatment and numeral asset to hosts (BIGR-987)', function () {
+    with_project('finalize_declared_kits_', function ($project): void {
+        $project->writeText('theme/style.css', '/* Test theme */');
+        $project->writeJson('designDirection.json', [
+            'band_geometry' => 'rounded',
+            'type_treatment' => 'caps-tight',
+            'step_numeral' => 'ghost',
+        ]);
+        finalize_static_header($project);
+        $step = new FinalizeThemeStep();
+        quietly(fn () => $step->run($project));
+        $writes = \Automattic\SiteBuild\StepGraph::describe([$step])[0]['writes'];
+        $php = $project->readText('theme/functions.php');
+        foreach (['band', 'treatment', 'numeral'] as $folder) {
+            assert_true($project->exists("theme/assets/{$folder}/{$folder}.css"), 'the configured kit was actually emitted');
+            assert_contains("assets/{$folder}/{$folder}.css", $php, 'the theme references the emitted CSS');
+            assert_true(in_array("theme/assets/{$folder}/*", $writes, true), "host output manifest must include {$folder}");
+        }
+        $project->writeJson('designDirection.json', [
+            'band_geometry' => 'square', 'type_treatment' => 'sentence', 'step_numeral' => 'none',
+        ]);
+        quietly(fn () => $step->run($project));
+        foreach (['band', 'treatment', 'numeral'] as $folder) {
+            assert_true(!$project->exists("theme/assets/{$folder}/{$folder}.css"), 'resuming without the commitment prunes stale CSS');
+            assert_true(!str_contains($project->readText('theme/functions.php'), "assets/{$folder}/{$folder}.css"));
+        }
+    });
+});
+
 test('finalize-theme inlines header title-hiding keyed on site-logo-mark', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_logo_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
