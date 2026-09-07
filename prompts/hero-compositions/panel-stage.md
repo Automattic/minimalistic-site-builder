@@ -30,9 +30,10 @@ before you place anything and execute the pair you were given.
   cutout, never text painted into the image.
 - Blocks: use only group, columns/column, image, heading, paragraph, and an
   optional planned button.
-- Surface/width: the root keeps the planned `base` or `tinted` surface and the
-  recipe's asymmetric-split width; the panel carries the tint (`band`), so the
-  root is never painted with an image and never with `contrast`.
+- Surface/width: the root keeps the planned `base` surface and the recipe's
+  asymmetric-split width; the panel carries the tint (`band`), so the root is
+  never painted with the tint (a tinted root swallows the panel), never with
+  an image and never with `contrast`.
 - Mobile: one ordered stack, copy first, the plate below, the stage image
   last; the panel keeps its rounded shape at every width.
 - Objective failure: no `hero-composition__panel` group, a cover background,
