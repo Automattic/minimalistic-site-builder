@@ -1337,3 +1337,28 @@ test('on a personal brief the retry asks for the person\'s name as the site name
     $warnings = [];
     assert_eq('Studio Grund', SiteSpecStep::namedAfterThePerson(['name' => 'Studio Grund', 'persona_name' => 'Jonas Grund'], false, $warnings)['name']);
 });
+
+test('on a personal brief a persona is a placeholder whatever the invented list says (frm PR-0o)', function () {
+    // luzia-like45: persona "Craft Studio" beside the site "Craft Studio", only the name listed as invented.
+    $spec = ['name' => 'Craft Studio', 'persona_name' => 'Craft Studio', 'invented' => ['name']];
+    assert_true(!SiteSpecStep::placeholderPersona($spec), 'not a personal brief: the invented list rules, as before');
+    assert_true(SiteSpecStep::placeholderPersona($spec, true), 'a personal brief: a studio persona is a placeholder');
+    assert_true(!SiteSpecStep::placeholderPersona(['name' => 'Rua Nova', 'persona_name' => 'Rua Nova', 'invented' => ['persona_name']]), 'two words without a category word read as a name');
+    assert_true(!SiteSpecStep::placeholderPersona(['name' => 'Sofia Martins', 'persona_name' => 'Sofia Martins', 'invented' => ['persona_name']], true), 'a full name that names the site is the person');
+    assert_true(!SiteSpecStep::placeholderPersona(['name' => 'Studio Rua', 'persona_name' => 'Sofia Martins', 'invented' => []], true), 'a full persona stands even when unlisted');
+
+    $base = ['title' => 'Designer Portfolio', 'description' => 'd', 'site_type' => 'personal portfolio', 'topic' => 't', 'area' => 'a', 'audience' => 'u', 'visual_vibe' => 'v', 'language' => 'en'];
+    $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'Create a portfolio for an independent brand and web designer in Lisbon. Light page.', 'multi_page' => false]);
+    $llm = new FakeLlm();
+    $llm->queueJson(['name' => 'Craft Studio', 'persona_name' => 'Craft Studio', 'invented' => ['name']] + $base);
+    $llm->queueJson(['name' => 'Sofia Martins', 'persona_name' => 'Sofia Martins', 'invented' => ['name', 'persona_name']] + $base);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq(2, $llm->completeJsonCalls, 'the persona retry fires');
+    assert_eq('site-spec-persona-retry', $llm->calls[1]['opts']['log_label'] ?? null);
+    assert_contains('invented the persona "Craft Studio", which is not a person\'s full name', $llm->calls[1]['prompt']);
+    $written = $project->readJson('siteSpec.json');
+    assert_eq('Sofia Martins', $written['persona_name']);
+    assert_eq('Sofia Martins', $written['name']);
+});

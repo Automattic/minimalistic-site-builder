@@ -166,14 +166,18 @@ final class SiteSpecStep implements Step
                 // An invented persona that is not a person's full name is a
                 // placeholder (frm PR-0k): calderr-like20 shipped "Amsterdam
                 // Designer" and the site "Amsterdam Design Studio" followed it.
-                $placeholder = is_array($spec) && self::placeholderPersona($spec)
-                    ? trim((string) $spec['persona_name'])
-                    : '';
                 // A brief that states a personal site and a spec with no
                 // persona at all is the same miss (frm PR-0m): calderr-like26
                 // and -27 answered an empty persona_name on "a personal
                 // portfolio for a web designer", and no retry could fire.
                 $personal = self::personalBrief((string) ($meta['original_prompt'] ?? '')) || self::personalBrief($prompt);
+                // On a personal brief every persona is invented (the brief
+                // names no person), whatever the model lists (frm PR-0o):
+                // luzia-like45 answered persona "Craft Studio" beside the site
+                // "Craft Studio" and listed only the name as invented.
+                $placeholder = is_array($spec) && self::placeholderPersona($spec, $personal)
+                    ? trim((string) $spec['persona_name'])
+                    : '';
                 $emptyPersona = $placeholder === '' && is_array($spec)
                     && trim((string) ($spec['persona_name'] ?? '')) === ''
                     && $personal;
@@ -216,7 +220,7 @@ final class SiteSpecStep implements Step
                         $spec = self::namedAfterThePerson($spec, $personal, $warnings);
                         if ($placeholder !== '') {
                             $retriedPersona = trim((string) ($retry['persona_name'] ?? ''));
-                            $warnings[] = self::placeholderPersona($retry)
+                            $warnings[] = self::placeholderPersona($retry, $personal)
                                 ? "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered "
                                     . ($retriedPersona === '' ? 'nothing usable' : "\"{$retriedPersona}\"")
                                     . "; disposition an invented persona must be a person's full name, and the one"
@@ -245,7 +249,7 @@ final class SiteSpecStep implements Step
                     $retriedPersona = is_array($retry) ? trim((string) ($retry['persona_name'] ?? '')) : '';
                     $retriedName = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
                     if (
-                        is_array($retry) && $retriedPersona !== '' && !self::placeholderPersona($retry)
+                        is_array($retry) && $retriedPersona !== '' && !self::placeholderPersona($retry, $personal)
                         && $retriedName !== '' && !self::genericName($retriedName)
                     ) {
                         $spec = $retry;
@@ -361,14 +365,16 @@ final class SiteSpecStep implements Step
      *
      * @param array<mixed> $spec
      */
-    public static function placeholderPersona(array $spec): bool
+    public static function placeholderPersona(array $spec, bool $personal = false): bool
     {
         $persona = $spec['persona_name'] ?? '';
         if (!is_string($persona) || trim($persona) === '') {
             return false;
         }
         $invented = $spec['invented'] ?? [];
-        if (!is_array($invented) || !in_array('persona_name', $invented, true)) {
+        // On a personal brief the brief names no person, so the persona is
+        // invented whatever the model lists (frm PR-0o).
+        if (!$personal && (!is_array($invented) || !in_array('persona_name', $invented, true))) {
             return false;
         }
         $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $persona)), 'UTF-8');
