@@ -103,6 +103,12 @@ final class GroundTint
         return 'violet';
     }
 
+    /** The hue a chromatic family is rotated onto, degrees; a neutral or an unknown family has none. */
+    public static function centerOf(string $tint): float
+    {
+        return self::CENTERS[$tint] ?? 0.0;
+    }
+
     /** The hue each family is rotated onto, degrees — the middle of its band. */
     private const CENTERS = [
         'warm' => 40.0, 'green' => 120.0, 'cool' => 210.0, 'violet' => 280.0, 'blush' => 345.0,

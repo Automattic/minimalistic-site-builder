@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AccentHue;
+use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
@@ -2769,6 +2770,26 @@ final class DesignDirectionStep implements Step
                         . '; disposition the brief names its accent hue (' . $statedAccent['word']
                         . '), so the model commitment moves into that hue family at its own lightness and chroma';
                     $direction['palette']['accent'] = $fixed;
+                }
+            }
+        }
+        // frm PR-2ag: a band colour the brief states beside a surface noun
+        // outranks the grey band derived from the page. zova's "pale blue
+        // gradient panel hero" shipped a neutral panel in six cohorts: the
+        // white page's band is grey, and no reader looked at the panel.
+        $statedBand = BandTint::statedFor($meta);
+        if ($statedBand !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $base = is_string($palette['base'] ?? null) ? $palette['base'] : null;
+            $band = is_string($palette['band'] ?? null) ? $palette['band'] : null;
+            if ($base !== null && ($band === null || GroundTint::classify($band) !== $statedBand['tint'])) {
+                $fixed = BandTint::apply($base, $statedBand['tint']);
+                if ($fixed !== null && strcasecmp($fixed, (string) $band) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.band authored '
+                        . self::describe($band) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its band colour (' . $statedBand['word']
+                        . '), so the band moves into that tint family at its derived lightness';
+                    $direction['palette']['band'] = $fixed;
                 }
             }
         }
