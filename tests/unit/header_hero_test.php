@@ -2985,3 +2985,125 @@ test('dedupeAgainstHero keeps the header CTA when the chrome commits a persisten
     $plain = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
     assert_true(!str_contains($plain['markup'], 'Start creating'), 'a plain bar still drops the duplicate');
 });
+
+/** A cover-media hero root for the stated-frame tests (frm PR-2y). */
+function hh_cover_hero(string $classes): string
+{
+    return '<!-- wp:group {"anchor":"hero","align":"full","className":"' . $classes . '","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group alignfull ' . $classes . '">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":50,"minHeight":80,"minHeightUnit":"vh","align":"full","className":"hero-composition__media"} -->'
+        . '<div class="wp-block-cover alignfull hero-composition__media" style="min-height:80vh">'
+        . '<div class="wp-block-cover__inner-container"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div>'
+        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
+}
+
+test('a hero the brief puts in a rounded frame is stamped hero-frame--rounded under a stacked header (frm PR-2y)', function () {
+    with_project('builder_hh_frame_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover', 'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Flux']);
+        $project->writeJson('meta.json', [
+            'original_prompt' => 'Warm off-white page, one painted desert-sky cover hero in a rounded frame with a centered white headline.',
+            'prompt' => 'A landing page for an AI assistant.',
+        ]);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'framed', 'band_geometry' => 'rounded', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        // The stated frame rides with the stated framed canvas (frm PR-2p),
+        // under which the header sits above the cover.
+        $delivery = AboveFoldContract::resolve(
+            $pages,
+            HeroBlueprint::defaultFor('cinematic-safe-zone'),
+            'framed',
+            hh_theme_json(),
+            ['stable_id' => 'hh-frame', 'writing_direction' => 'ltr', 'page_count' => 1],
+            ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        );
+        $project->writeJson('aboveFold.json', $delivery);
+        assert_eq(AboveFoldContract::MODE_STACKED, $delivery['header']['mode'], 'the fixture header sits above the cover');
+
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            hh_cover_hero('hero-composition--cinematic-safe-zone hero-mobile--stack-media-first'),
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        // Once in the rendered class attribute; the block comment's JSON
+        // escapes the literal `--` (illegal inside an HTML comment).
+        assert_eq(1, substr_count($hero, 'hero-frame--rounded'));
+        assert_contains('hero-frame\\u002d\\u002drounded', $hero, 'the marker is in the block JSON too');
+        assert_true(preg_match('/class="wp-block-group alignfull hero-composition--cinematic-safe-zone hero-mobile--stack-media-first hero-media--[a-z-]+ hero-frame--rounded"/', $hero) === 1, $hero);
+        $report = $project->readText('logs/header-hero.txt');
+        assert_contains('"delivered":"hero-frame--rounded"', $report);
+    });
+
+    // The frame is withheld, with a warning, when the recipe carries no cover
+    // to frame; the brief's other stated hero wins the recipe and keeps its edges.
+    with_project('builder_hh_frame2_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero',
+                'layout_archetype' => 'asymmetric-split', 'background' => 'base',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Flux']);
+        $project->writeJson('meta.json', ['prompt' => 'A split hero in a rounded frame.']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'foreground-split');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-copy-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        assert_true(!str_contains($hero, 'hero-frame--'), 'no frame on a split hero');
+        assert_contains('carries no cover to frame; the frame is withheld', $project->readText('warnings.json'));
+    });
+
+    // No stated frame, no marker and no warning.
+    with_project('builder_hh_frame3_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover', 'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Flux']);
+        $project->writeJson('meta.json', ['prompt' => 'A dark landing page with a cinematic photo hero.']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            hh_cover_hero('hero-composition--cinematic-safe-zone hero-mobile--stack-media-first'),
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'hero-frame--'));
+        assert_true(!$project->exists('warnings.json') || !str_contains($project->readText('warnings.json'), 'frames the hero'));
+    });
+});
