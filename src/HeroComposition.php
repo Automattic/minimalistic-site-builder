@@ -327,7 +327,9 @@ final class HeroComposition
             'media_modes' => ['foreground-image'],
             'min_images' => 1,
             'max_images' => 2,
-            'backgrounds' => ['base', 'tinted'],
+            // The panel carries the tint; a tinted root merged with it into
+            // one edge-to-edge block on zova-like45 (frm PR-2ad).
+            'backgrounds' => ['base'],
             'default_background' => 'base',
             'fallback_background' => 'base',
             'header_modes' => ['stacked'],

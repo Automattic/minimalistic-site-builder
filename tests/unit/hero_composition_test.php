@@ -427,7 +427,7 @@ test('panel-stage is a two-image foreground recipe that stays out of one-image c
     $meta = HeroComposition::metadata('panel-stage');
     assert_eq(['foreground-image'], $meta['media_modes']);
     assert_eq(['stacked'], $meta['header_modes'], 'the header sits above the panel, never over it');
-    assert_eq(['base', 'tinted'], $meta['backgrounds'], 'the panel carries the tint; the root never paints contrast or an image');
+    assert_eq(['base'], $meta['backgrounds'], 'the panel carries the tint; the root never paints contrast or an image');
     assert_eq('asymmetric-split', $meta['layout_archetype']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
     assert_true(in_array('panel-stage', HeroComposition::compatible([]), true));
@@ -804,4 +804,20 @@ test('a wordmark case the brief states is read, stamped on the headline and meas
     assert_contains('hero-composition__wordmark hero-composition__wordmark--lower"', $lower);
     assert_true(!str_contains($lower, 'wordmark--upper'), 'the opposite class is replaced, not stacked');
     assert_eq($upper, HeroComposition::bindWordmarkHeadline($upper, 'Studio Grund', 'page-home--hero', $repairs, null, 'uppercase'), 'a second pass is a fixed point');
+});
+
+test('the panel-stage root is always base: the panel carries the tint (frm PR-2ad)', function () {
+    assert_eq(['base'], HeroComposition::metadata('panel-stage')['backgrounds']);
+    $projection = HeroComposition::planProjection(HeroBlueprint::defaultFor('panel-stage'), null);
+    assert_eq(['base'], $projection['allowed_backgrounds']);
+    // zova-like45 planned the hero on tinted and the rounded panel vanished into one grey block.
+    $repairs = [];
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Steps\PagePlanStep::normalize([
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'asymmetric-split', 'background' => 'tinted', 'vertical_density' => 'standard', 'item_pattern' => null, 'text_placement' => 'left-column', 'handoff' => 'Sits under the header above the features row below.', 'primary_action' => null, 'purpose' => 'open'],
+        ['slug' => 'features', 'title' => 'Features', 'type' => 'features', 'layout_archetype' => 'feature-row-hairlines', 'background' => 'base', 'vertical_density' => 'standard', 'item_pattern' => null, 'text_placement' => 'centered', 'handoff' => 'Sits under the hero above the pricing below.', 'primary_action' => null, 'purpose' => 'list'],
+        ['slug' => 'pricing', 'title' => 'Pricing', 'type' => 'pricing', 'layout_archetype' => 'pricing-tiers', 'background' => 'base', 'vertical_density' => 'standard', 'item_pattern' => null, 'text_placement' => 'centered', 'handoff' => 'Sits under the features above the footer.', 'primary_action' => null, 'purpose' => 'sell'],
+    ], true, $projection, [], $warnings, 'home', $repairs);
+    assert_eq('base', $out[0]['background'], 'the tinted root yields to the panel');
+    assert_contains("path=\"pages[slug='home'].sections[0].background\"; authored=\"tinted\"; delivered=\"base\"", implode("\n", $repairs));
 });
