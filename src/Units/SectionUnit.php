@@ -258,7 +258,13 @@ final class SectionUnit extends AbstractPageSectionUnit
             $themeArray = json_decode($themeArray, true);
         }
         if (is_array($themeArray)) {
-            $headingFit = HeroHeadlineFit::fitSectionHeadings($markup, $themeArray, HeroHeadlineFit::PHONE_VIEWPORT_PX);
+            // A pricing tier's price paragraph is a figure line too (frm PR-2af).
+            $headingFit = HeroHeadlineFit::fitSectionHeadings(
+                $markup,
+                $themeArray,
+                HeroHeadlineFit::PHONE_VIEWPORT_PX,
+                $archetype === 'pricing-tiers',
+            );
             $markup = $headingFit['markup'];
             foreach ($headingFit['notes'] as $note) {
                 $repairs[] = [

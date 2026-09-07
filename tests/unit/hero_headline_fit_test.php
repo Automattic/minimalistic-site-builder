@@ -844,3 +844,44 @@ test('a paragraph at a heading-scale preset in a narrow nested column is bounded
     assert_eq($body, $r['markup']);
     assert_eq([], $r['notes']);
 });
+
+test('a pricing tier price paragraph is bounded by its column and the phone like a figure line (frm PR-2af)', function () {
+    // fabrica-like33: section-title clamp(4.33rem, 6vw, 6.447rem) in a wide
+    // heading face; "$14,000/mo" is one word in a 33.34% tier of a wide row.
+    $theme = [
+        'settings' => ['layout' => ['wideSize' => '1400px'], 'typography' => [
+            'fontFamilies' => [['slug' => 'heading', 'fontFamily' => '"Host Grotesk", sans-serif']],
+            'fontSizes' => [
+                ['slug' => 'body', 'size' => '1rem'],
+                ['slug' => 'heading', 'size' => '3.464rem'],
+                ['slug' => 'section-title', 'size' => 'clamp(4.33rem, 6vw, 6.447rem)'],
+            ],
+        ]],
+    ];
+    $tier = static fn (string $price, string $width, string $extra = ''): string => '<!-- wp:column {"width":"' . $width . '"} --><div class="wp-block-column" style="flex-basis:' . $width . '">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"level":3,"fontSize":"lead"} --><h3 class="wp-block-heading has-lead-font-size">Plan</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"className":"price-figure' . $extra . '","fontFamily":"heading"} --><p class="price-figure' . $extra . ' has-heading-font-family">' . $price . '</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Scope line for the tier.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->';
+    $markup = '<!-- wp:group {"className":"section-composition--pricing-tiers","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--pricing-tiers">'
+        . '<!-- wp:columns {"align":"wide","className":"equal-cards"} --><div class="wp-block-columns alignwide equal-cards">'
+        . $tier('$2,400/mo', '33.33%') . $tier('$6,000/mo', '33.33%', ' reveal') . $tier('$14,000/mo', '33.34%')
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($markup, $theme, HeroHeadlineFit::PHONE_VIEWPORT_PX, true);
+    $notes = implode("\n", $r['notes']);
+    assert_contains("section heading column-fit: p '\$14,000/mo'", $notes, 'the widest price is bounded by its tier column: ' . $notes);
+    assert_contains("section heading phone-fit: p '\$14,000/mo'", $notes, 'and by the phone measure, where the tiers stack');
+    assert_true(preg_match('/<p class="price-figure figure-line has-heading-font-family" style="font-size:min\(var\(--wp--preset--font-size--section-title\), [0-9.]+vw, [0-9]+px\)">\$14,000\/mo<\/p>/', $r['markup']) === 1
+        || preg_match('/<p class="price-figure figure-line has-heading-font-family">\$14,000\/mo<\/p>/', $r['markup']) === 1, 'the price keeps its class and gains the figure class in the HTML: ' . $r['markup']);
+    assert_contains('"className":"price-figure figure-line"', $r['markup'], 'and in the block JSON');
+    assert_contains('"fontSize":"min(var(\\u002d\\u002dwp\\u002d\\u002dpreset\\u002d\\u002dfont-size\\u002d\\u002dsection-title), ', $r['markup'], 'the pin joins the section-title preset');
+    assert_contains('"className":"price-figure reveal figure-line"', $r['markup'], 'a second class on the price survives');
+    // Without the pricing archetype the class means nothing to the fit.
+    $off = HeroHeadlineFit::fitSectionHeadings($markup, $theme);
+    assert_true($off['notes'] === [], 'outside a pricing section no price is bounded');
+    assert_true($off['markup'] === $markup);
+    // The pass is idempotent: a pinned price is left alone.
+    $again = HeroHeadlineFit::fitSectionHeadings($r['markup'], $theme, HeroHeadlineFit::PHONE_VIEWPORT_PX, true);
+    assert_true($again['notes'] === [] && $again['markup'] === $r['markup'], 'a pinned price is not pinned twice');
+});

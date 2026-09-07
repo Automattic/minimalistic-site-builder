@@ -242,6 +242,18 @@ final class HeroHeadlineFit
     public const FIGURE_CLASS = 'figure-line';
 
     /**
+     * A pricing tier's price paragraph (frm PR-2af). The pricing-tiers recipe
+     * marks it `price-figure` and the theme sets it at the section-title
+     * preset through that class, so no preset attribute names its scale and
+     * the figure-line check above never saw it: fabrica-like33's "$14,000/mo"
+     * (one unbreakable word) ran its 428px tier 100px past a 1366px viewport
+     * and a 390px phone to 471px. Under the pricing archetype the paragraph
+     * is a figure line at the section-title preset.
+     */
+    public const PRICE_FIGURE_CLASS = 'price-figure';
+    private const PRICE_FIGURE_SLUG = 'section-title';
+
+    /**
      * Phone-fit the section headings of one part (frm PR-5i). Headings may
      * not break mid-word (the word-wrap policy), and nothing measured them:
      * dasstudio-like2's "conversation" at the section-title minimum ran a
@@ -259,6 +271,7 @@ final class HeroHeadlineFit
         string $markup,
         array $theme,
         float $phoneViewportPx = self::PHONE_VIEWPORT_PX,
+        bool $priceFigures = false,
     ): array {
         $doc = BlockMarkup::parse($markup);
         if ($doc->hasMismatchedDelimiters() || $doc->hasMalformedDelimiters()) {
@@ -273,10 +286,13 @@ final class HeroHeadlineFit
             }
             $attrs = $doc->attrs($i) ?? [];
             $figure = $name === 'paragraph';
+            $price = false;
             if ($figure) {
-                // Only a paragraph at a heading-scale preset is a figure line (frm PR-5q).
+                // Only a paragraph at a heading-scale preset is a figure line (frm PR-5q),
+                // or a pricing tier's price, which the theme scales by class (frm PR-2af).
                 $presetSlug = is_string($attrs['fontSize'] ?? null) ? trim($attrs['fontSize']) : '';
-                if (!in_array($presetSlug, self::FIGURE_PARAGRAPH_SLUGS, true)) {
+                $price = $priceFigures && in_array(self::PRICE_FIGURE_CLASS, self::classes($attrs), true);
+                if (!$price && !in_array($presetSlug, self::FIGURE_PARAGRAPH_SLUGS, true)) {
                     continue;
                 }
                 $level = 3;
@@ -292,6 +308,9 @@ final class HeroHeadlineFit
             $slug = is_string($attrs['fontSize'] ?? null) && trim($attrs['fontSize']) !== ''
                 ? trim($attrs['fontSize'])
                 : self::sectionLevelSlug($theme, $level);
+            if ($price) {
+                $slug = self::PRICE_FIGURE_SLUG;
+            }
             $phoneSize = self::presetMinPx($theme, $slug);
             if ($phoneSize === null || $phoneSize <= 0) {
                 continue;
@@ -371,7 +390,13 @@ final class HeroHeadlineFit
                 $attrs['className'] = implode(' ', $classes);
             }
             $doc->setAttrs($i, $attrs);
-            if ($figure && !in_array(self::FIGURE_CLASS, self::classes($doc->attrs($i) ?? []), true)) {
+            if ($price) {
+                // The price class scales the paragraph; the figure class joins it in the HTML.
+                $doc->replaceClassTokenInOwnHtml($i, self::PRICE_FIGURE_CLASS, self::PRICE_FIGURE_CLASS . ' ' . self::FIGURE_CLASS);
+                if ($presetSlug !== '') {
+                    $doc->removeClassTokenInOwnHtml($i, 'has-' . $presetSlug . '-font-size');
+                }
+            } elseif ($figure && !in_array(self::FIGURE_CLASS, self::classes($doc->attrs($i) ?? []), true)) {
                 $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
             } elseif ($figure) {
                 $doc->replaceClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size', self::FIGURE_CLASS);
