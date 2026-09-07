@@ -3249,7 +3249,24 @@ test('a heading treatment the brief states outranks the seed commitment (frm PR-
     assert_eq('tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('tight sans headings'));
     assert_eq('caps-tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase headings with tight tracking'));
     assert_eq('lowercase', \Automattic\SiteBuild\TypeTreatment::statedTreatment('lowercase headings'));
-    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase display headline'), 'a stated case alone is PR-5s business, not a treatment');
+    assert_eq('caps-tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase display headline'), 'a stated uppercase heading is the caps treatment (frm PR-5u)');
     assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatment('a tight-knit team'), 'tight must be about type');
     assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatmentFor([]));
+});
+
+test('a stated uppercase heading binds the caps treatment and a committed caps-tracked stands (frm PR-5u)', function () {
+    $spector = ['prompt' => 'Dark hero with a full-bleed high-contrast portrait, metadata in the corners, a three-line uppercase display headline with a red-to-cream gradient.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $spector, false, $repairs);
+    assert_eq('caps-tight', $out['type_treatment']);
+    assert_contains('field type_treatment authored "tight" delivered "caps-tight"', implode("\n", $repairs));
+
+    $repairs = [];
+    $tracked = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tracked'], $spector, false, $repairs);
+    assert_eq('caps-tracked', $tracked['type_treatment'], 'the case already holds; the tracking is the seed\'s');
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'));
+
+    $repairs = [];
+    $lower = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], $spector, false, $repairs);
+    assert_eq('caps-tight', $lower['type_treatment'], 'a lowercase commitment yields to the stated uppercase');
 });
