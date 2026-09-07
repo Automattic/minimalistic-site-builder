@@ -119,8 +119,11 @@ p, li, dt, dd, blockquote, figcaption, caption, th, td,
   text-wrap: pretty;
 }
 
-/* Body copy may break a lone overlong token (a URL); headings never do. */
-p, li {
+/* Body copy may break a lone overlong token (a URL); headings never do,
+   and neither does a figure line: a paragraph at a heading-scale preset
+   or one the column fit pinned (frm PR-5q: calderr-like32's "Amsterdam"
+   stat split letter by letter in a narrow column). */
+p:not(.figure-line):not(.has-heading-font-size):not(.has-section-title-font-size):not(.has-display-font-size), li {
   overflow-wrap: break-word;
   word-break: normal;
 }

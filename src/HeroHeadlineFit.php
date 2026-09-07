@@ -223,6 +223,25 @@ final class HeroHeadlineFit
     private const SECTION_LEVEL_SLUGS = [2 => 'section-title', 3 => 'heading'];
 
     /**
+     * A paragraph at one of these presets is a figure line (frm PR-5q): a
+     * stat value, a price, a word-valued stat. calderr-like32 set "Amsterdam"
+     * at the heading preset in a 25% column of a 40% column, and core's
+     * `.wp-block-column { overflow-wrap: break-word }` split it letter by
+     * letter; the column fit bounds such a paragraph the way it bounds a
+     * heading.
+     *
+     * @var list<string>
+     */
+    private const FIGURE_PARAGRAPH_SLUGS = ['heading', 'section-title', 'display'];
+
+    /**
+     * The class a pinned figure paragraph keeps once its preset class gives
+     * way to the pin, so the page-styles wrap policy still treats it as a
+     * heading-scale line that never breaks mid-word (frm PR-5q).
+     */
+    public const FIGURE_CLASS = 'figure-line';
+
+    /**
      * Phone-fit the section headings of one part (frm PR-5i). Headings may
      * not break mid-word (the word-wrap policy), and nothing measured them:
      * dasstudio-like2's "conversation" at the section-title minimum ran a
@@ -248,13 +267,24 @@ final class HeroHeadlineFit
         $notes = [];
         $changed = false;
         foreach ($doc->indices() as $i) {
-            if ($doc->name($i) !== 'heading' || !$doc->isStructurallySafe($i)) {
+            $name = $doc->name($i);
+            if (!in_array($name, ['heading', 'paragraph'], true) || !$doc->isStructurallySafe($i)) {
                 continue;
             }
             $attrs = $doc->attrs($i) ?? [];
-            $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
-            if (!in_array($level, self::SECTION_HEADING_LEVELS, true)) {
-                continue;
+            $figure = $name === 'paragraph';
+            if ($figure) {
+                // Only a paragraph at a heading-scale preset is a figure line (frm PR-5q).
+                $presetSlug = is_string($attrs['fontSize'] ?? null) ? trim($attrs['fontSize']) : '';
+                if (!in_array($presetSlug, self::FIGURE_PARAGRAPH_SLUGS, true)) {
+                    continue;
+                }
+                $level = 3;
+            } else {
+                $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
+                if (!in_array($level, self::SECTION_HEADING_LEVELS, true)) {
+                    continue;
+                }
             }
             if (isset($attrs['style']['typography']['fontSize'])) {
                 continue;
@@ -270,22 +300,32 @@ final class HeroHeadlineFit
             if ($word === null) {
                 continue;
             }
-            $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
+            // A paragraph reads its own transform and tracking, not the heading element's.
+            $uppercase = $figure
+                ? (($attrs['style']['typography']['textTransform'] ?? null) === 'uppercase')
+                : self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
             $chars = mb_strlen($word);
-            $wordEm = $chars * self::characterEm($theme, $uppercase)
-                + max(0, $chars - 1) * self::effectiveLetterSpacingEm($attrs, $theme, $level);
+            $spacingEm = $figure
+                ? self::ownLetterSpacingEm($attrs)
+                : self::effectiveLetterSpacingEm($attrs, $theme, $level);
+            $wordEm = $chars * self::characterEm($theme, $uppercase) + max(0, $chars - 1) * $spacingEm;
+            $tag = $figure ? 'p' : 'h' . $level;
             if ($wordEm <= 0 || $phoneViewportPx <= 2 * self::PHONE_GUTTER_PX) {
                 continue;
             }
-            $available = ($phoneViewportPx - 2 * self::PHONE_GUTTER_PX) * self::PHONE_SAFETY;
+            // A column row that stays side by side on phones narrows the
+            // phone measure too (frm PR-5q): calderr-like32's four unstacked
+            // stat columns gave "Amsterdam" about 70px at 390, and the whole
+            // page grew to 415px once the word could no longer break.
+            $available = self::phoneColumnPx($doc, $i, $phoneViewportPx) * self::PHONE_SAFETY;
             $terms = [];
             if ($phoneSize * $wordEm > $available) {
                 $vw = floor(($available / $phoneViewportPx * 100) / $wordEm * 10) / 10;
                 if ($vw > 0) {
                     $terms[] = $vw . 'vw';
                     $notes[] = sprintf(
-                        "section heading phone-fit: h%d '%s' (~%.2fem) would overflow a %dpx viewport at the %s minimum; %svw joins the preset",
-                        $level,
+                        "section heading phone-fit: %s '%s' (~%.2fem) would overflow a %dpx viewport at the %s minimum; %svw joins the preset",
+                        $tag,
                         $word,
                         $wordEm,
                         (int) $phoneViewportPx,
@@ -308,8 +348,8 @@ final class HeroHeadlineFit
             if ($column !== null) {
                 $terms[] = $column['px'] . 'px';
                 $notes[] = sprintf(
-                    "section heading column-fit: h%d '%s' (~%.2fem) would overflow a %dpx column at the %s maximum; %dpx joins the preset",
-                    $level,
+                    "section heading column-fit: %s '%s' (~%.2fem) would overflow a %dpx column at the %s maximum; %dpx joins the preset",
+                    $tag,
                     $column['text'],
                     $column['em'],
                     $column['column'],
@@ -323,14 +363,64 @@ final class HeroHeadlineFit
             $size = 'min(var(--wp--preset--font-size--' . $slug . '), ' . implode(', ', $terms) . ')';
             unset($attrs['fontSize']);
             $attrs = self::withPinnedFontSize($attrs, $size);
+            if ($figure) {
+                $classes = self::classes($attrs);
+                if (!in_array(self::FIGURE_CLASS, $classes, true)) {
+                    $classes[] = self::FIGURE_CLASS;
+                }
+                $attrs['className'] = implode(' ', $classes);
+            }
             $doc->setAttrs($i, $attrs);
-            $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
+            if ($figure && !in_array(self::FIGURE_CLASS, self::classes($doc->attrs($i) ?? []), true)) {
+                $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
+            } elseif ($figure) {
+                $doc->replaceClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size', self::FIGURE_CLASS);
+            } else {
+                $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
+            }
             $changed = true;
         }
         return ['markup' => $changed ? $doc->render() : $markup, 'notes' => $notes];
     }
 
     private const COLUMN_GAP_PX = 24.0;
+
+    /**
+     * The width a block has on a phone: the phone measure, narrowed by every
+     * enclosing column row that keeps its columns side by side there
+     * (`isStackedOnMobile: false`); a stacked row is full width on a phone.
+     */
+    private static function phoneColumnPx(BlockMarkup $doc, int $index, float $phoneViewportPx): float
+    {
+        $px = $phoneViewportPx - 2 * self::PHONE_GUTTER_PX;
+        $levels = [];
+        for ($node = $doc->parent($index); $node !== null; $node = $doc->parent($node)) {
+            if ($doc->name($node) !== 'column') {
+                continue;
+            }
+            $row = $doc->parent($node);
+            if ($row === null || $doc->name($row) !== 'columns') {
+                continue;
+            }
+            if (($doc->attrs($row)['isStackedOnMobile'] ?? true) !== false) {
+                continue;
+            }
+            $siblings = array_values(array_filter($doc->children($row), static fn (int $c): bool => $doc->name($c) === 'column'));
+            $count = count($siblings);
+            if ($count < 2) {
+                continue;
+            }
+            $width = $doc->attrs($node)['width'] ?? null;
+            $share = is_string($width) && preg_match('/^\s*([0-9.]+)%\s*$/', $width, $m) === 1
+                ? max(0.05, min(1.0, (float) $m[1] / 100))
+                : 1 / $count;
+            $levels[] = ['count' => $count, 'share' => $share];
+        }
+        foreach (array_reverse($levels) as $level) {
+            $px = max(1.0, ($px - ($level['count'] - 1) * self::COLUMN_GAP_PX) * $level['share']);
+        }
+        return $px;
+    }
     /** A word space in em, near the space glyph of the wide faces (Anybody 900: 0.26). */
     private const SPACE_EM = 0.28;
     /** Headings with this many words or more keep their widest neighbouring pair on one line in a narrow column. */
@@ -1240,6 +1330,20 @@ final class HeroHeadlineFit
             }
         }
         return null;
+    }
+
+    /** A block's own letter spacing in em, for a figure paragraph (frm PR-5q). */
+    private static function ownLetterSpacingEm(array $attrs): float
+    {
+        $value = $attrs['style']['typography']['letterSpacing'] ?? null;
+        if (!is_string($value) || trim($value) === '') {
+            return 0.0;
+        }
+        $value = trim($value);
+        if (preg_match('/^(-?[\d.]+)em$/i', $value, $m)) {
+            return max(0.0, (float) $m[1]);
+        }
+        return str_starts_with($value, '-') ? 0.0 : self::UNKNOWN_SPACING_EM;
     }
 
     private static function effectiveLetterSpacingEm(array $attrs, array $theme, int $level): float

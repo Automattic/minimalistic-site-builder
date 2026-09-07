@@ -790,3 +790,57 @@ test('a long heading in a nested column keeps its widest word pair on one line (
     $r = HeroHeadlineFit::fitSectionHeadings($wideCol, $theme);
     assert_true(!str_contains(implode("\n", $r['notes']), 'column-fit'), 'a wide column keeps the preset when its longest word fits');
 });
+
+test('a paragraph at a heading-scale preset in a narrow nested column is bounded like a heading (frm PR-5q)', function () {
+    $theme = [
+        'settings' => ['layout' => ['wideSize' => '1560px'], 'typography' => [
+            'fontFamilies' => [['slug' => 'heading', 'fontFamily' => '"Piazzolla", serif']],
+            'fontSizes' => [
+                ['slug' => 'body', 'size' => '1rem'],
+                ['slug' => 'heading', 'size' => '2.449rem'],
+                ['slug' => 'section-title', 'size' => 'clamp(3.062rem, 3vw, 3.834rem)'],
+            ],
+        ]],
+        'styles' => ['elements' => ['heading' => ['typography' => ['textTransform' => 'uppercase', 'letterSpacing' => '-0.01em']]]],
+    ];
+    // calderr-like32: four stats in 25% columns inside the 40% column of the about split.
+    $stat = static fn (string $value, string $size = 'heading'): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column" style="flex-basis:25%">'
+        . '<!-- wp:paragraph {"fontFamily":"heading","fontSize":"' . $size . '"} --><p class="has-heading-font-family has-' . $size . '-font-size">' . $value . '</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">label</p><!-- /wp:paragraph --></div><!-- /wp:column -->';
+    $inner = '<!-- wp:columns --><div class="wp-block-columns">' . $stat('8+') . $stat('40+') . $stat('2') . $stat('Amsterdam') . '</div><!-- /wp:columns -->';
+    $outer = '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column" style="flex-basis:60%"><!-- wp:paragraph --><p>Copy</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column" style="flex-basis:40%">' . $inner . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . $outer . '</div><!-- /wp:group -->';
+    $r = HeroHeadlineFit::fitSectionHeadings($markup, $theme);
+    $notes = implode("\n", $r['notes']);
+    assert_contains("section heading column-fit: p 'Amsterdam'", $notes, 'the word-valued stat is bounded');
+    assert_true(preg_match('/<p class="has-heading-font-family" style="font-size:min\(var\(--wp--preset--font-size--heading\), [^"]*px\)">Amsterdam<\/p>/', $r['markup']) === 1
+        || str_contains($r['markup'], '"fontSize":"min(var(\\u002d\\u002dwp\\u002d\\u002dpreset\\u002d\\u002dfont-size\\u002d\\u002dheading), '), 'the pin joins the preset in the block JSON');
+    assert_true(!str_contains($notes, "'8+'") && !str_contains($notes, "'40+'"), 'a two-character figure fits the column');
+    assert_true(!str_contains($r['markup'], 'has-heading-font-size">Amsterdam'), 'the preset class gives way to the pin');
+    assert_true(preg_match('/<p class="has-heading-font-family figure-line"[^>]*>Amsterdam<\/p>/', $r['markup']) === 1, 'the figure-line class replaces the preset class in the HTML: ' . $r['markup']);
+    assert_contains('"className":"figure-line"', $r['markup'], 'and in the block JSON');
+    // A paragraph reads its own case, not the heading element's: mixed-case advances, not uppercase ones.
+    assert_true(!str_contains($notes, 'AMSTERDAM'));
+    $again = HeroHeadlineFit::fitSectionHeadings($r['markup'], $theme);
+    assert_eq($r['markup'], $again['markup'], 'idempotent');
+
+    // The row stays side by side on phones: the phone term then reads the
+    // column's phone share, not the whole measure, and the page keeps 390.
+    $unstacked = str_replace('<!-- wp:columns --><div class="wp-block-columns">', '<!-- wp:columns {"isStackedOnMobile":false} --><div class="wp-block-columns is-not-stacked-on-mobile">', $markup);
+    $r = HeroHeadlineFit::fitSectionHeadings($unstacked, $theme);
+    $notes = implode("\n", $r['notes']);
+    assert_contains("section heading phone-fit: p 'Amsterdam'", $notes, 'the unstacked column narrows the phone measure');
+    assert_true(preg_match('/heading\), ([0-9.]+)vw, [0-9]+px\)/', $r['markup'], $vm) === 1, 'both terms join the preset: ' . $r['markup']);
+    assert_true((float) $vm[1] < 5.0, 'a quarter column of a 390px phone measure bounds the word far under the preset');
+    $stackedNotes = implode("\n", HeroHeadlineFit::fitSectionHeadings($markup, $theme)['notes']);
+    assert_true(!str_contains($stackedNotes, 'phone-fit'), 'a stacked row is full width on a phone and the word fits the measure');
+
+    // A body-size paragraph and a caption stay untouched.
+    $body = str_replace('"fontSize":"heading"', '"fontSize":"body"', str_replace('has-heading-font-size', 'has-body-font-size', $markup));
+    $r = HeroHeadlineFit::fitSectionHeadings($body, $theme);
+    assert_eq($body, $r['markup']);
+    assert_eq([], $r['notes']);
+});
