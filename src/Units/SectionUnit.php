@@ -316,6 +316,8 @@ final class SectionUnit extends AbstractPageSectionUnit
             );
         }
         if ($itemPattern !== null) {
+            // A repeated list shows a picture on every item or on none (frm PR-3aj).
+            $markup = GeneratedMarkup::withItemMediaParity($markup, $this->key($input), $repairs, $warnings);
             array_push(
                 $warnings,
                 ...ItemPattern::markupWarnings($markup, $itemPattern, $this->key($input)),

@@ -460,3 +460,57 @@ test('a cardless archetype releases its planned item pattern and corrects the no
     assert_eq($delivered, PagePlanStep::reconcileItemPatternAssignments($delivered, 'card', $fixedPointRepairs));
     assert_eq([], $fixedPointRepairs);
 });
+
+test('a minority of repeated items with a picture loses it, a majority keeps it (frm PR-3aj)', function (): void {
+    $item = static function (string $title, bool $picture): string {
+        $classes = 'item-pattern__item card-style--flush' . ($picture ? ' card-flush' : '');
+        $escaped = str_replace('--', '--', $classes);
+        return '<!-- wp:group {"backgroundColor":"band","className":"' . $escaped . '","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group ' . $classes . ' has-band-background-color has-background">'
+            . ($picture ? '<!-- wp:image {"className":"card-media"} --><figure class="wp-block-image card-media"><img src="/x.jpg" alt=""/></figure><!-- /wp:image -->' : '')
+            . '<!-- wp:group {"className":"card-body","layout":{"type":"constrained"}} --><div class="wp-block-group card-body">'
+            . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading -->'
+            . '<!-- wp:paragraph --><p>Copy.</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
+            . '</div><!-- /wp:group -->';
+    };
+    $section = static fn (array $items): string => '<!-- wp:group {"anchor":"services","className":"section-composition--centered-stack item-pattern--card","layout":{"type":"constrained"}} -->'
+        . '<div id="services" class="wp-block-group section-composition--centered-stack item-pattern--card">'
+        . implode('', $items) . '</div><!-- /wp:group -->';
+
+    // dasstudio-like25: two of five with a tall photo.
+    $repairs = [];
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::withItemMediaParity(
+        $section([$item('Brand', true), $item('Identity', true), $item('Art', false), $item('Systems', false), $item('Editorial', false)]),
+        'page-home--services',
+        $repairs,
+        $warnings,
+    );
+    assert_true(!str_contains($out, 'wp:image'), 'both minority pictures removed');
+    assert_true(!str_contains($out, 'card-flush'), 'the media-card hook went with them');
+    assert_true(str_contains($out, 'card-style--flush'), 'the card style stays');
+    assert_eq(10, substr_count($out, 'item-pattern__item'), 'five items, each once in the JSON and once in the class attribute');
+    assert_eq(5, substr_count($out, '<h3'), 'every item keeps its copy');
+    assert_eq(2, count($warnings));
+    assert_contains('2 of 5 repeated items carried a picture', $warnings[0]);
+    assert_contains('delivered=removed', $warnings[0]);
+    assert_eq(1, count($repairs));
+    assert_eq('item-media-parity', $repairs[0]['code']);
+    assert_true(\Automattic\SiteBuild\BlockMarkup::parse($out)->unclosedIndices() === [], 'the document still parses');
+
+    // A majority with pictures, an even split, every item, or no item: untouched.
+    foreach ([
+        [$item('A', true), $item('B', true), $item('C', true), $item('D', false)],
+        [$item('A', true), $item('B', false), $item('C', true), $item('D', false)],
+        [$item('A', true), $item('B', true), $item('C', true)],
+        [$item('A', false), $item('B', false), $item('C', false)],
+        [$item('A', true), $item('B', false)],
+    ] as $items) {
+        $repairs = [];
+        $warnings = [];
+        $markup = $section($items);
+        assert_eq($markup, \Automattic\SiteBuild\Units\GeneratedMarkup::withItemMediaParity($markup, 'page-home--services', $repairs, $warnings));
+        assert_eq([], $warnings);
+        assert_eq([], $repairs);
+    }
+});

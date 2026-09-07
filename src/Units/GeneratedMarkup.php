@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
@@ -2416,6 +2417,142 @@ final class GeneratedMarkup
             'disposition' => 'repaired',
         ];
         return $document->render();
+    }
+
+    /**
+     * Media parity across one repeated-item list (frm PR-3aj). dasstudio-like25's
+     * five disciplines gave the first two items a tall card picture and the
+     * other three none, so the list read as two kinds of card. A repeated
+     * list shows a picture on every item or on none: when fewer than half of
+     * the sibling items carry one, the minority's pictures are removed at
+     * their complete block boundaries and the item drops its media-card hook.
+     * A majority with pictures stays as authored (nothing invents a picture).
+     * Items are grouped by parent so two lists in one section are judged apart.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function withItemMediaParity(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $itemIndices = [];
+        foreach ($document->indices() as $index) {
+            if (in_array(ItemPattern::ITEM_MARKER, self::classTokens(
+                (string) (($document->attrs($index) ?? [])['className'] ?? ''),
+            ), true)) {
+                $itemIndices[$index] = true;
+            }
+        }
+        if (count($itemIndices) < 3) {
+            return $markup;
+        }
+        // Media blocks, keyed by the nearest enclosing item.
+        $mediaByItem = [];
+        foreach ($document->indices() as $index) {
+            if (!in_array($document->name($index), ['image', 'cover'], true)) {
+                continue;
+            }
+            for ($up = $document->parent($index); $up !== null; $up = $document->parent($up)) {
+                if (isset($itemIndices[$up])) {
+                    $mediaByItem[$up][] = $index;
+                    break;
+                }
+            }
+        }
+        // Sibling groups: items that share a parent form one list.
+        $groups = [];
+        foreach (array_keys($itemIndices) as $item) {
+            $groups[(string) ($document->parent($item) ?? 'root')][] = $item;
+        }
+        $spans = [];
+        $bareItems = [];
+        $summary = [];
+        foreach ($groups as $items) {
+            $total = count($items);
+            $withMedia = array_values(array_filter($items, static fn (int $item): bool => isset($mediaByItem[$item])));
+            $carrying = count($withMedia);
+            if ($total < 3 || $carrying === 0 || $carrying * 2 >= $total) {
+                continue;
+            }
+            foreach ($withMedia as $item) {
+                foreach ($mediaByItem[$item] as $media) {
+                    $end = $document->endOffset($media);
+                    if ($end === null) {
+                        continue;
+                    }
+                    $spans[] = [
+                        'index' => $media,
+                        'start' => $document->openingOffset($media),
+                        'end' => $end,
+                        'authored' => substr($markup, $document->openingOffset($media), $end - $document->openingOffset($media)),
+                        'path' => self::blockPath($document, $media),
+                    ];
+                }
+                $bareItems[] = $item;
+            }
+            $summary[] = "{$carrying} of {$total} repeated items carried a picture";
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+        $spans = self::outermostRemovalSpans($spans);
+        $disposition = implode('; ', $summary)
+            . '; a repeated list shows a picture on every item or on none, so the minority picture was removed '
+            . 'at its complete block boundary and the copy kept';
+        foreach ($spans as $span) {
+            $warnings[] = "file='theme/parts/{$part}.html'; block='{$span['path']}'; authored="
+                . Warnings::value($span['authored']) . "; delivered=removed; disposition={$disposition}";
+        }
+        // The media-card hook names a picture that is no longer there.
+        $bareOffsets = [];
+        foreach ($bareItems as $item) {
+            $bareOffsets[$document->openingOffset($item)] = true;
+        }
+        $out = self::removeSpans($markup, $spans);
+        $reparsed = BlockMarkup::parse($out);
+        $offsetShift = static function (int $offset) use ($spans): int {
+            $shift = 0;
+            foreach ($spans as $span) {
+                if ($span['end'] <= $offset) {
+                    $shift += $span['end'] - $span['start'];
+                }
+            }
+            return $offset - $shift;
+        };
+        $bareAfter = [];
+        foreach (array_keys($bareOffsets) as $offset) {
+            $bareAfter[$offsetShift($offset)] = true;
+        }
+        $stripped = 0;
+        foreach ($reparsed->indices() as $index) {
+            if (!isset($bareAfter[$reparsed->openingOffset($index)])) {
+                continue;
+            }
+            $attrs = $reparsed->attrs($index) ?? [];
+            $tokens = self::classTokens((string) ($attrs['className'] ?? ''));
+            if (!in_array('card-flush', $tokens, true)) {
+                continue;
+            }
+            $attrs['className'] = implode(' ', array_values(array_diff($tokens, ['card-flush'])));
+            $reparsed->setAttrs($index, $attrs);
+            $reparsed->removeClassTokenInOwnHtml($index, 'card-flush');
+            $stripped++;
+        }
+        if ($stripped > 0) {
+            $out = $reparsed->render();
+        }
+        $repairs[] = [
+            'code' => 'item-media-parity',
+            'part' => $part,
+            'authored' => implode('; ', $summary),
+            'delivered' => count($spans) . ' minority picture(s) removed, ' . $stripped . ' media-card hook(s) dropped',
+            'disposition' => 'repaired',
+        ];
+        return $out;
     }
 
     /**
