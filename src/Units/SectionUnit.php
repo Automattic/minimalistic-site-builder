@@ -298,6 +298,10 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $band->markup;
         array_push($repairs, ...$band->repairs);
         array_push($warnings, ...$band->warnings);
+        // A closing panel holds one panel and nothing else (frm PR-3an).
+        if ($archetype === 'cta-panel') {
+            $markup = GeneratedMarkup::stripCtaPanelSiblings($markup, $this->key($input), $repairs, $warnings);
+        }
         // Advisory only: the catalog reports a section that ignored its
         // assignment and the build delivers the safe parseable markup anyway.
         if ($archetype !== null) {

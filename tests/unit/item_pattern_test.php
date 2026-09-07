@@ -514,3 +514,37 @@ test('a minority of repeated items with a picture loses it, a majority keeps it 
         assert_eq([], $repairs);
     }
 });
+
+test('a closing cta-panel section keeps its one panel and loses every sibling (frm PR-3an)', function (): void {
+    $panel = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","align":"wide","className":"cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide cta-panel has-base-color has-contrast-background-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Let\'s work together</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Have a project in mind?</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#contact">Get in touch</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $echo = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:heading {"level":3,"fontSize":"display"} --><h3 class="wp-block-heading has-display-font-size">Sophie van der Meer</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Web design and digital direction.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $badge = '<!-- wp:paragraph {"className":"section-badge"} --><p class="section-badge">Next step</p><!-- /wp:paragraph -->';
+    $section = static fn (string $inner): string => '<!-- wp:group {"anchor":"closing","className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div id="closing" class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+
+    $repairs = [];
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($badge . $panel . $echo), 'page-home--closing', $repairs, $warnings);
+    assert_eq($section($panel), $out, 'the badge before and the echo after both go');
+    assert_eq(2, count($warnings));
+    assert_contains('holds one panel and nothing else in its root', $warnings[1]);
+    assert_contains("block='wp:group[0] > wp:group[1]'; authored=", $warnings[1], 'the echo group after the panel: ' . $warnings[1]);
+    assert_contains("block='wp:group[0] > wp:paragraph[0]'", $warnings[0], 'the badge before it');
+    assert_eq('cta-panel-siblings-stripped', $repairs[0]['code'] ?? null);
+    assert_true(\Automattic\SiteBuild\BlockMarkup::parse($out)->unclosedIndices() === []);
+
+    // Only the panel: untouched. No panel: untouched (the advisory check reports it).
+    $repairs = [];
+    $warnings = [];
+    assert_eq($section($panel), \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($panel), 'page-home--closing', $repairs, $warnings));
+    assert_eq($section($echo), \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($echo), 'page-home--closing', $repairs, $warnings));
+    assert_eq([], $warnings);
+    assert_eq([], $repairs);
+});

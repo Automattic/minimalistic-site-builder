@@ -2420,6 +2420,77 @@ final class GeneratedMarkup
     }
 
     /**
+     * A closing cta-panel section holds ONE panel and nothing else in its
+     * root (frm PR-3an). calderr-like33's author appended a wide group with
+     * the site name at display size under the panel, so the name appeared
+     * twice in a row: once on the page ground, once set huge in the footer
+     * band below. Every direct child of the root other than the panel group
+     * is removed at its complete block boundary, with a warning per block;
+     * the panel keeps its copy and action. Without a panel nothing moves
+     * (the advisory check reports that case).
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripCtaPanelSiblings(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $children = $document->children($root);
+        $panel = null;
+        foreach ($children as $child) {
+            if ($document->name($child) === 'group'
+                && in_array(SectionComposition::CTA_PANEL_CLASS, self::classTokens(
+                    (string) (($document->attrs($child) ?? [])['className'] ?? ''),
+                ), true)
+            ) {
+                $panel = $child;
+                break;
+            }
+        }
+        if ($panel === null) {
+            return $markup;
+        }
+        $spans = [];
+        foreach ($children as $child) {
+            if ($child === $panel) {
+                continue;
+            }
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                continue;
+            }
+            $start = $document->openingOffset($child);
+            $spans[] = ['index' => $child, 'start' => $start, 'end' => $end];
+            $warnings[] = "file='theme/parts/{$part}.html'; block='" . self::blockPath($document, $child)
+                . "'; authored=" . Warnings::value(substr($markup, $start, $end - $start))
+                . '; delivered=removed; disposition=a closing cta-panel section holds one panel and nothing else in'
+                . ' its root; the sibling block was removed at its complete block boundary';
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-siblings-stripped',
+            'part' => $part,
+            'authored' => count($spans) . ' block(s) beside the panel',
+            'delivered' => 'the one panel',
+            'disposition' => 'repaired',
+        ];
+        return self::removeSpans($markup, self::outermostRemovalSpans($spans));
+    }
+
+    /**
      * Media parity across one repeated-item list (frm PR-3aj). dasstudio-like25's
      * five disciplines gave the first two items a tall card picture and the
      * other three none, so the list read as two kinds of card. A repeated
