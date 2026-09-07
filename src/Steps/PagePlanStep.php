@@ -2897,9 +2897,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // hero-only plan appends, so the appended tail takes the role.
             // Each inserted archetype avoids both neighbors so the adjacency
             // variety rule holds by construction.
-            $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
-                ? ['centered-stack', 'asymmetric-split', 'offset-grid']
-                : ['centered-stack', 'asymmetric-split', 'equal-card-grid'];
             $briefs = [
                 [
                     'slug'          => 'overview',
@@ -2929,6 +2926,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : '';
             $inserted = [];
             foreach (array_slice($briefs, 0, $missing) as $brief) {
+                // Only the closing brief is known to be one short message.
+                // The overview may contain several paragraphs or a list.
+                $safeArchetypes = $brief['type'] === 'cta'
+                    ? ['centered-stack', 'cta-panel', 'asymmetric-split']
+                    : ['asymmetric-split', 'equal-card-grid', 'list-with-thumbnails'];
                 $archetype = $safeArchetypes[0];
                 foreach ($safeArchetypes as $candidate) {
                     if ($candidate !== $above && $candidate !== $below) {
@@ -3389,7 +3391,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'title'            => 'Content',
                 'type'             => 'content',
                 'purpose'          => '',
-                'content_notes'    => '',
+                'content_notes'    => $front ? '' : 'A compact page introduction: one heading and one short paragraph grounded in the site spec. No repeated items or multi-paragraph story.',
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => 'standard',
@@ -3437,9 +3439,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
         $sections = array_values(array_filter($raw, 'is_array'));
 
-        // Neither of these is a safe landing spot for a value we are guessing:
-        // a cover has its own interior-page rule and a grid has a cap.
-        $excluded = ['full-bleed-cover', 'equal-card-grid'];
+        // These are not safe landing spots for a value we are guessing:
+        // a cover has an interior-page rule, a grid has a cap, and a
+        // centered stack requires evidence that the content is simple.
+        $excluded = ['full-bleed-cover', 'equal-card-grid', 'centered-stack'];
         $candidates = array_values(array_filter(
             array_diff(self::ARCHETYPES, $excluded),
             static fn (string $candidate): bool => self::archetypeEligible($candidate, $allowOffsetGrid),
@@ -3853,7 +3856,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         string ...$exclude,
     ): string {
         foreach (self::ARCHETYPES as $candidate) {
-            if ($candidate === 'equal-card-grid') {
+            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
@@ -4204,8 +4207,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $bestCount = PHP_INT_MAX;
         foreach (self::ARCHETYPES as $candidate) {
             // The card grid has its own tighter cap and its own pass; letting
-            // this one hand out grids would fight it.
-            if ($candidate === 'equal-card-grid') {
+            // this one hand out grids would fight it. A centered stack is
+            // also never guessed: its single-message contract needs an
+            // explicit content-led assignment from the planner.
+            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {

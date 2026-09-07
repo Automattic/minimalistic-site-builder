@@ -366,10 +366,10 @@ final class SectionComposition
             'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
             'default_background' => 'base',
             'min_images' => 0,
-            'max_images' => 2,
-            'copy_capacity' => 'standard',
-            // One column is the whole point, so no row block is required and
-            // none is forbidden either — a stack may still hold one grid.
+            'max_images' => 1,
+            'copy_capacity' => 'compact',
+            // One short message with optional supporting media, not a
+            // generic container for repeated items or an editorial story.
             'requires_row' => false,
             'requires_context' => [],
             'ineligible_reason' => '',

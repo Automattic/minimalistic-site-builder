@@ -494,6 +494,22 @@ test('the section catalog reports an ignored assignment as an advisory warning',
     assert_contains('"image_count":5', $joined);
 });
 
+test('centered-stack budgets one supporting image and retains excess authored media with a warning (BIGR-988)', function () {
+    $image = '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure><!-- /wp:image -->';
+    $single = section_composition_markup('centered-stack', $image);
+    assert_eq([], SectionComposition::markupWarnings($single, 'centered-stack', 'page-home--invitation'));
+
+    $pair = section_composition_markup('centered-stack', $image . $image);
+    $before = $pair;
+    $warnings = SectionComposition::markupWarnings($pair, 'centered-stack', 'page-home--invitation');
+    assert_eq($before, $pair, 'an advisory check never removes supplied media');
+    assert_eq(1, count($warnings));
+    assert_contains('"max_images":1', $warnings[0]);
+    assert_contains('"image_count":2', $warnings[0]);
+    assert_contains('page-home--invitation', $warnings[0]);
+    assert_contains('disposition=safe parseable section was retained', $warnings[0]);
+});
+
 test('the section catalog advisory check never throws on hostile markup', function () {
     foreach ([
         '',

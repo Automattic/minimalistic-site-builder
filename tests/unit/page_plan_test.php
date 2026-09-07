@@ -50,6 +50,81 @@ function plan_spec(array $overrides = []): array
     ], $overrides);
 }
 
+test('page-plan mechanical repairs never guess centered-stack for content of unknown complexity (BIGR-988)', function () {
+    $cases = [
+        'field' => ['asymmetric-split', 'unknown', 'full-bleed-cover'],
+        'adjacency' => ['asymmetric-split', 'asymmetric-split', 'full-bleed-cover'],
+        'dominance' => ['asymmetric-split', 'equal-card-grid', 'asymmetric-split', 'list-with-thumbnails', 'asymmetric-split', 'equal-card-grid'],
+    ];
+    foreach ($cases as $case => $archetypes) {
+        $sections = [];
+        foreach ($archetypes as $i => $archetype) {
+            $sections[] = plan_section([
+                'slug' => "section-{$i}",
+                'type' => 'process',
+                'layout_archetype' => $archetype,
+                'background' => $archetype === 'full-bleed-cover' ? 'image' : 'base',
+                'content_notes' => "Keep the complete authored process for section {$i}.",
+                'item_pattern' => 'card',
+            ]);
+        }
+        $warnings = [];
+        $out = $case === 'field'
+            ? PagePlanStep::repairFields($sections, $warnings, 'home', false)
+            : PagePlanStep::repairVariety($sections, warnings: $warnings, pageSlug: 'home', allowOffsetGrid: false);
+        assert_true(!in_array('centered-stack', array_column($out, 'layout_archetype'), true), $case);
+        assert_true($warnings !== [], 'a changed assignment remains actionable');
+        $joined = implode("\n", $warnings);
+        foreach (["file='pages.json'", "pages[slug='home'].sections[", 'authored=', 'delivered=', 'disposition='] as $context) {
+            assert_contains($context, $joined);
+        }
+        foreach ($out as $i => $section) {
+            assert_eq($sections[$i]['content_notes'], $section['content_notes'], 'no copy is discarded');
+            assert_eq($sections[$i]['item_pattern'], $section['item_pattern']);
+            if ($sections[$i]['layout_archetype'] === $section['layout_archetype']
+                && $sections[$i]['background'] === $section['background']) {
+                assert_eq($sections[$i], $section, 'unaffected siblings stay intact');
+            }
+        }
+        $againWarnings = [];
+        $again = $case === 'field'
+            ? PagePlanStep::repairFields($out, $againWarnings, 'home', false)
+            : PagePlanStep::repairVariety($out, warnings: $againWarnings, pageSlug: 'home', allowOffsetGrid: false);
+        assert_eq($out, $again, 'repair reaches a fixed point');
+        assert_eq([], $againWarnings);
+    }
+});
+
+test('page-plan preserves an explicitly planned simple centered invitation (BIGR-988)', function () {
+    $sections = [
+        plan_section(),
+        plan_section(['slug' => 'story', 'type' => 'story', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'invitation', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'content_notes' => 'One heading and one short invitation to visit.']),
+    ];
+    $warnings = [];
+    $out = PagePlanStep::repairFields($sections, $warnings);
+    $out = PagePlanStep::repairVariety($out, warnings: $warnings);
+    assert_eq($sections, $out);
+    assert_eq([], $warnings);
+});
+
+test('page-plan padding reserves centered-stack for the known short closing brief (BIGR-988)', function () {
+    $hero = plan_section();
+    $pages = [['slug' => 'home', 'front' => true, 'sections' => [$hero]]];
+    $warnings = [];
+    $out = PagePlanStep::padThinFrontPlan($pages, null, [], $warnings);
+    $sections = array_column($out[0]['sections'], null, 'slug');
+    assert_true($sections['overview']['layout_archetype'] !== 'centered-stack');
+    assert_eq('centered-stack', $sections['closing']['layout_archetype']);
+    assert_contains('One heading, one short supporting line', $sections['closing']['content_notes']);
+    assert_contains('compact list', $sections['overview']['content_notes'], 'the overview retains its broader content budget');
+    assert_eq($hero['layout_archetype'], $sections['hero']['layout_archetype']);
+    $againWarnings = [];
+    assert_eq($out, PagePlanStep::padThinFrontPlan($out, null, [], $againWarnings));
+    assert_eq([], $againWarnings);
+    assert_contains("file='pages.json'", implode("\n", $warnings));
+});
+
 test('PagePlanStep declares its durable warning sink', function () {
     $step = new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
 
@@ -1207,9 +1282,9 @@ test('page-plan removes a generated footer before recomputing variety and roles'
     assert_eq(['welcome', 'overview', 'reserve'], array_column($sections, 'slug'));
     assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
     assert_eq(
-        ['full-bleed-cover', 'centered-stack', 'asymmetric-split'],
+        ['full-bleed-cover', 'equal-card-grid', 'asymmetric-split'],
         array_column($sections, 'layout_archetype'),
-        'variety is validated against the surviving adjacency'
+        'the overview avoids both neighbors without assuming its content fits a centered stack'
     );
     assert_eq(2, count($llm->calls), 'the filtered adjacency receives one semantic repair');
     assert_true(

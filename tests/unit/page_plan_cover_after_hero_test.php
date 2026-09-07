@@ -25,9 +25,9 @@ test('a cover band planned right after the front hero becomes a level row on the
         $warnings
     );
     $slot = $pages[0]['sections'][1];
-    assert_eq('centered-stack', $slot['layout_archetype'], 'the first level row clear of the hero');
+    assert_eq('list-with-thumbnails', $slot['layout_archetype'], 'a guessed layout never assumes the cover content fits a centered stack');
     assert_eq('base', $slot['background']);
-    assert_contains('Build correction: this section is now a "centered-stack" on the "base" surface, not a cover band', $slot['handoff']);
+    assert_contains('Build correction: this section is now a "list-with-thumbnails" on the "base" surface, not a cover band', $slot['handoff']);
     assert_eq('asymmetric-split', $pages[0]['sections'][0]['layout_archetype'], 'the hero is untouched');
     assert_eq(2, count($warnings));
     assert_contains("[slug='home'].sections[1].layout_archetype", $warnings[0]);
