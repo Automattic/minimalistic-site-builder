@@ -2779,7 +2779,10 @@ final class DesignDirectionStep implements Step
         $statedTreatment = TypeTreatment::statedTreatmentFor($meta);
         if ($statedTreatment !== null) {
             $committedTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
-            if ($committedTreatment !== $statedTreatment) {
+            // caps-tracked already sets the stated uppercase (frm PR-5u); its
+            // open tracking is the seed's own choice and stands.
+            $caseHolds = $statedTreatment === 'caps-tight' && $committedTreatment === 'caps-tracked';
+            if ($committedTreatment !== $statedTreatment && !$caseHolds) {
                 $repairs[] = 'designDirection.json: field type_treatment authored ' . self::describe($committedTreatment)
                     . ' delivered ' . self::describe($statedTreatment)
                     . '; disposition the brief states its heading treatment, so the model commitment yields to it';

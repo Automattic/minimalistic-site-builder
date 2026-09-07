@@ -89,7 +89,11 @@ final class TypeTreatment
         }
         $case = self::statedHeadingCase($brief);
         if ($case === 'uppercase') {
-            return $tight ? 'caps-tight' : null;
+            // A stated uppercase heading is the caps treatment (frm PR-5u):
+            // spector-like47's "three-line uppercase display headline" met a
+            // tight commitment and shipped in mixed case. Compact tracking is
+            // the default; a committed caps-tracked keeps its tracking.
+            return 'caps-tight';
         }
         if ($case === 'lowercase') {
             return 'lowercase';
