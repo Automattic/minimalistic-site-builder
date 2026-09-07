@@ -1048,3 +1048,21 @@ test('GeneratedMarkup removes a matching tagName when generated HTML already use
     assert_true(!str_contains($out, '"tagName"'));
     assert_contains('<div class="wp-block-group keep">Header</div>', $out);
 });
+
+test('the footer collapses a name painted as a marquee in copy to the name, like a section does (frm PR-3aw)', function () {
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} --><div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:heading {"align":"wide","fontFamily":"heading"} --><h2 class="wp-block-heading alignwide has-heading-font-family">Lumina Studio · Lumina Studio · Lumina Studio</h2><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":3,"align":"wide"} --><h3 class="wp-block-heading alignwide">Lumina Studio · Lumina Studio · Lumina Studio</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Every frame rendered in-house.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $input = template_part_unit_input();
+    $result = $unit->finish($raw, $input);
+    $once = $result->markup;
+    assert_eq(0, substr_count($once, 'Lumina Studio · Lumina Studio'), 'the repeats are gone: ' . $once);
+    assert_eq(2, substr_count($once, '>Lumina Studio</h'), 'each identity heading keeps the name once');
+    assert_contains('Every frame rendered in-house.', $once);
+    $collapsed = array_values(array_filter($result->repairs, static fn (array $r): bool => str_contains((string) ($r['note'] ?? ''), 'collapsed a phrase repeated in copy')));
+    assert_eq(2, count($collapsed), json_encode($result->repairs));
+    assert_eq($once, $unit->finish($once, $input)->markup, 'the collapse reaches a fixed point');
+});
