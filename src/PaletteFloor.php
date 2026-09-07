@@ -66,6 +66,13 @@ final class PaletteFloor
     /** Below this chroma a hue is too faint to count as a competing color. */
     public const CHROMA_MIN = 0.1;
 
+    /**
+     * The chroma a primary keeps when it yields to a stated accent (frm
+     * PR-4y): under CHROMA_MIN with room for 8-bit rounding, so the pair
+     * no longer competes, while the hue still tints the foundation.
+     */
+    public const PINNED_PRIMARY_CHROMA = 0.08;
+
     /** Chroma above this at extreme luminance is the garish-lime failure. */
     public const CHROMA_CEILING = 0.55;
 
@@ -209,6 +216,7 @@ final class PaletteFloor
         array &$warnings,
         ?float $contrastOnBase = null,
         ?string $colorEconomy = null,
+        bool $accentStated = false,
     ): array
     {
         $contrastOnBase ??= self::CONTRAST_ON_BASE;
@@ -219,7 +227,12 @@ final class PaletteFloor
         $out = self::repairContrast($palette, $notes, $contrastOnBase);
         $out = self::repairEconomy($out, $notes, $colorEconomy);
         if (ColorEconomy::requiresAccentHueSeparation($colorEconomy)) {
-            $out = self::repairHue($out, $notes);
+            $out = self::repairHue($out, $notes, $accentStated);
+            if ($accentStated) {
+                // The primary yielded instead of the accent (frm PR-4y); the
+                // tonal roles follow it so the economy holds.
+                $out = self::repairEconomy($out, $notes, $colorEconomy);
+            }
         }
         $out = self::repairChroma($out, $notes);
         $out = self::repairContrast($out, $notes, $contrastOnBase);
@@ -358,6 +371,25 @@ final class PaletteFloor
             return null;
         }
         return self::hue($hex);
+    }
+
+    /** The same color moved to `$hue`, saturation and lightness held; null for a non-hex. */
+    public static function atHue(string $hex, float $hue): ?string
+    {
+        return self::withHue($hex, $hue);
+    }
+
+    /** The same color at HSL chroma `$chroma`, hue and lightness held; null for a non-hex. */
+    private static function withChroma(string $hex, float $chroma): ?string
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return null;
+        }
+        [$hue, , $lightness] = self::toHsl($rgb);
+        $span = 1 - abs(2 * $lightness - 1);
+        $saturation = $span <= 1e-9 ? 0.0 : min(1.0, $chroma / $span);
+        return self::toHex(self::hslToRgb($hue, $saturation, $lightness));
     }
 
     /** The same color moved to `$hue`, saturation and lightness held; null for a non-hex. */
@@ -587,7 +619,7 @@ final class PaletteFloor
      * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairHue(array $palette, array &$notes): array
+    private static function repairHue(array $palette, array &$notes, bool $accentStated = false): array
     {
         $primary = self::hexOf($palette, 'primary');
         $accent = self::hexOf($palette, 'accent');
@@ -609,6 +641,27 @@ final class PaletteFloor
         $primaryHue = self::hue($primary);
         $accentHue = self::hue($accent);
         if ($primaryHue === null || $accentHue === null) {
+            return $palette;
+        }
+
+        if ($accentStated) {
+            // The brief names the accent's hue (frm PR-4y): parley's orange
+            // buttons were rotated to yellow away from an orange-brown
+            // primary. The stated hue stays. The primary yields its chroma
+            // rather than its hue: a single-accent page is a tonal foundation
+            // with one interaction hue, and a rotated primary (wine red
+            // beside orange) spends the second hue the economy forbids.
+            $fixed = self::withChroma($primary, self::PINNED_PRIMARY_CHROMA);
+            if ($fixed === null || self::sameHex($fixed, $primary)) {
+                return $palette;
+            }
+            $palette['primary'] = $fixed;
+            self::note(
+                $notes,
+                'primary',
+                'repaired',
+                'hue separation, primary yields its chroma to the accent the brief states and reads as a tonal foundation; hue and lightness held',
+            );
             return $palette;
         }
 

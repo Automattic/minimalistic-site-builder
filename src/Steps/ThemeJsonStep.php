@@ -7,6 +7,7 @@ use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
+use Automattic\SiteBuild\AccentHue;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\Depth;
@@ -633,10 +634,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Floors run on the palette about to be written, after every other
         // repair. A committed surface texture raises the body-ink floor to
         // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        // An accent hue the brief states is never rotated away; the primary
+        // takes the hue separation instead (frm PR-4y).
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
         [$theme, $floorWarnings] = self::applyPaletteFloor(
             $theme,
             Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
             DesignDirectionStep::colorEconomyFor($project),
+            AccentHue::statedFor(is_array($meta) ? $meta : []) !== null,
         );
         $warnings = array_merge($warnings, $floorWarnings);
 
@@ -1648,6 +1653,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         array $theme,
         ?float $contrastOnBase = null,
         ?string $colorEconomy = null,
+        bool $accentStated = false,
     ): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
@@ -1670,7 +1676,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy, $accentStated);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;

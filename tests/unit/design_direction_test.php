@@ -3164,3 +3164,29 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     assert_eq('', $generic['tension']);
     assert_eq('', $generic['subject_anchor']);
 });
+
+test('an accent hue the brief states moves the model accent into that family (frm PR-4y)', function () {
+    $meta = ['prompt' => 'Warm off-white page with a single orange accent on the buttons.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['primary' => '#7A4A34', 'accent' => '#E8D35C']], $meta, false, $repairs);
+    assert_true(\Automattic\SiteBuild\AccentHue::inFamily($out['palette']['accent'], \Automattic\SiteBuild\AccentHue::statedInBrief('orange accent')), 'yellow became orange');
+    assert_eq('#7A4A34', $out['palette']['primary'], 'the primary is the floor\'s business');
+    assert_eq(1, count($repairs));
+    assert_contains('field palette.accent authored "#E8D35C"', $repairs[0]);
+    assert_contains('the brief names its accent hue (orange)', $repairs[0]);
+
+    $repairs = [];
+    $same = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#E2712A']], $meta, false, $repairs);
+    assert_eq('#E2712A', $same['palette']['accent'], 'already orange: no repair');
+    assert_eq([], $repairs);
+
+    $repairs = [];
+    $grey = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#8A8A8A']], $meta, false, $repairs);
+    assert_eq('#8A8A8A', $grey['palette']['accent'], 'a grey has no hue to move; left for the floor');
+    assert_eq([], $repairs);
+
+    $repairs = [];
+    $silent = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#E8D35C']], ['prompt' => 'a landing page'], false, $repairs);
+    assert_eq('#E8D35C', $silent['palette']['accent'], 'a silent brief changes nothing');
+    assert_eq([], $repairs);
+});
