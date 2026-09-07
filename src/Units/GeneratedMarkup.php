@@ -4898,6 +4898,85 @@ final class GeneratedMarkup
     }
 
     /**
+     * An orphan project tile spans its row (frm PR-3au): spector-like54's
+     * project-grid-2x2 shipped three cover tiles, the third alone in a
+     * two-column row at 50%, so the fourth cell was an empty hole. In a
+     * project grid a columns row with one column that follows a two-column
+     * row takes the full width; the tile count warning still stands.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    /** The column class a widened orphan tile carries, so the theme gives it a banner ratio. */
+    public const WIDE_TILE_CLASS = 'project-tile--wide';
+
+    public static function widenOrphanProjectTile(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'project-grid-2x2') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $rows = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'columns') {
+                continue;
+            }
+            $columns = array_values(array_filter(
+                $document->children($index),
+                static fn (int $child): bool => $document->name($child) === 'column',
+            ));
+            $hasTile = false;
+            foreach ($columns as $column) {
+                foreach ($document->children($column) as $child) {
+                    if ($document->name($child) === 'cover') {
+                        $hasTile = true;
+                    }
+                }
+            }
+            if ($hasTile) {
+                $rows[] = ['index' => $index, 'columns' => $columns];
+            }
+        }
+        $changed = false;
+        foreach ($rows as $i => $row) {
+            if (count($row['columns']) !== 1 || $i === 0 || count($rows[$i - 1]['columns']) !== 2) {
+                continue;
+            }
+            $column = $row['columns'][0];
+            if (!$document->isStructurallySafe($column)) {
+                continue;
+            }
+            $attrs = $document->attrs($column) ?? [];
+            $width = is_string($attrs['width'] ?? null) ? trim($attrs['width']) : '';
+            if ($width === '100%') {
+                continue;
+            }
+            // The attributes are enough: the block serializer that runs after
+            // every unit rewrites the column's flex-basis and class from them.
+            // The class lets the theme give the wide tile a banner ratio.
+            $attrs['width'] = '100%';
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(self::WIDE_TILE_CLASS, $classes, true)) {
+                $classes[] = self::WIDE_TILE_CLASS;
+            }
+            $attrs['className'] = implode(' ', $classes);
+            $document->setAttrs($column, $attrs);
+            $repairs[] = [
+                'code' => 'orphan-project-tile-widened',
+                'part' => $part,
+                'block' => 'column',
+                'authored' => $width === '' ? 'no width' : "width '{$width}'",
+                'delivered' => "width '100%'",
+                'disposition' => 'repaired',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    /**
      * The theme owns the ledger figure scale (frm PR-3m): an authored
      * fontSize on a stat-ledger figure heading (spector-like10 set the
      * display preset inline) beats the theme's column cap through the
