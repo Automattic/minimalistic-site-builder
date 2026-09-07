@@ -56,6 +56,11 @@ final class FooterUnit extends AbstractMarkupUnit
         $repairs = [];
         $key = $this->key($input);
         $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        // A name painted as a marquee in copy ("Lumina Studio · Lumina Studio
+        // · Lumina Studio") collapses to the name, in the footer as in a
+        // section (frm PR-3aw): dreammotion set it three times in its
+        // identity headings and the static line wrapped under reduced motion.
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $key, $repairs);
         $before = $markup;
         $markup = GeneratedMarkup::withoutRedundantLandmark($markup, 'footer');
         if ($markup !== $before) {
