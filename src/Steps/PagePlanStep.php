@@ -778,6 +778,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // section after a panel-stage hero. The slot keeps a level row unless
         // the brief asks for a cover band in so many words.
         $out = self::withCoverOffTheSlotAfterHero($out, self::statedCoverBandFor($meta), $warnings);
+        // The closing cta-panel's card is the contrast surface by recipe, so a
+        // contrast band directly above it fuses with the panel and the footer
+        // into one dark close (frm PR-3ai: zova-like43 ended on a dark FAQ
+        // band, the dark panel and the dark footer).
+        $out = self::withBandOffClosingPanel($out, $warnings);
         $out = self::withClosingBandOffFooterSurface(
             $out,
             FooterComposition::surface($footerArchetype),
@@ -968,6 +973,57 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $replacement,
                 "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
                 . 'that page with no visible footer boundary',
+            );
+        }
+        return $pages;
+    }
+
+    /**
+     * Keep a contrast band off the slot directly above a closing cta-panel
+     * (frm PR-3ai). The panel archetype paints its card with the contrast
+     * surface on the page ground, so a contrast band right above it reads as
+     * one dark mass with the panel, and with a contrast footer the page ends
+     * on three dark surfaces in a row (zova-like43). The band above the
+     * panel takes the soft tint instead; bands higher up are deliberate
+     * rhythm and stay.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withBandOffClosingPanel(array $pages, array &$warnings = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections) || count($sections) < 2) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            $lastKey = end($keys);
+            $aboveKey = $keys[count($keys) - 2];
+            $last = $sections[$lastKey];
+            $above = $sections[$aboveKey];
+            if (!is_array($last) || !is_array($above)) {
+                continue;
+            }
+            if (trim((string) ($last['layout_archetype'] ?? '')) !== 'cta-panel'
+                || ($above['background'] ?? null) !== 'contrast'
+            ) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$aboveKey]['background'] = 'tinted';
+            $handoff = trim((string) ($above['handoff'] ?? ''));
+            $sections[$aboveKey]['handoff'] = trim($handoff . ' Build correction: this section\'s background is now '
+                . '"tinted" because the closing panel below it carries the contrast surface; this supersedes any '
+                . 'background named earlier in this line.');
+            $pages[$index]['sections'] = $sections;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $aboveKey) . '.background',
+                'contrast',
+                'tinted',
+                'the closing cta-panel below it paints its card on the contrast surface, so a contrast band '
+                . 'directly above would fuse with the panel into one dark close',
             );
         }
         return $pages;

@@ -256,3 +256,37 @@ test('a footer band with a 3D object the brief names reaches image-plinth (frm P
     assert_eq('image-plinth', FooterComposition::statedInBrief('closing with a plinth footer'));
     assert_eq(null, FooterComposition::statedInBrief('floating colorful 3D objects in the hero'), 'objects elsewhere do not name the footer');
 });
+
+test('a contrast band directly above a closing cta-panel takes the tint (frm PR-3ai)', function () {
+    // zova-like43: a contrast FAQ band, then the closing cta-panel (whose
+    // card is the contrast surface by recipe), then a contrast footer.
+    $page = footer_seam_page('home', ['base', 'tinted', 'base', 'contrast', 'base']);
+    $page['sections'][4]['layout_archetype'] = 'cta-panel';
+    $page['sections'][3]['handoff'] = 'A dark FAQ band. Background: contrast.';
+    $warnings = [];
+    $out = PagePlanStep::withBandOffClosingPanel([$page], $warnings);
+    assert_eq(['base', 'tinted', 'base', 'tinted', 'base'], array_column($out[0]['sections'], 'background'));
+    assert_eq(1, count($warnings));
+    assert_contains("pages[slug='home'].sections[3].background", $warnings[0]);
+    assert_contains('authored="contrast"; delivered="tinted"', $warnings[0]);
+    assert_contains('fuse with the panel into one dark close', $warnings[0]);
+    assert_contains('Build correction: this section\'s background is now "tinted"', $out[0]['sections'][3]['handoff']);
+
+    // A tinted or base band above the panel, a contrast band two slots up,
+    // or a closing section that is not a cta-panel: nothing moves.
+    $warnings = [];
+    $tinted = footer_seam_page('home', ['contrast', 'tinted', 'base']);
+    $tinted['sections'][2]['layout_archetype'] = 'cta-panel';
+    $noPanel = footer_seam_page('menu', ['base', 'contrast', 'base']);
+    $noPanel['sections'][2]['layout_archetype'] = 'centered-stack';
+    $out = PagePlanStep::withBandOffClosingPanel([$tinted, $noPanel], $warnings);
+    assert_eq(['contrast', 'tinted', 'base'], array_column($out[0]['sections'], 'background'));
+    assert_eq(['base', 'contrast', 'base'], array_column($out[1]['sections'], 'background'));
+    assert_eq([], $warnings);
+
+    // The footer rule still runs after it and leaves the panel's base band alone.
+    $warnings = [];
+    $out = PagePlanStep::withClosingBandOffFooterSurface(PagePlanStep::withBandOffClosingPanel([$page], $warnings), 'contrast', $warnings);
+    assert_eq('base', end($out[0]['sections'])['background']);
+    assert_eq(1, count($warnings));
+});
