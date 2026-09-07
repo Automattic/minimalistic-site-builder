@@ -431,6 +431,39 @@ final class HeaderHeroStep implements Step
                         );
                     }
                 }
+                // Facts the brief sets as pill tags take the pill device on
+                // the facts row (frm PR-2ah), and the filled panel when the
+                // brief puts the pills in a panel; a recipe without a facts
+                // row has nothing to set and says so.
+                $factPills = HeroComposition::statedFactPillsFor(is_array($meta) ? $meta : []);
+                if ($factPills !== null) {
+                    if (!str_contains($heroMarkup, HeroComposition::FACTS_CLASS)) {
+                        $warnings[] = "[{$heroRel}] the brief states pill tags in the hero, but the "
+                            . (string) $delivery['recipe'] . ' recipe carries no facts row; the pills are withheld';
+                    } else {
+                        $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                            $heroMarkup,
+                            HeroComposition::FACTS_MARKER_PREFIX,
+                            $factPills === 'panel' ? HeroComposition::FACTS_PANEL_MARKER : HeroComposition::FACTS_PILLS_MARKER,
+                            $heroPart,
+                            $heroRepairs,
+                        );
+                        if ($factPills === 'panel') {
+                            $inked = HeroComposition::ownFactsInk($heroMarkup);
+                            if ($inked !== $heroMarkup) {
+                                $heroMarkup = $inked;
+                                $heroRepairs[] = [
+                                    'code' => 'hero-facts-panel-ink',
+                                    'part' => $heroPart,
+                                    'block' => 'paragraph',
+                                    'authored' => 'preset text colour on the facts',
+                                    'delivered' => 'base ink from the panel rule',
+                                    'disposition' => 'repaired',
+                                ];
+                            }
+                        }
+                    }
+                }
                 $beforeLayout = $heroMarkup;
                 $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
                 if ($heroMarkup !== $beforeLayout) {
