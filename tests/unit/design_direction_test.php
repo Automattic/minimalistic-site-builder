@@ -3226,3 +3226,30 @@ test('a stated wordmark case is not the site-wide heading treatment (frm PR-5s)'
     assert_eq(null, \Automattic\SiteBuild\TypeTreatment::caseOf('sentence'));
     assert_eq('uppercase', \Automattic\SiteBuild\TypeTreatment::caseOf('caps-tracked'));
 });
+
+test('a heading treatment the brief states outranks the seed commitment (frm PR-5t)', function () {
+    $luzia = ['prompt' => 'Light page, tight sans headings with muted-plus-dark two-tone lines, featured work as large image cards with tag pills.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tight'], $luzia, false, $repairs);
+    assert_eq('tight', $out['type_treatment']);
+    $rows = array_values(array_filter($repairs, static fn (string $r): bool => str_contains($r, 'type_treatment')));
+    assert_eq(1, count($rows));
+    assert_contains('field type_treatment authored "caps-tight" delivered "tight"', $rows[0]);
+    assert_contains('the brief states its heading treatment', $rows[0]);
+
+    $repairs = [];
+    $same = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $luzia, false, $repairs);
+    assert_eq('tight', $same['type_treatment']);
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'), 'already tight: no repair');
+
+    $dasstudio = ['prompt' => 'White page, huge uppercase wordmark hero, giant uppercase section titles with counts, tight tracking throughout.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'sentence'], $dasstudio, false, $repairs);
+    assert_eq('caps-tight', $caps['type_treatment'], 'uppercase titles plus tight tracking is the caps-tight treatment');
+
+    assert_eq('tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('tight sans headings'));
+    assert_eq('caps-tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase headings with tight tracking'));
+    assert_eq('lowercase', \Automattic\SiteBuild\TypeTreatment::statedTreatment('lowercase headings'));
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase display headline'), 'a stated case alone is PR-5s business, not a treatment');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatment('a tight-knit team'), 'tight must be about type');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatmentFor([]));
+});
