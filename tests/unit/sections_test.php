@@ -474,6 +474,39 @@ test('sections persists the deterministic plan repairs back into pages.json', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections delivers covered item content and persists unresolved parity warnings (BIGR-987)', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['item_pattern'] = 'card';
+    $pages['pages'][0]['sections'][1]['layout_archetype'] = 'centered-stack';
+    $project->writeJson('pages.json', $pages);
+    $cover = '<!-- wp:cover {"url":"project.jpg","dimRatio":50} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="project.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unique project description.</p><!-- /wp:paragraph --></div></div><!-- /wp:cover -->';
+    $item = static fn (string $body): string => '<!-- wp:group {"className":"item-pattern__item"} --><div class="wp-block-group item-pattern__item">'
+        . $body . '</div><!-- /wp:group -->';
+    $raw = '<!-- wp:group --><div class="wp-block-group">' . $item($cover)
+        . $item('<!-- wp:paragraph --><p>Second project.</p><!-- /wp:paragraph -->')
+        . $item('<!-- wp:paragraph --><p>Third project.</p><!-- /wp:paragraph -->') . '</div><!-- /wp:group -->';
+    $llm = new FakeLlm();
+    foreach (['OK', '<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->',
+        '<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->',
+        '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->', $raw] as $answer) {
+        $llm->queueText($answer);
+    }
+    quietly(fn () => (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+    $out = $project->readText('theme/parts/page-home--about.html');
+    foreach (['Unique project description.', 'Second project.', 'Third project.'] as $text) {
+        assert_contains($text, $out);
+    }
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    foreach (["file='theme/parts/page-home--about.html'", 'wp:cover', 'authored=', 'delivered=unchanged', 'minority media retained'] as $context) {
+        assert_contains($context, $warnings);
+    }
+    assert_contains('Footer', $project->readText('theme/parts/footer.html'), 'the step still delivers the other parts');
+    remove_tree($tmp);
+});
+
 test('sections persists ambiguous list-thumb warnings and delivers that row unchanged', function () {
     [$project, $tmp] = sections_fixture();
     $ambiguousRow = trim(<<<'HTML'

@@ -515,6 +515,38 @@ test('a minority of repeated items with a picture loses it, a majority keeps it 
     }
 });
 
+test('media parity retains content-bearing covers and removes only independent pictures (BIGR-987)', function (): void {
+    $item = static fn (string $body): string => '<!-- wp:group {"className":"item-pattern__item card-flush"} -->'
+        . '<div class="wp-block-group item-pattern__item card-flush">' . $body . '</div><!-- /wp:group -->';
+    $cover = '<!-- wp:cover {"url":"project.jpg","dimRatio":50} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="project.jpg" alt=""/>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Project title</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Unique description with <a href="/project/">project details</a>.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="detail.jpg" alt="Detail"/></figure><!-- /wp:image -->'
+        . '</div></div><!-- /wp:cover -->';
+    $pictured = $item('<!-- wp:image --><figure class="wp-block-image"><img src="decoration.jpg" alt=""/></figure><!-- /wp:image -->'
+        . '<!-- wp:paragraph --><p>Keep this caption.</p><!-- /wp:paragraph -->');
+    $siblings = $item('<!-- wp:paragraph --><p>Second.</p><!-- /wp:paragraph -->')
+        . $item('<!-- wp:paragraph --><p>Third.</p><!-- /wp:paragraph -->')
+        . $item('<!-- wp:paragraph --><p>Fourth.</p><!-- /wp:paragraph -->');
+    $markup = '<!-- wp:group --><div class="wp-block-group">' . $pictured . $item($cover) . $siblings . '</div><!-- /wp:group -->';
+    $repairs = $warnings = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::withItemMediaParity($markup, 'page-home--work', $repairs, $warnings);
+    assert_contains($item($cover) . $siblings, $out, 'the entire covered item and all plain siblings stay byte-for-byte intact');
+    assert_true(!str_contains($out, 'decoration.jpg'));
+    assert_contains('Keep this caption.', $out);
+    assert_true(!\Automattic\SiteBuild\BlockMarkup::parse($out)->hasMismatchedDelimiters());
+    $retained = array_values(array_filter($warnings, static fn (string $w): bool => str_contains($w, 'delivered=unchanged')));
+    assert_eq(1, count($retained));
+    foreach (["file='theme/parts/page-home--work.html'", 'wp:cover', 'authored=', 'disposition=', 'content'] as $context) {
+        assert_contains($context, $retained[0]);
+    }
+    $again = $againWarnings = [];
+    assert_eq($out, \Automattic\SiteBuild\Units\GeneratedMarkup::withItemMediaParity($out, 'page-home--work', $again, $againWarnings));
+    assert_eq([], $again, 'the retained cover is not partially repaired on a later pass');
+});
+
 test('a closing cta-panel section keeps its one panel and loses every sibling (frm PR-3an)', function (): void {
     $panel = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","align":"wide","className":"cta-panel","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group alignwide cta-panel has-base-color has-contrast-background-color has-text-color has-background">'

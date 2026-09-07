@@ -2499,6 +2499,9 @@ final class GeneratedMarkup
      * their complete block boundaries and the item drops its media-card hook.
      * A majority with pictures stays as authored (nothing invents a picture).
      * Items are grouped by parent so two lists in one section are judged apart.
+     * A cover with nested content keeps its entire item: removing its paint
+     * alone can invalidate the text's contrast, and dropping the block loses
+     * its copy. That unresolved parity defect is warned, never stripped.
      *
      * @param list<array<string,mixed>> $repairs
      * @param list<string>              $warnings
@@ -2550,6 +2553,19 @@ final class GeneratedMarkup
                 continue;
             }
             foreach ($withMedia as $item) {
+                $protected = array_filter($mediaByItem[$item], static fn (int $media): bool =>
+                    $document->name($media) === 'cover'
+                    && ($document->children($media) !== [] || trim(strip_tags($document->innerHtml($media))) !== '')
+                );
+                if ($protected !== []) {
+                    foreach ($protected as $cover) {
+                        $warnings[] = "file='theme/parts/{$part}.html'; block='" . self::blockPath($document, $cover)
+                            . "'; authored=" . Warnings::value($document->innerHtml($cover))
+                            . '; delivered=unchanged; disposition=minority media retained because the cover contains'
+                            . ' content; removing its background cannot safely preserve the copy and contrast';
+                    }
+                    continue;
+                }
                 foreach ($mediaByItem[$item] as $media) {
                     $end = $document->endOffset($media);
                     if ($end === null) {
