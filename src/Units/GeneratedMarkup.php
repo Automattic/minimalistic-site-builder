@@ -5066,6 +5066,65 @@ final class GeneratedMarkup
      *
      * @param list<array<string,mixed>> $repairs
      */
+    /**
+     * The dim a picture cover takes when the model names none (frm PR-2aj):
+     * core's default is 100, a solid overlay that hides the picture.
+     * dasstudio-like38 shipped four black work tiles that way. Forty is the
+     * floor CoverContrastStep keeps for text on a picture; it raises it
+     * further when the text needs it.
+     */
+    public const COVER_DEFAULT_DIM = 40;
+
+    /**
+     * A picture cover without a dim ratio takes the default (frm PR-2aj).
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function defaultCoverDim(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if (trim((string) ($attrs['url'] ?? '')) === '' || is_numeric($attrs['dimRatio'] ?? null)) {
+                continue;
+            }
+            $attrs['dimRatio'] = self::COVER_DEFAULT_DIM;
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'code' => 'cover-dim-default',
+                'part' => $part,
+                'block' => 'cover',
+                'authored' => 'no dimRatio (core paints 100, a solid overlay)',
+                'delivered' => 'dimRatio ' . self::COVER_DEFAULT_DIM,
+                'disposition' => 'repaired',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    /** Whether a cover is a project tile: inside a grid column, directly or through card wrapper groups (frm PR-2aj). */
+    private static function isProjectTile(BlockMarkup $document, int $cover): bool
+    {
+        for ($node = $document->parent($cover); $node !== null; $node = $document->parent($node)) {
+            $name = $document->name($node);
+            if ($name === 'column') {
+                return true;
+            }
+            if ($name !== 'group') {
+                return false;
+            }
+        }
+        return false;
+    }
+
     public static function ownProjectTileInk(string $markup, string $part, ?string $archetype, array &$repairs = []): string
     {
         if ($archetype !== 'project-grid-2x2') {
@@ -5077,8 +5136,9 @@ final class GeneratedMarkup
             if ($document->name($index) !== 'cover' || !$document->isStructurallySafe($index)) {
                 continue;
             }
-            $parent = $document->parent($index);
-            if ($parent === null || $document->name($parent) !== 'column') {
+            // A tile wrapped in a card group is a tile too (frm PR-2aj):
+            // dasstudio-like38 boxed each cover in an item-pattern card.
+            if (!self::isProjectTile($document, $index)) {
                 continue;
             }
             $attrs = $document->attrs($index) ?? [];
