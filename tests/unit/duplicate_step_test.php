@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Units\GeneratedMarkup;
+use Automattic\SiteBuild\BlockMarkup;
 
 function dst_row(string $numeral, string $heading, string $copy, bool $media, bool $copyFirst = true): string
 {
@@ -16,6 +17,34 @@ function dst_row(string $numeral, string $heading, string $copy, bool $media, bo
         : '';
     return '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . ($copyFirst ? $copyColumn . $mediaColumn : $mediaColumn . $copyColumn) . '</div><!-- /wp:columns -->';
 }
+
+test('interleaved duplicate steps are removed using original source offsets (BIGR-987)', function () {
+    $open = '<!-- wp:group --><div class="wp-block-group">';
+    $close = '</div><!-- /wp:group -->';
+    $sibling = '<!-- wp:paragraph {"className":"untouched"} --><p class="untouched">Keep <em>every byte</em>.</p><!-- /wp:paragraph -->';
+    $markup = $open
+        . dst_row('1', 'Discover', 'Draft discovery.', false)
+        . dst_row('2', 'Build', 'Draft build.', false)
+        . dst_row('3', 'Build', 'Surviving build.', true)
+        . dst_row('4', 'Discover', 'Surviving discovery.', true)
+        . dst_row('5', 'Deliver', 'Surviving handoff.', true)
+        . $sibling . $close;
+    $expected = $open
+        . dst_row('1', 'Build', 'Surviving build.', true)
+        . dst_row('2', 'Discover', 'Surviving discovery.', true)
+        . dst_row('3', 'Deliver', 'Surviving handoff.', true)
+        . $sibling . $close;
+
+    $repairs = [];
+    $out = GeneratedMarkup::dropDuplicateSteps($markup, 'page-home--process', 'zigzag-steps', $repairs);
+    assert_eq($expected, $out, 'only the two unpictured duplicates and surviving numerals change');
+    assert_true(!BlockMarkup::parse($out)->hasMismatchedDelimiters());
+    assert_eq([], BlockMarkup::parse($out)->unclosedIndices());
+    assert_eq(2, count(array_filter($repairs, static fn (array $r): bool => $r['code'] === 'duplicate-step-dropped')));
+    $again = [];
+    assert_eq($out, GeneratedMarkup::dropDuplicateSteps($out, 'page-home--process', 'zigzag-steps', $again));
+    assert_eq([], $again, 'the repair reaches a fixed point');
+});
 
 test('a zigzag step whose heading repeats an earlier step is dropped, the unpictured repeat first, and the numerals renumber (frm PR-3ax)', function () {
     $intro = '<!-- wp:heading --><h2 class="wp-block-heading">How we work</h2><!-- /wp:heading -->';

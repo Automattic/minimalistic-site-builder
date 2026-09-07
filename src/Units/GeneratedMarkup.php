@@ -5152,10 +5152,12 @@ final class GeneratedMarkup
         if ($drop === []) {
             return $markup;
         }
-        $rendered = $markup;
-        foreach (array_reverse(array_keys($drop)) as $i) {
-            $row = $rows[$i];
-            $rendered = substr($rendered, 0, $row['start']) . substr($rendered, $row['end']);
+        // A later pictured duplicate can select an earlier row for removal,
+        // so discovery order is not source order. Splice disjoint spans from
+        // the end using the same source offsets used to identify the rows.
+        $spans = self::outermostRemovalSpans(array_values(array_intersect_key($rows, $drop)));
+        $rendered = self::removeSpans($markup, $spans);
+        foreach ($spans as $row) {
             $repairs[] = [
                 'code' => 'duplicate-step-dropped',
                 'part' => $part,
