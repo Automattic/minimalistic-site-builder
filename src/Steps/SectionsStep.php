@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BilledInput;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
@@ -1128,6 +1129,10 @@ final class SectionsStep implements Step
                 $project->exists('meta.json') ? $project->readJson('meta.json') : [],
             ),
             'stated_highlight'  => (string) SectionComposition::statedHighlightFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
+            // The case the brief states for a wordmark hero (frm PR-2ac).
+            'stated_wordmark_case' => (string) HeroComposition::statedWordmarkCaseFor(
                 $project->exists('meta.json') ? $project->readJson('meta.json') : [],
             ),
         ];

@@ -765,6 +765,15 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--wordmark-stage .hero-composition__facts {
             max-width: none;
         }
+        /* A case the brief states for the wordmark (frm PR-2ac): the bind
+           stamps one of the two classes and measures the cased name; the
+           class outranks a theme heading transform by specificity. */
+        .hero-composition__wordmark.hero-composition__wordmark--upper {
+            text-transform: uppercase;
+        }
+        .hero-composition__wordmark.hero-composition__wordmark--lower {
+            text-transform: lowercase;
+        }
         .hero-composition--wordmark-stage .hero-composition__wordmark {
             margin-block: 0 0.35em;
             line-height: 0.88;

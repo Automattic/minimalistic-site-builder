@@ -772,3 +772,36 @@ test('a hero the brief puts in a rounded frame is read in so many words (frm PR-
     assert_true(HeroComposition::statedHeroFrameFor(['prompt' => 'the hero in a rounded frame']));
     assert_true(!HeroComposition::statedHeroFrameFor(['prompt' => 'a landing page', 'original_prompt' => '']));
 });
+
+test('a wordmark case the brief states is read, stamped on the headline and measured as it renders (frm PR-2ac)', function () {
+    assert_eq('uppercase', HeroComposition::statedWordmarkCase('White page, huge uppercase wordmark hero with a facts ledger, photo strip.'));
+    assert_eq('lowercase', HeroComposition::statedWordmarkCase('rounded near-black hero panel with a giant lowercase wordmark'));
+    assert_eq(null, HeroComposition::statedWordmarkCase('a giant serif name as the hero headline'), 'a serif name states no case');
+    assert_eq(null, HeroComposition::statedWordmarkCase('uppercase links in the header'), 'links are not the wordmark');
+    assert_eq('uppercase', HeroComposition::statedWordmarkCaseFor(['original_prompt' => 'name set in capitals', 'prompt' => 'a studio site']));
+    assert_eq(null, HeroComposition::statedWordmarkCaseFor([]));
+
+    assert_eq(HeroComposition::wordmarkEm('STUDIO GRUND'), HeroComposition::wordmarkEm('Studio Grund', null, 'uppercase'), 'measured as it renders');
+    assert_eq(HeroComposition::wordmarkEm('luminous'), HeroComposition::wordmarkEm('Luminous', null, 'lowercase'));
+    $upperTheme = ['styles' => ['elements' => ['heading' => ['typography' => ['textTransform' => 'uppercase']]]]];
+    assert_eq(HeroComposition::wordmarkEm('luminous'), HeroComposition::wordmarkEm('Luminous', $upperTheme, 'lowercase'), 'a stated lowercase outranks an uppercase theme');
+
+    $hero = static fn (string $h1): string => '<!-- wp:group {"className":"hero-composition--wordmark-stage","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--wordmark-stage"><!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">' . $h1 . '<!-- wp:paragraph --><p>Line.</p><!-- /wp:paragraph --></div><!-- /wp:group --></div><!-- /wp:group -->';
+    $plain = $hero('<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading has-display-font-size">Studio Grund</h1><!-- /wp:heading -->');
+    $repairs = [];
+    $upper = HeroComposition::bindWordmarkHeadline($plain, 'Studio Grund', 'page-home--hero', $repairs, null, 'uppercase');
+    // The block comment escapes `--` as \u002d\u002d (illegal inside an HTML comment).
+    assert_contains('"className":"hero-composition__wordmark hero-composition__wordmark\\u002d\\u002dupper"', $upper);
+    assert_contains('class="wp-block-heading hero-composition__wordmark hero-composition__wordmark--upper"', $upper);
+    assert_contains('>Studio Grund</h1>', $upper, 'the text keeps its case; the class transforms it');
+    $upperEm = number_format(HeroComposition::wordmarkEm('STUDIO GRUND'), 2, '.', '');
+    assert_contains('calc(90cqi / ' . $upperEm . ')', $upper, 'the pin measures the uppercase name');
+    $mixed = HeroComposition::bindWordmarkHeadline($plain, 'Studio Grund', 'page-home--hero', $repairs);
+    assert_true(!str_contains($mixed, 'wordmark--upper') && !str_contains($mixed, 'wordmark--lower'), 'no stated case, no class');
+    $lower = HeroComposition::bindWordmarkHeadline($upper, 'Studio Grund', 'page-home--hero', $repairs, null, 'lowercase');
+    assert_contains('hero-composition__wordmark hero-composition__wordmark--lower"', $lower);
+    assert_true(!str_contains($lower, 'wordmark--upper'), 'the opposite class is replaced, not stacked');
+    assert_eq($upper, HeroComposition::bindWordmarkHeadline($upper, 'Studio Grund', 'page-home--hero', $repairs, null, 'uppercase'), 'a second pass is a fixed point');
+});
