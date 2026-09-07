@@ -296,6 +296,10 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // A hero the brief puts in a rounded frame is an inset, clipped plate
     // keyed on the build-owned hero-frame--rounded marker (frm PR-2y).
     assert_contains('.wp-block-group[class*="hero-composition--"].hero-frame--rounded {', $css);
+    // Hero facts stated as pill tags, keyed on the hero-facts-- markers (frm PR-2ah).
+    assert_contains('.hero-facts--pills .hero-composition__facts > p,', $css);
+    assert_contains('.hero-facts--panel .hero-composition__facts {', $css);
+    assert_contains('.hero-facts--panel .hero-composition__facts > p {', $css);
     assert_contains('.wp-block-group.hero-frame--rounded .wp-block-cover.alignfull {', $css);
     assert_contains('@media (max-width: 781.98px)', $css);
     foreach ([

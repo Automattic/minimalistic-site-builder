@@ -821,3 +821,17 @@ test('the panel-stage root is always base: the panel carries the tint (frm PR-2a
     assert_eq('base', $out[0]['background'], 'the tinted root yields to the panel');
     assert_contains("path=\"pages[slug='home'].sections[0].background\"; authored=\"tinted\"; delivered=\"base\"", implode("\n", $repairs));
 });
+
+test('hero facts the brief sets as pill tags are read, with the panel when the brief puts them in one (frm PR-2ah)', function () {
+    $calderr = 'Off-white page with every letter and line in one cobalt blue: a short intro paragraph top-left, a rounded blue panel of service pill tags top-right, a giant serif name as the hero headline.';
+    assert_eq('panel', HeroComposition::statedFactPills($calderr));
+    assert_eq('panel', HeroComposition::statedFactPills('the pill tags sit in a rounded panel'));
+    assert_eq('pills', HeroComposition::statedFactPills('a facts ledger of tag pills under the name'));
+    assert_eq('pills', HeroComposition::statedFactPills('Service pills beside the intro.'));
+    assert_eq(null, HeroComposition::statedFactPills('a floating pill navigation with one pill CTA'), 'the nav pill is not a tag');
+    assert_eq(null, HeroComposition::statedFactPills('a pill badge per section'), 'the section badge is not a tag');
+    assert_eq(null, HeroComposition::statedFactPills('a small facts ledger on the right'), 'a plain ledger states no pills');
+    assert_eq('panel', HeroComposition::statedFactPillsFor(['original_prompt' => $calderr, 'prompt' => 'a portfolio']));
+    assert_eq('pills', HeroComposition::statedFactPillsFor(['prompt' => 'tag pills top-right']));
+    assert_eq(null, HeroComposition::statedFactPillsFor([]));
+});

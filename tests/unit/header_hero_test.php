@@ -3107,3 +3107,76 @@ test('a hero the brief puts in a rounded frame is stamped hero-frame--rounded un
         assert_true(!$project->exists('warnings.json') || !str_contains($project->readText('warnings.json'), 'frames the hero'));
     });
 });
+
+/** A wordmark-stage hero root with a facts row for the stated pill-tag tests (frm PR-2ah). */
+function hh_facts_hero(): string
+{
+    $classes = 'hero-composition--wordmark-stage hero-mobile--stack-copy-first';
+    return '<!-- wp:group {"anchor":"hero","className":"' . $classes . '","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group ' . $classes . '">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"className":"hero-composition__wordmark"} --><h1 class="wp-block-heading hero-composition__wordmark">Lucas Vermeer</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">I design digital experiences.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:group {"className":"hero-composition__facts","layout":{"type":"flex","flexWrap":"wrap"}} --><div class="wp-block-group hero-composition__facts">'
+        . '<!-- wp:paragraph {"textColor":"contrast","fontSize":"caption"} --><p class="has-contrast-color has-text-color has-caption-font-size">Based in Amsterdam</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"textColor":"contrast","fontSize":"caption"} --><p class="has-contrast-color has-text-color has-caption-font-size">Brand strategy</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+}
+
+test('hero facts the brief sets as pill tags are stamped hero-facts--panel or --pills on the root (frm PR-2ah)', function () {
+    $run = static function (string $prefix, string $brief, string $heroMarkup, string $recipe): array {
+        return with_project($prefix, function ($project) use ($brief, $heroMarkup, $recipe) {
+            $pages = [[
+                'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+                'sections' => [[
+                    'slug' => 'hero', 'role' => 'hero',
+                    'layout_archetype' => $recipe === 'wordmark-stage' ? 'centered-stack' : 'full-bleed-cover',
+                    'background' => $recipe === 'wordmark-stage' ? 'base' : 'image',
+                ]],
+            ]];
+            $project->writeJson('siteSpec.json', ['name' => 'Lucas Vermeer']);
+            $project->writeJson('meta.json', ['prompt' => $brief]);
+            $project->writeJson('theme/theme.json', hh_theme_json());
+            $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+            $project->writeJson('pages.json', ['pages' => $pages]);
+            hh_above_fold($project, $pages, $recipe);
+            $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+            $project->writeText('theme/parts/page-home--hero.html', $heroMarkup);
+            putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+            (new HeaderHeroStep())->run($project);
+            return [
+                'hero' => $project->readText('theme/parts/page-home--hero.html'),
+                'report' => $project->readText('logs/header-hero.txt'),
+                'warnings' => $project->exists('warnings.json') ? $project->readText('warnings.json') : '',
+            ];
+        });
+    };
+    $calderr = 'Off-white page in one cobalt blue: a short intro paragraph top-left, a rounded blue panel of service pill tags top-right, a giant serif name as the hero headline.';
+    $panel = $run('builder_hh_pills1_', $calderr, hh_facts_hero(), 'wordmark-stage');
+    assert_eq(1, substr_count($panel['hero'], 'hero-facts--panel'), $panel['hero']);
+    assert_contains('hero-facts\\u002d\\u002dpanel', $panel['hero'], 'the marker is in the block JSON too');
+    assert_true(preg_match('/<div id="hero" class="wp-block-group hero-composition--wordmark-stage hero-mobile--stack-copy-first[^"]* hero-facts--panel"/', $panel['hero']) === 1, $panel['hero']);
+    assert_contains('"delivered":"hero-facts--panel"', $panel['report']);
+    // The panel owns the facts' ink: the contrast preset would paint over the plate with !important.
+    assert_true(!str_contains($panel['hero'], 'has-contrast-color') && !str_contains($panel['hero'], '"textColor"'), $panel['hero']);
+    assert_true(preg_match('/<p class="has-caption-font-size">Based in Amsterdam<\/p>/', $panel['hero']) === 1, $panel['hero']);
+    assert_contains('"code":"hero-facts-panel-ink"', $panel['report']);
+    assert_true(!str_contains($panel['warnings'], 'pill tags'), 'no warning when the facts row exists');
+
+    $pills = $run('builder_hh_pills2_', 'A huge name with a facts ledger of tag pills.', hh_facts_hero(), 'wordmark-stage');
+    assert_eq(1, substr_count($pills['hero'], 'hero-facts--pills'));
+    assert_true(!str_contains($pills['hero'], 'hero-facts--panel'));
+    assert_contains('has-contrast-color', $pills['hero'], 'plain pills keep the facts\' own ink');
+
+    // A recipe without a facts row withholds the device and says so.
+    $none = $run('builder_hh_pills3_', $calderr, hh_cover_hero('hero-composition--cinematic-safe-zone hero-mobile--stack-media-first'), 'cinematic-safe-zone');
+    assert_true(!str_contains($none['hero'], 'hero-facts--'), 'nothing to set on a cover hero');
+    assert_contains('recipe carries no facts row; the pills are withheld', $none['warnings']);
+
+    // No stated pills, no marker and no warning.
+    $plain = $run('builder_hh_pills4_', 'A giant serif name as the hero headline with a small facts ledger.', hh_facts_hero(), 'wordmark-stage');
+    assert_true(!str_contains($plain['hero'], 'hero-facts--'));
+    assert_true(!str_contains($plain['warnings'], 'pill tags'));
+});

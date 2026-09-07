@@ -686,6 +686,117 @@ final class HeroComposition
 
     public const FRAME_MARKER = 'hero-frame--rounded';
 
+    /**
+     * Phrases a brief uses for the hero facts set as pills (frm PR-2ah):
+     * calderr's "a rounded blue panel of service pill tags top-right" shipped
+     * its three facts as caption lines under a hairline in six cohorts. A
+     * "panel of" pill phrase also asks for the filled panel behind them.
+     *
+     * @var list<string>
+     */
+    private const STATED_FACT_PILL_PHRASES = [
+        'pill tags', 'tag pills', 'service pill tags', 'service pills', 'pill labels', 'tags as pills', 'pills of tags', 'pill-shaped tags',
+    ];
+
+    /** The build-owned root marker prefix for the stated facts device. */
+    public const FACTS_MARKER_PREFIX = 'hero-facts--';
+
+    public const FACTS_PILLS_MARKER = 'hero-facts--pills';
+
+    public const FACTS_PANEL_MARKER = 'hero-facts--panel';
+
+    /**
+     * The facts device the brief states: `pills` when it names pill tags,
+     * `panel` when it puts those pills in a panel, null otherwise.
+     */
+    public static function statedFactPills(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_FACT_PILL_PHRASES as $phrase) {
+            $quoted = preg_quote($phrase, '/');
+            if (preg_match('/(?<![\p{L}-])' . $quoted . '(?![\p{L}-])/u', $text) !== 1) {
+                continue;
+            }
+            // "a rounded blue panel of service pill tags", "pill tags in a panel"
+            if (preg_match('/panel(?: of| with| holding)(?: [\p{L}-]+){0,4} ' . $quoted . '(?![\p{L}-])/u', $text) === 1
+                || preg_match('/' . $quoted . '(?: [\p{L}-]+){0,3} (?:in|on|inside) an? (?:[\p{L}-]+ ){0,3}panel(?![\p{L}-])/u', $text) === 1) {
+                return 'panel';
+            }
+            return 'pills';
+        }
+        return null;
+    }
+
+    /**
+     * The build owns the ink of facts on a stated panel (frm PR-2ah): the
+     * recipe sets each fact in the contrast preset, whose core class paints
+     * with `!important`, and contrast on the primary plate is unreadable.
+     * Dropping the preset lets the panel rule set base ink.
+     */
+    public static function ownFactsInk(string $markup): string
+    {
+        $doc = BlockMarkup::parse($markup);
+        if ($doc->hasMismatchedDelimiters() || $doc->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $changed = false;
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'paragraph') {
+                continue;
+            }
+            $parent = $doc->parent($i);
+            if ($parent === null || $doc->name($parent) !== 'group') {
+                continue;
+            }
+            $parentClasses = preg_split('/\s+/', trim((string) (($doc->attrs($parent) ?? [])['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(self::FACTS_CLASS, $parentClasses, true)) {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $slug = is_string($attrs['textColor'] ?? null) ? trim($attrs['textColor']) : '';
+            $hasStyleColor = isset($attrs['style']['color']['text']);
+            if ($slug === '' && !$hasStyleColor) {
+                continue;
+            }
+            unset($attrs['textColor'], $attrs['style']['color']['text']);
+            if (isset($attrs['style']['color']) && $attrs['style']['color'] === []) {
+                unset($attrs['style']['color']);
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-text-color' && ($slug === '' || $c !== 'has-' . $slug . '-color')));
+            if ($classes === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $classes);
+            }
+            $doc->setAttrs($i, $attrs);
+            if ($slug !== '') {
+                $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-color');
+            }
+            $doc->removeClassTokenInOwnHtml($i, 'has-text-color');
+            $changed = true;
+        }
+        return $changed ? $doc->render() : $markup;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedFactPillsFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $stated = self::statedFactPills($text);
+                if ($stated !== null) {
+                    return $stated;
+                }
+            }
+        }
+        return null;
+    }
+
     /** Whether the brief puts the hero itself inside a rounded frame. */
     public static function statedHeroFrame(string $brief): bool
     {

@@ -802,6 +802,40 @@ final class ScaffoldThemeStep implements Step
             margin: 0;
             font-size: var(--wp--preset--font-size--caption, 0.875rem);
         }
+        /* Facts the brief states as pill tags (frm PR-2ah): the row drops its
+           hairline and each fact is one outlined pill; a stated panel puts
+           the pills on a filled primary plate with base ink, and the facts'
+           own contrast ink yields so the pair keeps the primary/base floor. */
+        .hero-facts--pills .hero-composition__facts,
+        .hero-facts--panel .hero-composition__facts {
+            border-block-start: 0;
+            padding-block-start: 0;
+            opacity: 1;
+            gap: var(--wp--preset--spacing--xs, 0.5rem);
+        }
+        .hero-facts--pills .hero-composition__facts > p,
+        .hero-facts--panel .hero-composition__facts > p {
+            border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+            border-radius: 999px;
+            padding: 0.4em 0.95em;
+            line-height: 1.2;
+        }
+        .hero-facts--panel .hero-composition__facts {
+            background: var(--wp--preset--color--primary);
+            color: var(--wp--preset--color--base);
+            padding: var(--wp--preset--spacing--md, 1.5rem);
+            border-radius: var(--shape-radius-panel, 1rem);
+            width: fit-content;
+            max-width: min(100%, 36rem);
+            /* Core's constrained layout centres a child with auto side
+               margins marked !important; the stated panel sits at the end
+               of the copy, where the facts row already justifies. */
+            margin-inline-start: auto !important;
+            margin-inline-end: 0 !important;
+        }
+        .hero-facts--panel .hero-composition__facts > p {
+            color: inherit;
+        }
         /* A fit-text identity line (frm PR-4q): at 600px and more the font's
            content area stands taller than the heading's line box, and that
            inline overflow is scrollable, so the page ran on below the
