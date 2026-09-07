@@ -296,6 +296,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // A hero the brief puts in a rounded frame is an inset, clipped plate
     // keyed on the build-owned hero-frame--rounded marker (frm PR-2y).
     assert_contains('.wp-block-group[class*="hero-composition--"].hero-frame--rounded {', $css);
+    // A card's bottom action keeps clear of the copy above it (frm PR-3ay).
+    assert_contains('.item-pattern__item .cta-bottom,', $css);
+    assert_contains('padding-block-start: var(--wp--preset--spacing--md, 1.5rem);', $css);
     // Tag pills on a card are one outlined chip per tag (frm PR-3al).
     assert_contains('p.tag-pill {', $css);
     assert_contains('.wp-block-group.tag-pills {', $css);
