@@ -31,6 +31,18 @@ final class Project
         return $this->path('theme' . ($rel === '' ? '' : '/' . ltrim($rel, '/')));
     }
 
+    /** Basenames of every file directly under theme/assets. @return array<string,true> */
+    public function assetFilenames(): array
+    {
+        $names = [];
+        foreach (glob($this->themePath('assets/*')) ?: [] as $abs) {
+            if (is_file($abs)) {
+                $names[basename($abs)] = true;
+            }
+        }
+        return $names;
+    }
+
     /** Absolute path under the companion content plugin's directory. */
     public function pluginPath(string $rel = ''): string
     {

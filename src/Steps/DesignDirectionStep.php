@@ -185,7 +185,7 @@ final class DesignDirectionStep implements Step
         private ?float $temperature = null,
         private ?string $seedModel = null,
         private ?string $judgeModel = null,
-        private ?float $judgeTemperature = 0.0,
+        private float $judgeTemperature = 0.0,
     ) {}
 
     public function id(): string
@@ -609,15 +609,10 @@ final class DesignDirectionStep implements Step
         }
 
         if ($seeds === []) {
-            return [
-                'text' => self::SEED_FALLBACK,
-                'ground' => '',
-                'tint' => '',
-                'register' => '',
-                'type_register' => '',
-                'color_economy' => '',
-                'choice' => ['Seed round: no usable seeds', 'Seed choice: fallback (built-in "invent one concept" seed)'],
-            ];
+            return self::chosen(['text' => self::SEED_FALLBACK], [
+                'Seed round: no usable seeds',
+                'Seed choice: fallback (built-in "invent one concept" seed)',
+            ]);
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
         $choice = self::seedRoundReport($pool);
@@ -708,7 +703,7 @@ final class DesignDirectionStep implements Step
             );
             $opts = [
                 'log_label'   => 'design-direction-judge',
-                'temperature' => $this->judgeTemperature ?? 0.0,
+                'temperature' => $this->judgeTemperature,
             ];
             if ($this->judgeModel !== null) {
                 $opts['model'] = $this->judgeModel;
@@ -741,7 +736,7 @@ final class DesignDirectionStep implements Step
      * prose. Passing them through is what makes the vocabularies levers rather
      * than bookkeeping.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
+     * @param array{text:string,ground?:?string,register?:?string,accent?:?string,tint?:?string,type_register?:?string,color_economy?:?string} $seed
      * @param list<string> $choice the report lines describing how this seed was picked
      * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
      */
@@ -1324,8 +1319,8 @@ final class DesignDirectionStep implements Step
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
             'motion_note'      => $motionNote,
-            'subject_anchor'   => self::normalizeSubjectAnchor($raw, $warnings),
-            'tension'          => self::normalizeTension($raw, $warnings),
+            'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
+            'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
             'concept_seed'     => $conceptSeed,
             // The seed's design tradition, kept as a bounded token so
             // build-owned gates (AboveFoldContract's header pool) can read
@@ -1339,37 +1334,13 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The direction's answer to the swap test: which palette role(s) are taken
-     * literally from the subject's own physical world, and from what. Prose,
-     * trimmed and delivered as authored. A non-string is dropped with a
-     * warning; an absent or empty value delivers '' silently, because '' is
-     * also the delivered form and normalize() must be a fixed point. Whether
-     * the delivered anchor is blank or binds no role is judged once per
-     * build by commitmentWarnings(), not here.
+     * A prose commitment (subject_anchor, tension), trimmed and delivered as
+     * authored. A non-string is dropped with a warning; an absent or empty
+     * value delivers '' silently, because '' is also the delivered form and
+     * normalize() must be a fixed point. Whether the delivered text is blank
+     * or binds no role is judged once per build by commitmentWarnings().
      *
      * @param array<string,mixed> $raw the whole direction payload
-     * @param list<string> $warnings
-     */
-    private static function normalizeSubjectAnchor(array $raw, array &$warnings): string
-    {
-        return self::normalizeProseCommitment($raw, 'subject_anchor', $warnings);
-    }
-
-    /**
-     * The one deliberate contrast the direction is built on, as one sentence.
-     * Same contract as normalizeSubjectAnchor(): type coercion here, content
-     * judgement in commitmentWarnings().
-     *
-     * @param array<string,mixed> $raw the whole direction payload
-     * @param list<string> $warnings
-     */
-    private static function normalizeTension(array $raw, array &$warnings): string
-    {
-        return self::normalizeProseCommitment($raw, 'tension', $warnings);
-    }
-
-    /**
-     * @param array<string,mixed> $raw
      * @param list<string> $warnings
      */
     private static function normalizeProseCommitment(array $raw, string $field, array &$warnings): string
@@ -1404,12 +1375,12 @@ final class DesignDirectionStep implements Step
     public static function commitmentWarnings(array $direction): array
     {
         $rows = [];
-        $tension = is_string($direction['tension'] ?? null) ? trim($direction['tension']) : '';
+        $tension = trim((string) ($direction['tension'] ?? ''));
         if ($tension === '') {
             $rows[] = "file='designDirection.json'; path=\"tension\"; authored=\"\"; delivered=\"\"; "
                 . 'disposition=no deliberate contrast committed; the direction ships as its category default';
         }
-        $anchor = is_string($direction['subject_anchor'] ?? null) ? trim($direction['subject_anchor']) : '';
+        $anchor = trim((string) ($direction['subject_anchor'] ?? ''));
         if ($anchor === '') {
             $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored=\"\"; delivered=\"\"; "
                 . "disposition=no palette role was tied to the subject's own world, so the swap test is "
@@ -1925,13 +1896,13 @@ final class DesignDirectionStep implements Step
         // The two prose commitments that keep a direction from being its
         // category's default. Rendered beside the palette because they say
         // where the hexes came from and what the composition is arguing.
-        $subjectAnchor = is_string($direction['subject_anchor'] ?? null) ? trim($direction['subject_anchor']) : '';
+        $subjectAnchor = trim((string) ($direction['subject_anchor'] ?? ''));
         if ($subjectAnchor !== '') {
             $facts[] = '- **Subject anchor**: ' . $subjectAnchor
                 . " — the palette role(s) taken literally from the subject's own world; keep that role"
                 . ' visible wherever the page uses it, never diluted to a neutral.';
         }
-        $tension = is_string($direction['tension'] ?? null) ? trim($direction['tension']) : '';
+        $tension = trim((string) ($direction['tension'] ?? ''));
         if ($tension !== '') {
             $facts[] = '- **Tension**: ' . $tension
                 . ' — the one deliberate contrast the site is built on; a band holds both halves'

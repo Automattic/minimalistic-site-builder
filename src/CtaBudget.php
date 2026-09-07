@@ -59,7 +59,6 @@ final class CtaBudget
             $buttons[] = ['index' => $i, 'row' => $row];
         }
 
-        $keep = max($keep, 0);
         $keepSet = [];
         $want = is_string($preferLabel) ? self::buttonLabel($preferLabel) : '';
         if ($want !== '' && $keep > 0) {
@@ -76,28 +75,22 @@ final class CtaBudget
             }
             $keepSet[$k] = true;
         }
-        $demote = [];
-        foreach ($buttons as $k => $button) {
-            if (!isset($keepSet[$k])) {
-                $demote[] = $button;
-            }
-        }
-        $kept = count($buttons) - count($demote);
+        $demote = array_values(array_diff_key($buttons, $keepSet));
+        $kept = count($keepSet);
         if ($demote === []) {
-            return ['markup' => $markup, 'kept' => count($buttons), 'demoted' => 0, 'notes' => []];
+            return ['markup' => $markup, 'kept' => $kept, 'demoted' => 0, 'notes' => []];
         }
 
-        /** @var array<string,list<int>> $byRow row key => button indices */
+        /** @var array<int|string,list<int>> $byRow demoted button indices per wp:buttons row (int key) or solo button ('solo:N') */
         $byRow = [];
         foreach ($demote as $button) {
-            $key = $button['row'] === null ? 'solo:' . $button['index'] : 'row:' . $button['row'];
-            $byRow[$key][] = $button['index'];
+            $byRow[$button['row'] ?? 'solo:' . $button['index']][] = $button['index'];
         }
 
         $ops = [];
         $notes = [];
         foreach ($byRow as $key => $indices) {
-            $row = str_starts_with($key, 'row:') ? (int) substr($key, 4) : null;
+            $row = is_int($key) ? $key : null;
             $rowAttrs = $row === null ? [] : ($doc->attrs($row) ?? []);
             $paragraphs = [];
             foreach ($indices as $i) {
@@ -140,8 +133,13 @@ final class CtaBudget
         if (preg_match('#<a\b[^>]*>(.*?)</a>#is', $inner, $m) === 1) {
             $inner = $m[1];
         }
-        $plain = html_entity_decode(strip_tags($inner), ENT_QUOTES | ENT_HTML5);
-        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $plain)));
+        return mb_strtolower(self::plainLabel($inner));
+    }
+
+    /** The visible text of a label, tags and entities resolved, whitespace collapsed. */
+    private static function plainLabel(string $markup): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', PlainText::fromMarkup($markup)));
     }
 
     /**
@@ -168,8 +166,9 @@ final class CtaBudget
             $label = trim($m[2]);
             $anchor = '<a';
             foreach (['href', 'target', 'rel'] as $name) {
-                if (preg_match('/\b' . $name . '\s*=\s*(["\'])(.*?)\1/is', $m[1], $attr) === 1) {
-                    $anchor .= ' ' . $name . '="' . $attr[2] . '"';
+                $attr = MarkupScan::tagAttribute($m[1], $name);
+                if ($attr !== null) {
+                    $anchor .= ' ' . $name . '="' . $attr[0] . '"';
                 }
             }
             $inner = $anchor === '<a'
@@ -179,7 +178,7 @@ final class CtaBudget
             $label = trim(strip_tags($buttonInner));
             $inner = $label;
         }
-        $plain = trim(html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5));
+        $plain = self::plainLabel($label);
 
         $block = BlockMarkup::serializeComment('paragraph', $attrs, false) . "\n"
             . '<p class="' . implode(' ', $classes) . '">' . $inner . '</p>' . "\n"

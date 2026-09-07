@@ -120,9 +120,10 @@ final class ProjectStore
 
     /**
      * Filesystem- and URL-safe slug: lowercase, alnum + single hyphens,
-     * trimmed, capped. Always returns a non-empty string.
+     * trimmed, capped. Always returns a non-empty string: $fallback when
+     * nothing survives.
      */
-    public static function slugify(string $s): string
+    public static function slugify(string $s, string $fallback = 'site'): string
     {
         $s = strtolower(trim($s));
         $s = preg_replace('/[^a-z0-9]+/', '-', $s) ?? '';
@@ -130,6 +131,6 @@ final class ProjectStore
         if (strlen($s) > 60) {
             $s = rtrim(substr($s, 0, 60), '-');
         }
-        return $s === '' ? 'site' : $s;
+        return $s === '' ? $fallback : $s;
     }
 }

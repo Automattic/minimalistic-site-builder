@@ -556,8 +556,8 @@ final class SiteSpecStep implements Step
             if (mb_substr($lowerPhrase, 0, 1) !== mb_substr($lowerName, 0, 1)) {
                 continue;
             }
-            $distance = self::editDistance($lowerPhrase, $lowerName);
-            if ($distance <= 2) {
+            // Byte-based: one accent slip costs 2 and spends the whole budget on its own.
+            if (levenshtein($lowerPhrase, $lowerName) <= 2) {
                 $candidates[$phrase] = true;
             }
         }
@@ -586,26 +586,6 @@ final class SiteSpecStep implements Step
         return preg_match('/^.[^\s]*[\p{Lu}\p{N}]/u', $word) === 1;
     }
 
-    /** Levenshtein distance over characters, not bytes, so accented names measure right. */
-    private static function editDistance(string $a, string $b): int
-    {
-        $x = preg_split('//u', $a, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $y = preg_split('//u', $b, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $previous = range(0, count($y));
-        foreach ($x as $i => $cx) {
-            $current = [$i + 1];
-            foreach ($y as $j => $cy) {
-                $current[] = min(
-                    $previous[$j + 1] + 1,
-                    $current[$j] + 1,
-                    $previous[$j] + ($cx === $cy ? 0 : 1),
-                );
-            }
-            $previous = $current;
-        }
-        return $previous[count($y)];
-    }
-
     /**
      * Replace one identity token, as a whole word, in every string of a value.
      * Arrays are walked recursively so page titles and purposes follow the
@@ -614,12 +594,9 @@ final class SiteSpecStep implements Step
     private static function replaceIdentityToken(mixed $value, string $from, string $to): mixed
     {
         if (is_array($value)) {
-            foreach ($value as $key => $item) {
-                $value[$key] = self::replaceIdentityToken($item, $from, $to);
-            }
-            return $value;
+            return array_map(static fn (mixed $item): mixed => self::replaceIdentityToken($item, $from, $to), $value);
         }
-        if (!is_string($value) || $from === '') {
+        if (!is_string($value)) {
             return $value;
         }
         return (string) preg_replace(
