@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeaderNav;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
@@ -184,6 +185,8 @@ final class HeaderHeroStep implements Step
                 'aboveFold.json',
                 'designDirection.json',
                 'siteSpec.json',
+                // The brief, for a stated hero frame (frm PR-2y).
+                'meta.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -405,6 +408,29 @@ final class HeaderHeroStep implements Step
                     $heroPart,
                     $heroRepairs,
                 );
+                // A hero the brief puts in a rounded frame takes the inset
+                // plate (frm PR-2y): the hero is exempt from a framed canvas,
+                // so the stated frame is its own build-owned marker, on a
+                // cover-media hero under a header that sits above it.
+                $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+                if (HeroComposition::statedHeroFrameFor(is_array($meta) ? $meta : [])) {
+                    $recipeMeta = HeroComposition::metadata((string) $delivery['recipe']);
+                    if ((string) ($recipeMeta['layout_archetype'] ?? '') !== 'full-bleed-cover') {
+                        $warnings[] = "[{$heroRel}] the brief frames the hero, but the "
+                            . (string) $delivery['recipe'] . ' recipe carries no cover to frame; the frame is withheld';
+                    } elseif ($mode === AboveFoldContract::MODE_OVERLAY) {
+                        $warnings[] = "[{$heroRel}] the brief frames the hero, but the header overlays the cover;"
+                            . ' a frame under an overlay header would put the header on the plate corners, so the frame is withheld';
+                    } else {
+                        $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                            $heroMarkup,
+                            HeroComposition::FRAME_MARKER_PREFIX,
+                            HeroComposition::FRAME_MARKER,
+                            $heroPart,
+                            $heroRepairs,
+                        );
+                    }
+                }
                 $beforeLayout = $heroMarkup;
                 $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
                 if ($heroMarkup !== $beforeLayout) {

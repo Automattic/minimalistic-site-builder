@@ -760,3 +760,15 @@ test('a stated dark hero panel commits the contrast surface for a recipe that al
     $cover = HeroComposition::planProjection(HeroBlueprint::defaultFor('cinematic-safe-zone'), 'contrast');
     assert_eq(HeroComposition::planProjection(HeroBlueprint::defaultFor('cinematic-safe-zone')), $cover, 'a recipe whose backgrounds exclude the stated surface is untouched');
 });
+
+test('a hero the brief puts in a rounded frame is read in so many words (frm PR-2y)', function () {
+    assert_true(HeroComposition::statedHeroFrame('one painted desert-sky cover hero in a rounded frame with a centered white headline'));
+    assert_true(HeroComposition::statedHeroFrame('A framed cover hero over a warm page.'));
+    assert_true(HeroComposition::statedHeroFrame('the hero in a frame, then a logo row'));
+    assert_true(!HeroComposition::statedHeroFrame('Dark hero with a full-bleed high-contrast portrait'), 'a full-bleed cover is not framed');
+    assert_true(!HeroComposition::statedHeroFrame('framed cards with hairline borders'), 'a framed card style is not a hero frame');
+    assert_true(!HeroComposition::statedHeroFrame('an unframed hero'), 'a phrase matches at word boundaries');
+    assert_true(HeroComposition::statedHeroFrameFor(['original_prompt' => 'cover hero in a rounded frame', 'prompt' => 'a landing page']));
+    assert_true(HeroComposition::statedHeroFrameFor(['prompt' => 'the hero in a rounded frame']));
+    assert_true(!HeroComposition::statedHeroFrameFor(['prompt' => 'a landing page', 'original_prompt' => '']));
+});

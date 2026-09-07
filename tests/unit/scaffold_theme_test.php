@@ -293,6 +293,10 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // columns copy container must span full width or the constrained-layout
     // contentSize cap collides with the inset and starves the copy.
     assert_contains('.hero-composition--cinematic-safe-zone .wp-block-columns {', $css);
+    // A hero the brief puts in a rounded frame is an inset, clipped plate
+    // keyed on the build-owned hero-frame--rounded marker (frm PR-2y).
+    assert_contains('.wp-block-group[class*="hero-composition--"].hero-frame--rounded {', $css);
+    assert_contains('.wp-block-group.hero-frame--rounded .wp-block-cover.alignfull {', $css);
     assert_contains('@media (max-width: 781.98px)', $css);
     foreach ([
         'stack-copy-first',

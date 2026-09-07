@@ -605,6 +605,50 @@ final class HeroComposition
     }
 
     /**
+     * Phrases that put the hero itself inside a frame (frm PR-2y): parley's
+     * "painted desert-sky cover hero in a rounded frame". The hero is exempt
+     * from a framed canvas (prompts/hero.md), and only the wordmark-stage
+     * plate takes the rounded band geometry (frm PR-2s), so a stated hero
+     * frame needs its own reader, the way the stated dark hero panel has one.
+     *
+     * @var list<string>
+     */
+    private const STATED_HERO_FRAME_PHRASES = [
+        'hero in a rounded frame', 'cover hero in a rounded frame', 'cover in a rounded frame',
+        'in a rounded frame', 'in a rounded photo frame', 'rounded cover hero', 'rounded-frame hero',
+        'framed cover hero', 'hero in a frame', 'cover hero in a frame', 'framed hero photo', 'framed hero image',
+    ];
+
+    /** The build-owned root marker a stated hero frame stamps on the hero root. */
+    public const FRAME_MARKER_PREFIX = 'hero-frame--';
+
+    public const FRAME_MARKER = 'hero-frame--rounded';
+
+    /** Whether the brief puts the hero itself inside a rounded frame. */
+    public static function statedHeroFrame(string $brief): bool
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_HERO_FRAME_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedHeroFrameFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedHeroFrame($text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Strictly validate caller-owned design constraints. Unknown properties
      * fail so a misspelled operator flag never looks enforced when it is not.
      *

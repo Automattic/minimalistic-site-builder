@@ -599,6 +599,28 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster > .wp-block-cover {
             overflow: hidden;
         }
+        /* A hero the brief puts in a rounded frame (frm PR-2y): the root is
+           an inset plate, one gutter from the viewport and a small gap under
+           the header, with the committed panel radius, clipped so the cover
+           follows the corner. The build stamps hero-frame--rounded on a
+           cover-media hero under a stacked header (HeaderHeroStep); a full
+           cover inside it keeps the plate's edges, not the viewport's. */
+        .wp-block-group[class*="hero-composition--"].hero-frame--rounded {
+            margin-inline: var(--wp--preset--spacing--md, 1.5rem);
+            margin-block-start: var(--wp--preset--spacing--sm, 0.75rem);
+            border-radius: var(--shape-radius-panel, 1.5rem);
+            overflow: hidden;
+        }
+        .wp-block-group.hero-frame--rounded .wp-block-cover.alignfull {
+            margin-inline: 0;
+            max-width: none;
+            width: auto;
+        }
+        @media (max-width: 781px) {
+            .wp-block-group[class*="hero-composition--"].hero-frame--rounded {
+                margin-inline: var(--wp--preset--spacing--sm, 0.75rem);
+            }
+        }
         /* cinematic-safe-zone overlays copy on a full-bleed image and reserves
            image room with a right-side percentage inset. When the copy is
            authored as columns, the constrained layout otherwise caps it at
