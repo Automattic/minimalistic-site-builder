@@ -1338,6 +1338,56 @@ test('on a personal brief the retry asks for the person\'s name as the site name
     assert_eq('Studio Grund', SiteSpecStep::namedAfterThePerson(['name' => 'Studio Grund', 'persona_name' => 'Jonas Grund'], false, $warnings)['name']);
 });
 
+test('personal-site retries preserve identities present in the original brief (BIGR-987)', function () {
+    foreach ([[], ['name', 'persona_name']] as $invented) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        $project->writeJson('meta.json', [
+            'prompt' => 'Create a personal portfolio for a musician.',
+            'original_prompt' => 'Create a personal portfolio for Prince, a musician. Keep the name Prince.',
+        ]);
+        $llm->queueJson(['name' => 'Prince', 'persona_name' => 'Prince', 'invented' => $invented, 'language' => 'en']);
+        $llm->queueJson(['name' => 'Marcus Bennett', 'persona_name' => 'Marcus Bennett', 'invented' => ['name', 'persona_name'], 'language' => 'en']);
+        quietly(fn () => (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+        $spec = $project->readJson('siteSpec.json');
+        assert_eq(1, $llm->completeJsonCalls, 'a supplied mononym is not invented even when the model says it is');
+        assert_eq('Prince', $spec['name']);
+        assert_eq('Prince', $spec['persona_name']);
+        remove_tree($tmp);
+    }
+
+    // A name retry must preserve a supplied persona too.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Create a personal portfolio for Prince.']);
+    $llm->queueJson(['name' => 'Untitled', 'persona_name' => 'Prince', 'invented' => ['name'], 'language' => 'en']);
+    $llm->queueJson(['name' => 'Paisley Park', 'persona_name' => 'Marcus Bennett', 'invented' => ['name', 'persona_name'], 'language' => 'en']);
+    quietly(fn () => (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+    assert_eq(2, $llm->completeJsonCalls);
+    assert_eq('Prince', $project->readJson('siteSpec.json')['persona_name']);
+    assert_true(!in_array('persona_name', $project->readJson('siteSpec.json')['invented'], true));
+    remove_tree($tmp);
+
+    // The original brief, not a model's rewrite or a substring, establishes identity.
+    foreach (['Create a personal portfolio for a musician.', 'Create a personal portfolio for Princess.'] as $original) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        $project->writeJson('meta.json', ['original_prompt' => $original, 'prompt' => 'Create a personal portfolio for Prince.']);
+        $llm->queueJson(['name' => 'Prince', 'persona_name' => 'Prince', 'invented' => ['name', 'persona_name'], 'language' => 'en']);
+        $llm->queueJson(['name' => 'Marcus Bennett', 'persona_name' => 'Marcus Bennett', 'invented' => ['name', 'persona_name'], 'language' => 'en']);
+        quietly(fn () => (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+        assert_eq(2, $llm->completeJsonCalls, 'an ungrounded placeholder still takes the bounded retry');
+        remove_tree($tmp);
+    }
+
+    // A supplied brand also survives a retry that fills the missing persona.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Create a personal portfolio named "Studio" for a musician.']);
+    $llm->queueJson(['name' => 'Studio', 'persona_name' => '', 'invented' => [], 'language' => 'en']);
+    $llm->queueJson(['name' => 'Marcus Bennett', 'persona_name' => 'Marcus Bennett', 'invented' => ['name', 'persona_name'], 'language' => 'en']);
+    quietly(fn () => (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+    assert_eq('Studio', $project->readJson('siteSpec.json')['name']);
+    assert_eq('Marcus Bennett', $project->readJson('siteSpec.json')['persona_name']);
+    remove_tree($tmp);
+});
+
 test('on a personal brief a persona is a placeholder whatever the invented list says (frm PR-0o)', function () {
     // luzia-like45: persona "Craft Studio" beside the site "Craft Studio", only the name listed as invented.
     $spec = ['name' => 'Craft Studio', 'persona_name' => 'Craft Studio', 'invented' => ['name']];

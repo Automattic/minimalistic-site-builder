@@ -124,6 +124,14 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        // Identities and contact facts are grounded in what the USER wrote. refine-prompt runs
+        // immediately before this step and replaces meta's `prompt` with its own
+        // rewrite, so grounding against that would let a contact detail refine
+        // invented vouch for itself. `original_prompt` is absent only when no
+        // refinement happened, and `prompt` is then the raw input.
+        $stated = $meta['original_prompt'] ?? null;
+        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
+
         // Validate an explicit caller value before spending the site-spec LLM
         // call. The generated spec never owns this field.
         $callerWritingDirection = array_key_exists('writing_direction', $meta)
@@ -158,6 +166,13 @@ final class SiteSpecStep implements Step
             ]);
             try {
                 $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+                $statedIdentity = [];
+                foreach (['name', 'persona_name'] as $field) {
+                    if (self::identityInPrompt($statedPrompt, $spec[$field] ?? null)) {
+                        $statedIdentity[$field] = $spec[$field];
+                    }
+                }
+                $spec = self::withStatedIdentity($spec, $statedIdentity);
                 // A category word is not a name (frm PR-0d): calderr-like6
                 // was named "Portfolio" and the giant wordmark read generic.
                 // One fresh sample with the rule quoted; a second generic
@@ -171,11 +186,10 @@ final class SiteSpecStep implements Step
                 // and -27 answered an empty persona_name on "a personal
                 // portfolio for a web designer", and no retry could fire.
                 $personal = self::personalBrief((string) ($meta['original_prompt'] ?? '')) || self::personalBrief($prompt);
-                // On a personal brief every persona is invented (the brief
-                // names no person), whatever the model lists (frm PR-0o):
-                // luzia-like45 answered persona "Craft Studio" beside the site
-                // "Craft Studio" and listed only the name as invented.
-                $placeholder = is_array($spec) && self::placeholderPersona($spec, $personal)
+                // A personal brief may name its person. Only ungrounded
+                // personas take the placeholder retry, even if the model
+                // incorrectly lists a stated identity as invented.
+                $placeholder = !isset($statedIdentity['persona_name']) && self::placeholderPersona($spec, $personal)
                     ? trim((string) $spec['persona_name'])
                     : '';
                 $emptyPersona = $placeholder === '' && is_array($spec)
@@ -192,7 +206,7 @@ final class SiteSpecStep implements Step
                 $naming = $personal
                     ? ' name the site with that person\'s full name itself (the site name IS the person\'s name, not a studio name),'
                     : ' name the site after that person or their studio,';
-                if ($generic !== '' && self::genericName($generic)) {
+                if ($generic !== '' && !isset($statedIdentity['name']) && self::genericName($generic)) {
                     // When the persona is a placeholder too, the one retry
                     // asks for both (frm PR-0l): calderr-like25's "Studio
                     // Atelier" became "Vera", persona "Vera", because the
@@ -212,12 +226,13 @@ final class SiteSpecStep implements Step
                         . ' none, and list "name" in "invented"); keep every other fact as before.' . $personaClause,
                         $this->withOptions(['log_label' => $this->id() . '-name-retry']),
                     );
+                    $retry = self::withStatedIdentity($retry, $statedIdentity);
                     $retried = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
                     if ($retried !== '' && !self::genericName($retried)) {
                         $spec = $retry;
                         $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered \"{$retried}\""
                             . '; disposition a generic category word is not a site name, so one fresh sample replaced it';
-                        $spec = self::namedAfterThePerson($spec, $personal, $warnings);
+                        $spec = self::namedAfterThePerson($spec, $personal && !isset($statedIdentity['name']), $warnings);
                         if ($placeholder !== '') {
                             $retriedPersona = trim((string) ($retry['persona_name'] ?? ''));
                             $warnings[] = self::placeholderPersona($retry, $personal)
@@ -246,17 +261,18 @@ final class SiteSpecStep implements Step
                         . ' every other fact as before.',
                         $this->withOptions(['log_label' => $this->id() . '-persona-retry']),
                     );
+                    $retry = self::withStatedIdentity($retry, $statedIdentity);
                     $retriedPersona = is_array($retry) ? trim((string) ($retry['persona_name'] ?? '')) : '';
                     $retriedName = is_array($retry) ? trim((string) ($retry['name'] ?? '')) : '';
                     if (
                         is_array($retry) && $retriedPersona !== '' && !self::placeholderPersona($retry, $personal)
-                        && $retriedName !== '' && !self::genericName($retriedName)
+                        && $retriedName !== '' && (isset($statedIdentity['name']) || !self::genericName($retriedName))
                     ) {
                         $spec = $retry;
                         $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered \"{$retriedPersona}\""
                             . " (site name \"{$generic}\" to \"{$retriedName}\"); disposition an invented persona must be a"
                             . " person's full name, so one fresh sample replaced it";
-                        $spec = self::namedAfterThePerson($spec, $personal, $warnings);
+                        $spec = self::namedAfterThePerson($spec, $personal && !isset($statedIdentity['name']), $warnings);
                     } else {
                         $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered as authored"
                             . "; disposition an invented persona must be a person's full name, and the retry answered "
@@ -271,14 +287,6 @@ final class SiteSpecStep implements Step
                     . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
             }
         }
-
-        // Contact facts are grounded in what the USER wrote. refine-prompt runs
-        // immediately before this step and replaces meta's `prompt` with its own
-        // rewrite, so grounding against that would let a contact detail refine
-        // invented vouch for itself. `original_prompt` is absent only when no
-        // refinement happened, and `prompt` is then the raw input.
-        $stated = $meta['original_prompt'] ?? null;
-        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
 
         $spec = self::normalize(
             $spec,
@@ -328,6 +336,35 @@ final class SiteSpecStep implements Step
         $project->writeJson('siteSpec.json', $spec);
     }
 
+    /** Exact identity tokens in the user's own brief, never a model rewrite. */
+    private static function identityInPrompt(string $prompt, mixed $identity): bool
+    {
+        if (!is_string($identity) || trim($identity) === '') {
+            return false;
+        }
+        $words = preg_split('/\s+/u', trim($identity), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $pattern = implode('\s+', array_map(static fn (string $word): string => preg_quote($word, '/'), $words));
+        // "a personal portfolio" does not name the site Portfolio, but
+        // "a studio named Studio" really does state that category word.
+        $prefix = self::genericName($identity)
+            ? '(?<![\p{L}\p{N}])(?:named|called|name(?:\s+is)?)[\s:]+["\'“‘]?'
+            : '(?<![\p{L}\p{N}])';
+        return preg_match('/' . $prefix . $pattern . '(?![\p{L}\p{N}])/iu', $prompt) === 1;
+    }
+
+    /** A retry may repair invented fields but cannot replace a stated identity. */
+    private static function withStatedIdentity(array $spec, array $identity): array
+    {
+        $spec = array_replace($spec, $identity);
+        if (is_array($spec['invented'] ?? null)) {
+            $spec['invented'] = array_values(array_filter(
+                $spec['invented'],
+                static fn (mixed $field): bool => !is_string($field) || !array_key_exists($field, $identity),
+            ));
+        }
+        return $spec;
+    }
+
     /**
      * Category words a model offers as a site name when the prompt states
      * none (frm PR-0d). Compared whole, lowercase, after a leading article.
@@ -372,8 +409,9 @@ final class SiteSpecStep implements Step
             return false;
         }
         $invented = $spec['invented'] ?? [];
-        // On a personal brief the brief names no person, so the persona is
-        // invented whatever the model lists (frm PR-0o).
+        // The caller excludes identities grounded in the original brief.
+        // A remaining personal-site persona may be invented even when the
+        // model forgot to include it in its invented list (frm PR-0o).
         if (!$personal && (!is_array($invented) || !in_array('persona_name', $invented, true))) {
             return false;
         }
