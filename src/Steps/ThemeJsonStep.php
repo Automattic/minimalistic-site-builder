@@ -21,6 +21,7 @@ use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\HeadingEmphasis;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -2605,16 +2606,25 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return [$theme, []];
         }
         $warnings = [];
-        $hook = HeadingEmphasis::CLASS_NAME;
-        $remove = static function (array $node, string $path) use (&$remove, &$warnings, $hook): array {
+        // The tag pill is a build-owned hook too (frm PR-3al): luzia-like54's
+        // theme.json css filled `.tag-pill` with the accent, and the class
+        // then painted six full-width bars on the work cards.
+        $hooks = [
+            HeadingEmphasis::CLASS_NAME => 'the emphasis kit paints it',
+            ItemPattern::TAG_PILL_CLASS => 'the theme paints the pill',
+        ];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings, $hooks): array {
             foreach ($node as $key => $value) {
                 if ($key === 'css' && is_string($value)) {
-                    [$repaired, $dropped] = CssChecks::dropEmphasisHookDeclarations($value, $hook);
-                    foreach ($dropped as $declaration) {
-                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
-                            . Warnings::value($declaration)
-                            . "; delivered removed; disposition removed custom CSS for the emphasis hook .{$hook}"
-                            . ' — the emphasis kit paints it';
+                    $repaired = $value;
+                    foreach ($hooks as $hook => $owner) {
+                        [$repaired, $dropped] = CssChecks::dropEmphasisHookDeclarations($repaired, $hook);
+                        foreach ($dropped as $declaration) {
+                            $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                                . Warnings::value($declaration)
+                                . "; delivered removed; disposition removed custom CSS for the build-owned hook .{$hook}"
+                                . ' — ' . $owner;
+                        }
                     }
                     $node[$key] = $repaired;
                     continue;
