@@ -39,15 +39,58 @@ final class HeadingEmphasis
     public static function meaning(string $emphasis): string
     {
         return match ($emphasis) {
-            'two-tone'    => 'the heading is one line of two tones: wrap the QUIETER clause (the longer, explanatory'
-                . ' half) in <span class="' . self::CLASS_NAME . '">…</span> and leave the strong clause bare;'
-                . ' the build mutes the wrapped clause to ' . self::TWO_TONE_INK_SHARE . '% of the heading ink',
+            'two-tone'    => 'the heading is ONE sentence set in two tones: write the sentence first, so that it reads'
+                . ' whole with the span removed, then wrap its QUIETER clause (the longer, explanatory half) in'
+                . ' <span class="' . self::CLASS_NAME . '">…</span> and leave the strong clause bare. Never set a label'
+                . ' and a second title in the span ("Questions <span>Common answers</span>" and'
+                . ' "Let\'s create <span>ready to start?</span>" read as two glued headings, and a one-word section'
+                . ' label such as "Process" or "Questions" is never the bare clause); "Selected work'
+                . ' <span>from the last two years</span>" and "Ready to collaborate <span>on a brand that fits</span>"'
+                . ' are one sentence each. The build mutes the wrapped clause to '
+                . self::TWO_TONE_INK_SHARE . '% of the heading ink',
             'italic-word' => 'wrap ONE to THREE key words in <span class="' . self::CLASS_NAME . '">…</span>;'
                 . ' the build sets them in italic, in the accent face when the direction commits one',
             'highlight'   => 'wrap ONE to THREE key words in <span class="' . self::CLASS_NAME . '">…</span>;'
                 . ' the build draws a translucent accent highlighter band behind them',
             default       => 'no heading emphasis; headings are one tone, one face',
         };
+    }
+
+    /**
+     * Two-tone headings that read as a label glued to a second title (frm
+     * PR-5w): luzia-like50 shipped "Questions <span>Common answers</span>".
+     * A heading whose bare lead is one or two words and whose span opens
+     * with a capital letter is two titles, not one sentence; the build
+     * cannot rewrite the copy, so it reports each one.
+     *
+     * @return list<string> the offending headings' plain text
+     */
+    public static function gluedTwoTone(string $markup): array
+    {
+        $glued = [];
+        if (preg_match_all('/<h[1-6][^>]*>(.*?)<\/h[1-6]>/su', $markup, $headings) !== 1 && ($headings[1] ?? []) === []) {
+            return [];
+        }
+        foreach ($headings[1] as $inner) {
+            if (preg_match('/^(.*?)<span class="' . self::CLASS_NAME . '">(.*?)<\/span>\s*$/su', $inner, $m) !== 1) {
+                continue;
+            }
+            $lead = trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $tail = trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($lead === '' || $tail === '') {
+                continue;
+            }
+            $leadWords = preg_split('/\s+/u', $lead, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $leadEndsClause = preg_match('/[,:;]$/u', $lead) === 1;
+            $tailCapital = preg_match('/^\p{Lu}/u', $tail) === 1 && preg_match('/^\p{Lu}[\p{Ll}]/u', $tail) === 1;
+            // "Sofia Sousa", "FinFlow teams": a proper name or a camel-cased brand opens with a capital and is not a title.
+            $tailIsName = (preg_match('/^\p{Lu}\S*\s+\p{Lu}/u', $tail) === 1 && count(preg_split('/\s+/u', $tail, -1, PREG_SPLIT_NO_EMPTY) ?: []) <= 3)
+                || preg_match('/^\p{Lu}\p{Ll}+\p{Lu}/u', $tail) === 1;
+            if (count($leadWords) <= 2 && $tailCapital && !$leadEndsClause && !$tailIsName) {
+                $glued[] = trim(html_entity_decode(strip_tags($inner), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            }
+        }
+        return $glued;
     }
 
     /**

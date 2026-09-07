@@ -75,3 +75,22 @@ test('the direction normalizes, persists, formats and reads heading_emphasis (fr
         assert_eq('highlight', DesignDirectionStep::headingEmphasisFor($project));
     });
 });
+
+test('the two-tone fact asks for one sentence and a glued label-plus-title heading is reported (frm PR-5w)', function () {
+    $meaning = HeadingEmphasis::meaning('two-tone');
+    assert_contains('ONE sentence', $meaning);
+    assert_contains('reads whole with the span removed', $meaning);
+    assert_contains('Never set a label and a second title in the span', $meaning);
+    assert_contains('a one-word section label such as "Process" or "Questions" is never the bare clause', $meaning);
+
+    $markup = '<!-- wp:heading --><h2 class="wp-block-heading">Questions <span class="emph">Common answers</span></h2><!-- /wp:heading -->'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Selected projects <span class="emph">from the last two years</span></h2><!-- /wp:heading -->'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">How I work <span class="emph">three core offerings</span></h2><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Recognition: <span class="emph">Iberian Design Awards</span></h3><!-- /wp:heading -->'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Meet <span class="emph">Sofia Sousa</span></h2><!-- /wp:heading -->'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Trusted by <span class="emph">FinFlow teams</span></h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Questions <span class="emph">Common answers</span></p><!-- /wp:paragraph -->';
+    $glued = HeadingEmphasis::gluedTwoTone($markup);
+    assert_eq(['Questions Common answers'], $glued, implode(' | ', $glued));
+    assert_eq([], HeadingEmphasis::gluedTwoTone('<h2>No span here</h2>'));
+});
