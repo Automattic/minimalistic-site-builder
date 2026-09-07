@@ -1025,3 +1025,29 @@ test('monochrome economy aligns a formerly close accent instead of manufacturing
     $default = PaletteFloor::repair($palette, $defaultWarnings);
     assert_true($default['accent'] !== $palette['accent'], 'a bare floor call preserves its former multicolor behavior');
 });
+
+test('a stated accent keeps its hue and the primary takes the separation, with the tonal roles following (frm PR-4y)', function () {
+    // parley-like23: an orange-brown primary and the brief's orange accent, 13 degrees apart.
+    $palette = ['base' => '#F7F0E9', 'contrast' => '#2C231D', 'primary' => '#B4552C', 'secondary' => '#7C6E62', 'accent' => '#E2712A', 'band' => '#EBE0D4'];
+    $warnings = [];
+    $free = PaletteFloor::repair($palette, $warnings, null, 'single-accent');
+    assert_true($free['accent'] !== '#E2712A', 'without the pin the accent rotates, as before');
+
+    $warnings = [];
+    $pinned = PaletteFloor::repair($palette, $warnings, null, 'single-accent', true);
+    assert_eq('#E2712A', $pinned['accent'], 'the stated accent hue stays');
+    assert_true($pinned['primary'] !== '#B4552C', 'the primary yielded instead');
+    assert_true((PaletteFloor::chroma($pinned['primary']) ?? 1.0) <= PaletteFloor::CHROMA_MIN, 'the primary no longer competes as a hue');
+    assert_true(abs((PaletteFloor::hue($pinned['primary']) ?? 0.0) - (PaletteFloor::hue('#B4552C') ?? 0.0)) < 3.0, 'its warm hue still tints the foundation');
+    assert_eq([], PaletteFloor::check($pinned, null, 'single-accent'), 'no residual finding');
+    $text = implode("\n", $warnings);
+    assert_contains('primary yields its chroma to the accent the brief states', $text);
+    assert_true(!str_contains($text, 'accent rotated'), 'no accent rotation note');
+
+    // Far enough apart already: the pin changes nothing.
+    $apart = ['base' => '#FFFFFF', 'contrast' => '#111111', 'primary' => '#1B3CDB', 'secondary' => '#5F6165', 'accent' => '#E2712A'];
+    $warnings = [];
+    $out = PaletteFloor::repair($apart, $warnings, null, 'single-accent', true);
+    assert_eq('#E2712A', $out['accent']);
+    assert_eq('#1B3CDB', $out['primary']);
+});

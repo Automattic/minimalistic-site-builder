@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\AccentHue;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
@@ -2740,6 +2741,26 @@ final class DesignDirectionStep implements Step
                 $repairs[] = 'designDirection.json: field image_treatment authored ' . self::describe($treatment)
                     . ' delivered "natural"; disposition the brief names colour photography, so the treatment stays natural';
                 $direction['image_treatment'] = 'natural';
+            }
+        }
+        // frm PR-4y: an accent hue the brief states outranks the seed's
+        // accent. parley's "a single orange accent on the buttons" shipped
+        // yellow in four cohorts: the seed authored yellow, and the palette
+        // floor rotated an authored orange away from the orange-brown
+        // primary (the floor now moves the primary for a stated accent).
+        $statedAccent = AccentHue::statedFor($meta);
+        if ($statedAccent !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $accent = is_string($palette['accent'] ?? null) ? $palette['accent'] : null;
+            if ($accent !== null && !AccentHue::inFamily($accent, $statedAccent)) {
+                $fixed = AccentHue::toFamily($accent, $statedAccent);
+                if ($fixed !== null && strcasecmp($fixed, $accent) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.accent authored '
+                        . self::describe($accent) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its accent hue (' . $statedAccent['word']
+                        . '), so the model commitment moves into that hue family at its own lightness and chroma';
+                    $direction['palette']['accent'] = $fixed;
+                }
             }
         }
         // frm PR-6b: a numbered row the brief states (PR-3w) needs a
