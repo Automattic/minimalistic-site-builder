@@ -2772,6 +2772,20 @@ final class DesignDirectionStep implements Step
                 }
             }
         }
+        // frm PR-5t: a heading treatment the brief states outranks the seed's.
+        // luzia's "tight sans headings" met caps-tight and every heading
+        // shipped uppercase; a brief that also states uppercase titles keeps
+        // the caps treatment through the same reader.
+        $statedTreatment = TypeTreatment::statedTreatmentFor($meta);
+        if ($statedTreatment !== null) {
+            $committedTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+            if ($committedTreatment !== $statedTreatment) {
+                $repairs[] = 'designDirection.json: field type_treatment authored ' . self::describe($committedTreatment)
+                    . ' delivered ' . self::describe($statedTreatment)
+                    . '; disposition the brief states its heading treatment, so the model commitment yields to it';
+                $direction['type_treatment'] = $statedTreatment;
+            }
+        }
         // frm PR-5s: a stated wordmark case is the wordmark's own case (PR-2ac),
         // not the site-wide heading treatment. fabrica-like27 read "a giant
         // lowercase wordmark" as the lowercase treatment and set every heading

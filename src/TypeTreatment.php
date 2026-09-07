@@ -59,6 +59,59 @@ final class TypeTreatment
         ],
     ];
 
+    /**
+     * Phrases that state the tight sentence-case treatment (frm PR-5t):
+     * luzia's "tight sans headings with muted-plus-dark two-tone lines" met
+     * a caps-tight commitment and every heading shipped uppercase.
+     *
+     * @var list<string>
+     */
+    private const STATED_TIGHT_PHRASES = [
+        'tight sans headings', 'tight sans heading', 'tight headings', 'tight heading', 'tight sans type',
+        'tight tracking', 'tightly tracked headings', 'tight display type', 'tight display headings',
+        'tight grotesque headings', 'tight geometric headings', 'tight sans-serif headings',
+    ];
+
+    /**
+     * The treatment a brief states in so many words, or null: `tight` for a
+     * stated tight sans heading, `caps-tight` when the brief also states
+     * uppercase titles, `lowercase` for stated lowercase headings.
+     */
+    public static function statedTreatment(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        $tight = false;
+        foreach (self::STATED_TIGHT_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                $tight = true;
+                break;
+            }
+        }
+        $case = self::statedHeadingCase($brief);
+        if ($case === 'uppercase') {
+            return $tight ? 'caps-tight' : null;
+        }
+        if ($case === 'lowercase') {
+            return 'lowercase';
+        }
+        return $tight ? 'tight' : null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTreatmentFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $treatment = self::statedTreatment($text);
+                if ($treatment !== null) {
+                    return $treatment;
+                }
+            }
+        }
+        return null;
+    }
+
     /** The site-wide heading case a brief states, or null. */
     public static function statedHeadingCase(string $brief): ?string
     {
