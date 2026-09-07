@@ -144,7 +144,7 @@ function design_preview_assert_shape(string $html): void
     assert_eq(
         1,
         preg_match(
-            '/^AI_IMAGE: [^|]+ \| [^|]+ \| (?:photorealistic|digital-art|illustration|minimalist|flat-design|3d-render|abstract|watercolor) \| (?:square|landscape|portrait)$/D',
+            '/^AI_IMAGE: [^|]+ \| [^|]+ \| (?:photorealistic|digital-art|illustration|minimalist|flat-design|ui-screenshot|3d-render|abstract|watercolor) \| (?:square|landscape|portrait)$/D',
             $image->getAttribute('alt'),
         ),
         'image alt uses exact four-field AI_IMAGE convention',

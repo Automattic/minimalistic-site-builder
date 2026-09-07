@@ -46,6 +46,7 @@ When creating multiple images that will be displayed together in a row or grid (
 - `digital-art` — Modern digital artwork
 - `illustration` — Hand-drawn style illustrations
 - `minimalist` — Clean, simple, minimal design
+- `ui-screenshot` — Edge-to-edge screenshot of a current web application interface: the screen content only, never a window frame, title bar, browser tab, device or desk
 - `flat-design` — Flat, modern UI design style
 - `3d-render` — 3D rendered appearance
 - `abstract` — Abstract artistic style

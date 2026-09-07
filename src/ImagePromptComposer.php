@@ -157,6 +157,12 @@ final class ImagePromptComposer
             // carries the look on its own.
             $gradeClause = '';
         }
+        // A screenshot carries no lighting (frm PR-7m): the photo series'
+        // grade on a ui-mockup screen painted a lit plate on a desk.
+        $screenshot = !$transparent && ImageKind::skipsGrade($imageKind) && $kindClause !== ImageKind::portraitClause();
+        if ($screenshot) {
+            $gradeClause = '';
+        }
         if ($kindClause !== '') {
             $gradeClause = trim($gradeClause . ' ' . $kindClause);
         }
@@ -191,7 +197,9 @@ final class ImagePromptComposer
         // assets use a dedicated clause because their carrier is the isolated
         // focal subject rather than set dressing in a scene.
         $letteringClause = '';
-        if (self::subjectNamesTextCarrier($subject)) {
+        // A screenshot IS the screen (frm PR-7m): the set-dressing clause
+        // below would ask for a blank glass face instead of an interface.
+        if (!$screenshot && self::subjectNamesTextCarrier($subject)) {
             $letteringClause = $transparent
                 ? 'The isolated subject has a plain, unmarked material surface; its'
                     . ' form is conveyed only through shape, color and texture.'

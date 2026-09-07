@@ -32,7 +32,7 @@ final class ImageKind
     private const STYLE = [
         'photo'             => 'photorealistic',
         '3d-object'         => '3d-render',
-        'ui-mockup'         => 'flat-design',
+        'ui-mockup'         => 'ui-screenshot',
         'line-illustration' => 'illustration',
         'abstract-gradient' => 'abstract',
     ];
@@ -51,7 +51,7 @@ final class ImageKind
     {
         return match ($kind) {
             '3d-object'         => 'smooth matte clay-like 3D objects and simple geometric forms, rendered in soft studio light on plain seamless backdrops; no people, no scenes',
-            'ui-mockup'         => 'framed product screens: dashboards, panels and cards drawn as clean abstract interface shapes with blurred placeholder text and simple charts, seen straight-on or gently tilted, never a readable word',
+            'ui-mockup'         => 'edge-to-edge screenshots of a current web application: dashboards, lists, boards and panels as real interface components with text as blurred bars, the screen content only with no window chrome, never a readable word',
             'line-illustration' => 'single-weight line illustrations with two or three flat colours and generous white space, one subject per image',
             'abstract-gradient' => 'soft abstract gradient fields with fine grain and slow colour drift; no objects, no scenes, no text',
             default             => 'photographs, one graded series',
@@ -76,9 +76,20 @@ final class ImageKind
         return match ($kind) {
             '3d-object'         => 'Imagery kind for all site imagery: smooth matte clay-like 3D objects and simple geometric'
                 . ' forms in soft studio light on a plain seamless backdrop, no people and no environment.',
-            'ui-mockup'         => 'Imagery kind for all site imagery: a framed product interface rendered as clean abstract'
-                . ' shapes, panels, bars and simple charts with blurred placeholder text, seen straight-on or gently'
-                . ' tilted on a plain backdrop; no readable words, letters or numerals anywhere.',
+            // frm PR-7m: "a framed product interface ... on a plain backdrop"
+            // under the photographic grade drew 2013-era flat illustrations of
+            // an app window with a title bar, traffic-light dots and a drop
+            // shadow on a desk (parley-like38, zova-like57). The screen
+            // content is the picture; the theme's screen-frame kit supplies
+            // the frame.
+            'ui-mockup'         => 'Imagery kind for all site imagery: an edge-to-edge screenshot of a current web'
+                . ' application interface, the screen content only: real components such as a slim sidebar,'
+                . ' navigation rows, tiles, a data table, a chart, toggles and round avatars on a flat ground,'
+                . ' thin one-pixel hairline borders, gently rounded corners, generous whitespace, one accent'
+                . ' colour, and every text run rendered as a blurred grey bar; crisp, flat, straight-on and'
+                . ' evenly lit; no window frame, no title bar, no traffic-light dots, no browser tabs, no'
+                . ' address bar, no bezel, no device, no drop shadow, no desk, no backdrop, no perspective,'
+                . ' no reflections, no grain; no readable words, letters or numerals anywhere.',
             'line-illustration' => 'Imagery kind for all site imagery: a single-weight line illustration with two or three flat'
                 . ' colours, generous white space and one subject; no photographic texture, no text.',
             'abstract-gradient' => 'Imagery kind for all site imagery: a soft abstract gradient field with fine grain and'
@@ -185,6 +196,18 @@ final class ImageKind
      * because the site-wide kind clause asked every picture for an
      * interface. A person is a photograph whatever the site's kind.
      */
+    /**
+     * Whether a kind's pictures skip the site-wide photographic grade and the
+     * scene clauses (frm PR-7m): a screenshot has no lighting, horizon or set
+     * dressing, and the grade written for the photo series ("late-afternoon
+     * desert window light, printed-plate finish") is what turned the screens
+     * into illustrated plates.
+     */
+    public static function skipsGrade(?string $raw): bool
+    {
+        return self::explicit($raw) === 'ui-mockup';
+    }
+
     public static function portraitClause(): string
     {
         return 'Imagery kind for this picture: a photographic portrait of one real person, head and shoulders,'

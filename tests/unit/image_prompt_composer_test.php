@@ -864,3 +864,30 @@ test('compose keeps the orientation anchor under token pressure', function () {
     assert_contains(ImagePromptComposer::ORIENTATION_CLAUSE, $out);
     assert_contains('Site-wide crop direction:', $out);
 });
+
+test('a ui-mockup screen skips the photographic grade and the set-dressing clause; a person on the same site keeps the portrait clause (frm PR-7m)', function () {
+    $grade = 'Warm full color under late-afternoon desert window light with a printed-plate finish';
+    $screen = ImagePromptComposer::compose(
+        'An inbox triage screen: a stacked list of message rows with a short label bar each and one action button.',
+        'feature card image in a four-card capability grid',
+        'ui-screenshot',
+        'A product site for a team assistant.',
+        $grade,
+        false,
+        null,
+        '',
+        'ui-mockup',
+    );
+    assert_true(!str_contains($screen, 'Art direction for all site imagery'), 'no grade on a screenshot: ' . $screen);
+    assert_true(!str_contains($screen, 'desert window light'));
+    assert_true(!str_contains($screen, 'quiet set dressing'), 'a screen is the picture, not a blank glass face');
+    assert_contains('Imagery kind for all site imagery: an edge-to-edge screenshot', $screen);
+    assert_contains('no title bar', $screen);
+    assert_contains('Style: ui-screenshot', $screen);
+    $photo = ImagePromptComposer::compose('A hand on a printed screen proof.', 'feature band', 'photorealistic', '', $grade, false, null, '', 'photo');
+    assert_contains('Art direction for all site imagery: ' . $grade, $photo, 'a photo series keeps its grade');
+    assert_contains('quiet set dressing', $photo, 'and its text-carrier clause');
+    $person = ImagePromptComposer::compose('A portrait of the head of operations at her desk.', 'testimonial card portrait', 'ui-screenshot', '', $grade, false, null, '', 'ui-mockup');
+    assert_contains('photographic portrait of one real person', $person);
+    assert_true(!str_contains($person, 'edge-to-edge screenshot'));
+});

@@ -20,7 +20,13 @@ test('image kind is a closed vocabulary with one style keyword and one render cl
     }
     assert_contains('no readable words', ImageKind::promptClause('ui-mockup'));
     assert_eq('3d-render', ImageKind::styleKeyword('3d-object'));
-    assert_eq('flat-design', ImageKind::styleKeyword('ui-mockup'));
+    assert_eq('ui-screenshot', ImageKind::styleKeyword('ui-mockup'), 'flat-design was itself a retro cue (frm PR-7m)');
+    $screen = ImageKind::promptClause('ui-mockup');
+    foreach (['edge-to-edge screenshot', 'no window frame', 'no title bar', 'no traffic-light dots', 'no browser tabs', 'no drop shadow', 'no backdrop', 'screen content only'] as $needle) {
+        assert_contains($needle, $screen);
+    }
+    assert_true(!str_contains($screen, 'framed'), 'the theme frames the screen, the picture does not');
+    assert_true(ImageKind::skipsGrade('ui-mockup') && !ImageKind::skipsGrade('photo') && !ImageKind::skipsGrade('3d-object'));
     assert_eq('illustration', ImageKind::styleKeyword('line-illustration'));
     assert_eq('abstract', ImageKind::styleKeyword('abstract-gradient'));
     assert_eq('photorealistic', ImageKind::styleKeyword('nonsense'));
@@ -223,10 +229,10 @@ test('a person on a ui-mockup site takes the portrait clause instead of the inte
     assert_true(!ImageKind::namesPerson('A dashboard with a rising area chart'));
     $portrait = ImagePromptComposer::compose('A stylized abstract user avatar tile on a pale panel', 'testimonial card beside a quote', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
     assert_contains('a photographic portrait of one real person', $portrait);
-    assert_true(!str_contains($portrait, 'a framed product interface rendered as clean abstract shapes'), 'the interface clause yields');
+    assert_true(!str_contains($portrait, 'an edge-to-edge screenshot of a current web application interface'), 'the interface clause yields');
     assert_true(!str_contains($portrait, 'Art direction for all site imagery: Cool, evenly lit interface renders'), 'the interface grade yields too (frm PR-7l)');
     $screen = ImagePromptComposer::compose('A dashboard with a rising area chart', 'product tour', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
-    assert_contains('a framed product interface rendered as clean abstract shapes', $screen, 'a screen keeps the interface clause');
+    assert_contains('an edge-to-edge screenshot of a current web application interface', $screen, 'a screen keeps the interface clause');
     $clay = ImagePromptComposer::compose('portrait of the founder', 'testimonial', 'photorealistic', '', '', false, null, 'card-landscape', '3d-object');
     assert_true(!str_contains($clay, 'photographic portrait'), 'only the ui-mockup kind yields; a 3D-object site keeps its objects');
 });
