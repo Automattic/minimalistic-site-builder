@@ -1144,6 +1144,15 @@ final class DesignDirectionStep implements Step
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
         );
+        $rawTreatment = is_string($raw['type_treatment'] ?? null) ? strtolower(trim($raw['type_treatment'])) : null;
+        if ($rawTreatment !== null && in_array($rawTreatment, TypeTreatment::RETIRED, true)) {
+            // frm PR-5p: Title Case transforms every word of every heading;
+            // the references set two-tone headings in sentence case.
+            $warnings[] = 'designDirection.json: field type_treatment authored "' . $rawTreatment
+                . '" delivered "' . TypeTreatment::DEFAULT . '"; disposition the title treatment is retired'
+                . ' (a capitalize transform sets every heading in Title Case), so the sentence treatment stands';
+            $raw['type_treatment'] = TypeTreatment::DEFAULT;
+        }
         $typeTreatment = BoundedChoice::normalize(
             $raw['type_treatment'] ?? null,
             TypeTreatment::ALL,
