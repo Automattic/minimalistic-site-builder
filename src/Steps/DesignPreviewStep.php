@@ -41,7 +41,7 @@ final class DesignPreviewStep implements Step
     ];
 
     private const IMAGE_ALT_PATTERN = '/^AI_IMAGE: [^|\r\n]+ \| [^|\r\n]+ \| '
-        . '(?:photorealistic|digital-art|illustration|minimalist|flat-design|3d-render|abstract|watercolor) '
+        . '(?:photorealistic|digital-art|illustration|minimalist|flat-design|ui-screenshot|3d-render|abstract|watercolor) '
         . '\| (?:square|landscape|portrait)$/D';
 
     public function __construct(
