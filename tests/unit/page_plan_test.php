@@ -2535,3 +2535,61 @@ test('a section the stated highlight applies to takes a card archetype when the 
     assert_eq($pages, PagePlanStep::withStatedHighlightCards($pages, 'three pricing tiers with the middle one highlighted', $repairs), 'a clause about another section changes nothing');
     assert_eq([], $repairs);
 });
+
+test('a repeated list planned as an asymmetric split takes the card grid or the thumbnail list (frm PR-3aq)', function () {
+    $page = static fn (array $rows): array => ['slug' => 'home', 'front' => true, 'sections' => array_map(
+        static fn (array $r): array => plan_section(['slug' => $r[0], 'title' => ucfirst($r[0]), 'type' => $r[1], 'layout_archetype' => $r[2], 'background' => 'base', 'handoff' => 'A split.']),
+        $rows,
+    )];
+    // dasstudio-like29: five disciplines as a split beside copy; spector-like45: five awards.
+    $repairs = [];
+    $out = PagePlanStep::withListsOffTheSplit([$page([
+        ['hero', 'hero', 'asymmetric-split'],
+        ['about', 'about', 'asymmetric-split'],
+        ['services', 'services', 'asymmetric-split'],
+        ['process', 'process', 'zigzag-steps'],
+        ['awards', 'awards', 'asymmetric-split'],
+        ['testimonials', 'testimonials', 'asymmetric-split'],
+        ['team', 'team', 'asymmetric-split'],
+        ['closing', 'cta', 'cta-panel'],
+    ])], $repairs);
+    $a = array_column($out[0]['sections'], 'layout_archetype', 'slug');
+    assert_eq('asymmetric-split', $a['hero'], 'the front opening keeps its projection');
+    assert_eq('asymmetric-split', $a['about'], 'prose beside a portrait keeps the split');
+    assert_eq('equal-card-grid', $a['services']);
+    assert_eq('equal-card-grid', $a['awards']);
+    assert_eq('asymmetric-split', $a['testimonials'], 'a quote-led split (one photo beside quotes) keeps the split');
+    assert_eq('list-with-thumbnails', $a['team'], 'the page already holds its two grids');
+    assert_eq(3, count($repairs));
+    assert_contains("path=\"pages[slug='home'].sections[2].layout_archetype\"; authored=\"asymmetric-split\"; delivered=\"equal-card-grid\"", $repairs[0]);
+    assert_contains("a repeated 'services' list under the split", $repairs[0]);
+    assert_contains('Build correction: this section is now an equal-card-grid', $out[0]['sections'][2]['handoff']);
+
+    // cohesion-like47: the services split sits next to a card grid, so it takes the thumbnail list.
+    $repairs = [];
+    $out = PagePlanStep::withListsOffTheSplit([$page([
+        ['hero', 'hero', 'centered-stack'],
+        ['services', 'services', 'asymmetric-split'],
+        ['testimonials', 'testimonials', 'equal-card-grid'],
+        ['pricing', 'pricing', 'pricing-tiers'],
+    ])], $repairs);
+    assert_eq('list-with-thumbnails', array_column($out[0]['sections'], 'layout_archetype', 'slug')['services']);
+    assert_eq(1, count($repairs));
+
+    // spector-like45 typed its awards 'accolades' with the card pattern: the pattern says it repeats.
+    $repairs = [];
+    $typed = $page([['hero', 'hero', 'full-bleed-cover'], ['accolades', 'accolades', 'asymmetric-split'], ['stats', 'stats', 'stat-ledger'], ['voices', 'testimonials', 'asymmetric-split']]);
+    $typed['sections'][1]['type'] = 'accolades';
+    $typed['sections'][1]['item_pattern'] = 'card';
+    $typed['sections'][3]['item_pattern'] = 'card';
+    $out = PagePlanStep::withListsOffTheSplit([$typed], $repairs);
+    assert_eq('equal-card-grid', $out[0]['sections'][1]['layout_archetype'], 'an unknown type with an item pattern repeats');
+    assert_eq('asymmetric-split', $out[0]['sections'][3]['layout_archetype'], 'a quote-led section keeps the split even with the card pattern');
+    assert_eq(1, count($repairs));
+
+    // Nothing to do: no list under a split.
+    $repairs = [];
+    $plain = [$page([['hero', 'hero', 'centered-stack'], ['about', 'about', 'asymmetric-split'], ['work', 'projects', 'project-grid-2x2']])];
+    assert_eq($plain, PagePlanStep::withListsOffTheSplit($plain, $repairs));
+    assert_eq([], $repairs);
+});
