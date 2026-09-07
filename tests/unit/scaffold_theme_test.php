@@ -719,8 +719,9 @@ test('scaffold-theme keys the project-grid tile rules on covers inside columns, 
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
     exec('rm -rf ' . escapeshellarg($tmp));
-    assert_contains('.section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover {', $css);
-    assert_contains('.section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover:hover .wp-block-cover__image-background {', $css);
+    // A tile sits directly in a column or in one card wrapper group inside it (frm PR-2aj).
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover {', $css);
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover:hover .wp-block-cover__image-background {', $css);
     assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover {'), 'a section-level image band is a cover too and must keep its height');
     assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover__image-background {'), 'the band backdrop keeps its own scale');
 });

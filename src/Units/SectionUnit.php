@@ -253,6 +253,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
         // An orphan project tile spans its row instead of leaving a hole (frm PR-3au).
         $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
+        // A picture cover the model left without a dim ratio would ship core's solid overlay (frm PR-2aj).
+        $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         // A project tile's overlay and ink are the build's on every ground (frm PR-3p).
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
         // A heading word that would overflow a phone gets a measured phone pin (frm PR-5i).

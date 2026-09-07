@@ -1310,7 +1310,7 @@ final class ScaffoldThemeStep implements Step
            inside the grid's columns only: a section-level image band is a
            cover too, and the ratio plus clip on it cut the bottom tile row
            (dreammotion-like13, frm PR-3q). */
-        .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover {
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover {
             aspect-ratio: 4 / 3;
             min-height: 0;
             border-radius: var(--shape-radius-media, 0);
@@ -1323,19 +1323,19 @@ final class ScaffoldThemeStep implements Step
         .section-composition--project-grid-2x2 .wp-block-column.project-tile--wide > .wp-block-cover {
             aspect-ratio: 21 / 9;
         }
-        .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover .wp-block-heading {
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .wp-block-heading {
             margin-block: 0 0.25em;
         }
-        .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover .project-meta {
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .project-meta {
             margin: 0;
             font-size: var(--wp--preset--font-size--caption, 0.875rem);
             opacity: 0.85;
         }
-        .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover .wp-block-cover__image-background {
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .wp-block-cover__image-background {
             transition: scale 700ms ease;
         }
         @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-            .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover:hover .wp-block-cover__image-background {
+            .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover:hover .wp-block-cover__image-background {
                 scale: 1.04;
             }
         }
