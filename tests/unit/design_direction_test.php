@@ -3190,3 +3190,39 @@ test('an accent hue the brief states moves the model accent into that family (fr
     assert_eq('#E8D35C', $silent['palette']['accent'], 'a silent brief changes nothing');
     assert_eq([], $repairs);
 });
+
+test('a stated wordmark case is not the site-wide heading treatment (frm PR-5s)', function () {
+    $fabrica = ['prompt' => 'Light grey page with rounded near-black panels, a rounded near-black hero panel with a giant lowercase wordmark, a label-bar project grid.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], $fabrica, false, $repairs);
+    assert_eq('sentence', $out['type_treatment'], 'the lowercase treatment falls to sentence; the wordmark keeps its own case');
+    $treatmentRepairs = array_values(array_filter($repairs, static fn (string $r): bool => str_contains($r, 'type_treatment')));
+    assert_eq(1, count($treatmentRepairs), 'one treatment repair (the brief also states rounded panels, PR-4n)');
+    assert_contains('field type_treatment authored "lowercase" delivered "sentence"', $treatmentRepairs[0]);
+    assert_contains('the case of the wordmark, not of the headings', $treatmentRepairs[0]);
+
+    $repairs = [];
+    $tight = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $fabrica, false, $repairs);
+    assert_eq('tight', $tight['type_treatment'], 'a treatment that does not match the wordmark case stands');
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'));
+    $repairs = [];
+
+    $dasstudio = ['prompt' => 'White page, huge uppercase wordmark hero with a facts ledger, giant uppercase section titles with counts, 2x2 projects.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tight'], $dasstudio, false, $repairs);
+    assert_eq('caps-tight', $caps['type_treatment'], 'the brief states uppercase titles too, so the caps treatment stays');
+    assert_eq([], $repairs);
+
+    $spector = ['prompt' => 'Dark hero with a full-bleed portrait, a three-line uppercase display headline with a red-to-cream gradient.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tracked'], $spector, false, $repairs);
+    assert_eq('caps-tracked', $caps['type_treatment'], 'a stated uppercase display headline keeps caps without any wordmark phrase');
+
+    $silent = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], ['prompt' => 'a craft studio site'], false, $repairs);
+    assert_eq('lowercase', $silent['type_treatment'], 'no wordmark phrase, no change');
+    assert_eq([], $repairs);
+
+    assert_eq('uppercase', \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('giant uppercase section titles with counts'));
+    assert_eq('lowercase', \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('lowercase headings throughout'));
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('a giant lowercase wordmark'), 'the wordmark phrase is not a heading case');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::caseOf('sentence'));
+    assert_eq('uppercase', \Automattic\SiteBuild\TypeTreatment::caseOf('caps-tracked'));
+});
