@@ -7,7 +7,6 @@ test('type treatment maps every bounded commitment to exact case and tracking le
     $expected = [
         'sentence' => ['textTransform' => 'none', 'letterSpacing' => '-0.01em'],
         'tight' => ['textTransform' => 'none', 'letterSpacing' => '-0.04em'],
-        'title' => ['textTransform' => 'capitalize', 'letterSpacing' => '-0.02em'],
         'caps-tight' => ['textTransform' => 'uppercase', 'letterSpacing' => '-0.03em'],
         'caps-tracked' => ['textTransform' => 'uppercase', 'letterSpacing' => '0.08em'],
         'lowercase' => ['textTransform' => 'lowercase', 'letterSpacing' => '0.01em'],
@@ -21,9 +20,12 @@ test('type treatment maps every bounded commitment to exact case and tracking le
 });
 
 test('type treatment rejects absent and unsupported commitments without guessing', function () {
-    foreach ([null, '', 'small-caps', ['title'], 7] as $value) {
+    foreach ([null, '', 'small-caps', ['title'], 7, 'title'] as $value) {
         assert_eq(null, TypeTreatment::typography($value));
     }
+    // Title Case is retired (frm PR-5p): a direction that commits it falls to sentence with a warning.
+    assert_eq(['title'], TypeTreatment::RETIRED);
+    assert_true(!in_array('title', TypeTreatment::ALL, true));
     assert_eq('caps-tracked', TypeTreatment::explicit(' Caps-Tracked '));
 });
 
@@ -43,7 +45,7 @@ test('type treatment prompt contract keeps sentence casing authored and block ov
 
 test('the display-lines kit ships for the uppercase treatments only and finalize enqueues it (frm W5c)', function () {
     assert_eq(['caps-tight', 'caps-tracked'], TypeTreatment::STACKED_LINE_TREATMENTS);
-    foreach (['sentence', 'tight', 'title', 'lowercase'] as $treatment) {
+    foreach (['sentence', 'tight', 'lowercase'] as $treatment) {
         assert_eq(null, TypeTreatment::kitCss($treatment), $treatment);
     }
     $css = (string) TypeTreatment::kitCss('caps-tight');

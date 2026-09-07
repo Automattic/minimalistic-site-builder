@@ -214,3 +214,31 @@ test('text placement is bounded and unsupported intent degrades loudly', functio
     assert_eq('left-column', $direction['text_placement']);
     assert_contains('text_placement', implode("\n", $warnings));
 });
+
+test('the retired title treatment falls to sentence with a warning (frm PR-5p)', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#0B0812'], 'type_treatment' => ' Title '],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('sentence', $direction['type_treatment']);
+    $text = implode("\n", $warnings);
+    assert_contains('field type_treatment authored "title" delivered "sentence"', $text);
+    assert_contains('the title treatment is retired', $text);
+    assert_true(!str_contains($text, 'invalid heading treatment'), 'the retirement speaks for itself; the generic fallback warning stays quiet');
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#0B0812'], 'type_treatment' => 'tight'],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('tight', $direction['type_treatment']);
+    assert_true(!str_contains(implode("\n", $warnings), 'type_treatment'));
+});
