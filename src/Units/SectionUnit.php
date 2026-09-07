@@ -251,6 +251,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         // The theme caps a ledger figure to its column; an authored size
         // on the figure heading would overrun it (frm PR-3m).
         $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
+        // An orphan project tile spans its row instead of leaving a hole (frm PR-3au).
+        $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
         // A project tile's overlay and ink are the build's on every ground (frm PR-3p).
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
         // A heading word that would overflow a phone gets a measured phone pin (frm PR-5i).

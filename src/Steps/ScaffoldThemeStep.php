@@ -1317,6 +1317,12 @@ final class ScaffoldThemeStep implements Step
             overflow: hidden;
             padding: var(--wp--preset--spacing--md, 1.5rem);
         }
+        /* An orphan tile the build widened to its row (frm PR-3au) reads as
+           a banner, not a square: the 4:3 ratio at full width stood taller
+           than the pair above it on spector-like54. */
+        .section-composition--project-grid-2x2 .wp-block-column.project-tile--wide > .wp-block-cover {
+            aspect-ratio: 21 / 9;
+        }
         .section-composition--project-grid-2x2 .wp-block-column > .wp-block-cover .wp-block-heading {
             margin-block: 0 0.25em;
         }
