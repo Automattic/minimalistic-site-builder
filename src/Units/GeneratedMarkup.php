@@ -5067,6 +5067,148 @@ final class GeneratedMarkup
      * @param list<array<string,mixed>> $repairs
      */
     /**
+     * A zigzag step the author repeated is dropped (frm PR-3ax):
+     * dasstudio-like39 planned four steps and shipped five, rows 3 and 4
+     * both "Refinement and testing" with the same copy, row 3 without a
+     * picture. A step row whose heading repeats an earlier row's heading
+     * goes (the row without media first, else the later one), the step
+     * numerals renumber, and a repair records it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function dropDuplicateSteps(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'zigzag-steps') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $rows = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'columns' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $heading = null;
+            $hasMedia = false;
+            $hasNumeral = false;
+            foreach ($document->indices() as $inner) {
+                if ($inner <= $index) {
+                    continue;
+                }
+                $inside = false;
+                for ($node = $document->parent($inner); $node !== null; $node = $document->parent($node)) {
+                    if ($node === $index) {
+                        $inside = true;
+                        break;
+                    }
+                }
+                if (!$inside) {
+                    continue;
+                }
+                $name = $document->name($inner);
+                if ($name === 'heading' && $heading === null) {
+                    $heading = mb_strtolower(trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($document->innerHtml($inner)), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?? ''), 'UTF-8');
+                } elseif (in_array($name, ['image', 'cover', 'video'], true)) {
+                    $hasMedia = true;
+                } elseif ($name === 'paragraph') {
+                    $classes = preg_split('/\s+/', trim((string) (($document->attrs($inner) ?? [])['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    if (in_array(StepNumeral::CLASS_NAME, $classes, true)) {
+                        $hasNumeral = true;
+                    }
+                }
+            }
+            $end = $document->endOffset($index);
+            if ($heading === null || $heading === '' || $end === null) {
+                continue;
+            }
+            $rows[] = ['index' => $index, 'start' => $document->openingOffset($index), 'end' => $end, 'heading' => $heading, 'media' => $hasMedia, 'numeral' => $hasNumeral];
+        }
+        if (count($rows) < 2) {
+            return $markup;
+        }
+        $drop = [];
+        $seen = [];
+        foreach ($rows as $i => $row) {
+            $key = $row['heading'];
+            if (!isset($seen[$key])) {
+                $seen[$key] = $i;
+                continue;
+            }
+            $first = $seen[$key];
+            if (isset($drop[$first])) {
+                $drop[$i] = true;
+                continue;
+            }
+            // Keep the row with media; on a tie keep the earlier one.
+            if (!$rows[$first]['media'] && $row['media']) {
+                $drop[$first] = true;
+                $seen[$key] = $i;
+            } else {
+                $drop[$i] = true;
+            }
+        }
+        if ($drop === []) {
+            return $markup;
+        }
+        $rendered = $markup;
+        foreach (array_reverse(array_keys($drop)) as $i) {
+            $row = $rows[$i];
+            $rendered = substr($rendered, 0, $row['start']) . substr($rendered, $row['end']);
+            $repairs[] = [
+                'code' => 'duplicate-step-dropped',
+                'part' => $part,
+                'block' => 'columns',
+                'authored' => 'step "' . $row['heading'] . '" twice',
+                'delivered' => 'the ' . ($row['media'] ? 'pictured' : 'unpictured') . ' repeat dropped',
+                'disposition' => 'repaired',
+            ];
+        }
+        // Renumber the surviving step numerals in order.
+        $document = BlockMarkup::parse($rendered);
+        $numerals = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $classes = preg_split('/\s+/', trim((string) (($document->attrs($index) ?? [])['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(StepNumeral::CLASS_NAME, $classes, true)) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match('/^\d{1,2}$/', $text) !== 1) {
+                continue;
+            }
+            $numerals[] = ['start' => $document->openingOffset($index), 'end' => (int) $document->endOffset($index), 'text' => $text];
+        }
+        $n = 0;
+        $edits = [];
+        foreach ($numerals as $numeral) {
+            $n++;
+            if ($numeral['text'] !== (string) $n) {
+                $edits[] = ['start' => $numeral['start'], 'end' => $numeral['end'], 'from' => $numeral['text'], 'to' => (string) $n];
+            }
+        }
+        foreach (array_reverse($edits) as $edit) {
+            $block = substr($rendered, $edit['start'], $edit['end'] - $edit['start']);
+            $block = preg_replace('/>\s*' . preg_quote($edit['from'], '/') . '\s*</u', '>' . $edit['to'] . '<', $block, 1) ?? $block;
+            $rendered = substr($rendered, 0, $edit['start']) . $block . substr($rendered, $edit['end']);
+        }
+        if ($edits !== []) {
+            $repairs[] = [
+                'code' => 'step-numerals-renumbered',
+                'part' => $part,
+                'block' => 'paragraph.step-numeral',
+                'authored' => implode(', ', array_column($numerals, 'text')),
+                'delivered' => '1 to ' . count($numerals),
+                'disposition' => 'repaired',
+            ];
+        }
+        return $rendered;
+    }
+
+    /**
      * The build owns a card's tag pills (frm PR-3al). luzia's "cards with
      * tag pills" shipped as a bullet list (luzia-like40) and as accent-filled
      * bars painted by the model's own `.tag-pill` rule (luzia-like54). A

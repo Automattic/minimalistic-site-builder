@@ -218,6 +218,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         );
         $markup = $label['markup'];
         array_push($warnings, ...$label['warnings']);
+        // A zigzag step the author repeated is dropped before the numerals count (frm PR-3ax).
+        $markup = GeneratedMarkup::dropDuplicateSteps($markup, $this->key($input), $archetype, $repairs);
         // Step numerals (frm W6c): committed, process sections only, first
         // in each step item, renumbered in order; anything else is a
         // decorative number and goes.
