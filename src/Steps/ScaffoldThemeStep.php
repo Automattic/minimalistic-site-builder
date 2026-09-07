@@ -913,6 +913,16 @@ final class ScaffoldThemeStep implements Step
             position: relative;
             z-index: 1;
         }
+        /* The supporting line keeps a reading measure (frm PR-2z). The copy
+           group's constrained layout hands every child the site's content
+           measure, 960px on a wide site, so cohesion-like43's one-line
+           paragraph ran the whole band and the floating S covered its last
+           word. A centered line of about sixty characters sits clear of the
+           objects on both sides. */
+        .hero-composition--marquee-name .hero-composition__copy > p:not(.hero-composition__marquee) {
+            max-width: min(100%, 36rem);
+            margin-inline: auto;
+        }
         .hero-composition--marquee-name .hero-composition__media img {
             display: block;
             width: clamp(7rem, 16vw, 13rem);
