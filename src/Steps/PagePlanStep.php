@@ -739,6 +739,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $successfulRepairs,
         );
 
+        // A repeated list planned as an asymmetric split stacks every item's
+        // picture in the trailing column (frm PR-3aq): cohesion-like47's four
+        // services, dasstudio-like29's five disciplines and spector-like45's
+        // five awards each ran as one tall column of media cards.
+        $out = self::withListsOffTheSplit($out, $successfulRepairs);
+
         // The direction's item idiom is a site-wide commitment. The planner
         // decides only WHETHER a section is list-like; once it assigns a
         // pattern, the exact value cannot drift. Obvious list-like semantic
@@ -986,6 +992,88 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
                 . 'that page with no visible footer boundary',
             );
+        }
+        return $pages;
+    }
+
+    /**
+     * Semantic type words that repeat like a list but sit outside the item
+     * catalogs (frm PR-3aq): awards, capabilities, disciplines. They join the
+     * list-like types for the split rule only.
+     *
+     * @var list<string>
+     */
+    private const LIST_SPLIT_TYPES = [
+        'accolades', 'awards', 'capabilities', 'disciplines', 'expertise', 'honours', 'honors', 'practices', 'recognition',
+    ];
+
+    /**
+     * Keep a repeated list off the asymmetric split (frm PR-3aq). The split
+     * suits one media beside copy; a list of four or five items under it
+     * stacks every item's picture in the trailing column, and the page runs
+     * to three screens of one column. A list-like section (an item catalog
+     * type, or a type in LIST_SPLIT_TYPES) planned as asymmetric-split takes
+     * the equal card grid, or the thumbnail list when a neighbour already is
+     * a grid or the page holds its two grids, with a repair row and a
+     * handoff correction. The front page's opening keeps its projection;
+     * quote-led and prose sections (about, story) keep the split.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $repairs
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withListsOffTheSplit(array $pages, array &$repairs = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $front = !empty($page['front']);
+            $keys = array_keys($sections);
+            $archetypes = array_map(
+                static fn ($section): string => is_array($section) ? trim((string) ($section['layout_archetype'] ?? '')) : '',
+                array_values($sections),
+            );
+            foreach ($keys as $position => $key) {
+                $section = $sections[$key];
+                if (!is_array($section) || ($front && $position === 0)) {
+                    continue;
+                }
+                if ($archetypes[$position] !== 'asymmetric-split') {
+                    continue;
+                }
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                // The type vocabulary is open-ended (spector-like45 typed its
+                // awards 'accolades'); a planner item pattern says the section
+                // repeats, except on a quote-led section, whose one photo
+                // beside its quotes is the split's own composition.
+                $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
+                if (!$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
+                    continue;
+                }
+                $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
+                $neighbourGrid = ($archetypes[$position - 1] ?? null) === 'equal-card-grid'
+                    || ($archetypes[$position + 1] ?? null) === 'equal-card-grid';
+                $replacement = $neighbourGrid || $grids >= self::MAX_EQUAL_CARD_GRIDS
+                    ? 'list-with-thumbnails'
+                    : 'equal-card-grid';
+                if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
+                    continue;
+                }
+                $archetypes[$position] = $replacement;
+                $sections[$key]['layout_archetype'] = $replacement;
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now ' . ($replacement === 'equal-card-grid' ? 'an equal-card-grid, one card per item in a row' : 'a list-with-thumbnails, one row per item with a small picture') . '; this supersedes any layout named earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    'asymmetric-split',
+                    $replacement,
+                    "a repeated '{$type}' list under the split stacks every item's picture in one column",
+                );
+            }
+            $pages[$index]['sections'] = $sections;
         }
         return $pages;
     }
