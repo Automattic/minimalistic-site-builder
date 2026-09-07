@@ -2504,3 +2504,34 @@ test('page-plan recovers the original plan when the model repair answers with a 
     assert_true(!str_contains($warnings, 'reviewed generic briefs were appended'), 'no generic padding');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('a section the stated highlight applies to takes a card archetype when the plan drew no cards (frm PR-3ak)', function () {
+    $clause = \Automattic\SiteBuild\SectionComposition::statedHighlight('Light page, featured work as large image cards, three service cards with one highlighted in violet, a dark rounded band.');
+    assert_eq('three service cards with one highlighted in violet', $clause);
+    $pages = [[
+        'slug' => 'home', 'front' => true,
+        'sections' => [
+            plan_section(),
+            plan_section(['slug' => 'featured-work', 'title' => 'Featured work', 'type' => 'work', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+            plan_section(['slug' => 'services', 'title' => 'What I offer', 'type' => 'services', 'layout_archetype' => 'feature-row-hairlines', 'background' => 'base', 'handoff' => 'A clean, text-led triple column.']),
+            plan_section(['slug' => 'clients', 'title' => 'Clients', 'type' => 'services', 'layout_archetype' => 'logo-strip', 'background' => 'base']),
+            plan_section(['slug' => 'metrics', 'title' => 'Numbers', 'type' => 'stats', 'layout_archetype' => 'stat-ledger', 'background' => 'base']),
+        ],
+    ]];
+    $repairs = [];
+    $out = PagePlanStep::withStatedHighlightCards($pages, $clause, $repairs);
+    $archetypes = array_column($out[0]['sections'], 'layout_archetype', 'slug');
+    assert_eq('equal-card-grid', $archetypes['services'], 'the hairline row becomes a card grid');
+    assert_eq('equal-card-grid', $archetypes['featured-work'], 'a card grid stays');
+    assert_eq('logo-strip', $archetypes['clients'], 'a name strip is not a card row even when the clause reaches it');
+    assert_eq('stat-ledger', $archetypes['metrics'], 'the clause does not reach the ledger');
+    assert_eq(1, count($repairs));
+    assert_contains("path=\"pages[slug='home'].sections[2].layout_archetype\"; authored=\"feature-row-hairlines\"; delivered=\"equal-card-grid\"", $repairs[0]);
+    assert_contains('draws no card to highlight', $repairs[0]);
+    assert_contains('Build correction: this section is now an equal-card-grid', $out[0]['sections'][2]['handoff']);
+
+    $repairs = [];
+    assert_eq($pages, PagePlanStep::withStatedHighlightCards($pages, null, $repairs), 'no stated highlight, no change');
+    assert_eq($pages, PagePlanStep::withStatedHighlightCards($pages, 'three pricing tiers with the middle one highlighted', $repairs), 'a clause about another section changes nothing');
+    assert_eq([], $repairs);
+});

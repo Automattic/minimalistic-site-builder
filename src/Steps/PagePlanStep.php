@@ -727,6 +727,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
+        // A highlighted card the brief states needs a card to highlight (frm
+        // PR-3ak): luzia-like40 planned its "three service cards with one
+        // highlighted in violet" as a hairline row, so the author drew three
+        // text columns and the device had nothing to sit on.
+        $out = self::withStatedHighlightCards(
+            $out,
+            SectionComposition::statedHighlightFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
+            $successfulRepairs,
+        );
+
         // The direction's item idiom is a site-wide commitment. The planner
         // decides only WHETHER a section is list-like; once it assigns a
         // pattern, the exact value cannot drift. Obvious list-like semantic
@@ -974,6 +986,60 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
                 . 'that page with no visible footer boundary',
             );
+        }
+        return $pages;
+    }
+
+    /**
+     * Give a section the brief's stated highlight applies to a card archetype
+     * (frm PR-3ak). The highlight device (PR-3s) decorates a card the section
+     * author draws; on an archetype that draws no cards (a hairline row, a
+     * ledger, statement lines) there is nothing to highlight, and luzia-like40
+     * shipped three text columns with a violet heading. The stated clause
+     * names cards, so the layout becomes the equal card grid, with a repair
+     * row and a handoff correction; a logo strip is a name row and stays.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $repairs
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withStatedHighlightCards(array $pages, ?string $clause, array &$repairs = []): array
+    {
+        if ($clause === null || trim($clause) === '') {
+            return $pages;
+        }
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            foreach ($sections as $key => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (
+                    $archetype === 'logo-strip'
+                    || !in_array($archetype, self::CARDLESS_ARCHETYPES, true)
+                    || !SectionComposition::highlightAppliesTo($clause, $section)
+                ) {
+                    continue;
+                }
+                $sections[$key]['layout_archetype'] = 'equal-card-grid';
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now an equal-card-grid,'
+                    . ' one card per item with one card highlighted as the brief asks; this supersedes any layout named'
+                    . ' earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    $archetype,
+                    'equal-card-grid',
+                    'the brief states one highlighted card for this section, and a ' . $archetype
+                        . ' draws no card to highlight',
+                );
+            }
+            $pages[$index]['sections'] = $sections;
         }
         return $pages;
     }
