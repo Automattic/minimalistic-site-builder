@@ -238,6 +238,16 @@ final class ScaffoldThemeStep implements Step
         .equal-cards p.cta-bottom {
             text-align: center;
         }
+        /* A card's bottom action keeps clear of the copy above it (frm
+           PR-3ay): every cohort-46 card set its CTA flush against the list
+           or paragraph before it, because a flush card zeroes its blockGap
+           for the media and the action inherits that zero. Padding, not
+           margin, so the auto margin above still parks the action at the
+           card's foot in an equal-height row. */
+        .item-pattern__item .cta-bottom,
+        .equal-cards .cta-bottom {
+            padding-block-start: var(--wp--preset--spacing--md, 1.5rem);
+        }
         /* Tag pills on a card (frm PR-3al): one outlined chip per tag at the
            caption size, wrapping in their group. The class is the only
            thing the author writes; a model rule on it is dropped from the
