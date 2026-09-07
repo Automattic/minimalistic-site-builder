@@ -488,6 +488,71 @@ final class FooterMarkup
         return implode(';', $kept);
     }
 
+    /** The case classes a stated wordmark case stamps on the footer identity line (frm PR-2ae). */
+    public const WORDMARK_UPPER_CLASS = 'footer-wordmark--upper';
+
+    public const WORDMARK_LOWER_CLASS = 'footer-wordmark--lower';
+
+    /**
+     * The stated wordmark case reaches the footer identity line too (frm
+     * PR-2ae): dasstudio-like31 and -32 set ATELIER NORD and STUDIO NOIR
+     * uppercase in the hero (PR-2ac) and Atelier Nord, Studio Noir in the
+     * footer. The first fit-text heading takes one case class, in the block
+     * JSON and the HTML; the opposite class from an earlier pass goes.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withIdentityLineCase(string $markup, ?string $case, string $part, array &$repairs = []): string
+    {
+        $caseClass = match ($case) {
+            'uppercase' => self::WORDMARK_UPPER_CLASS,
+            'lowercase' => self::WORDMARK_LOWER_CLASS,
+            default => null,
+        };
+        if ($caseClass === null) {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/<h[1-6]\b[^>]*\bclass="[^"]*\bhas-fit-text\b/', $own) !== 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $tokens = array_values(array_filter(
+                $tokens,
+                static fn (string $c): bool => !in_array($c, [self::WORDMARK_UPPER_CLASS, self::WORDMARK_LOWER_CLASS], true),
+            ));
+            $tokens[] = $caseClass;
+            $attrs['className'] = implode(' ', $tokens);
+            $document->setAttrs($index, $attrs);
+            foreach ([self::WORDMARK_UPPER_CLASS, self::WORDMARK_LOWER_CLASS] as $stale) {
+                if ($stale !== $caseClass) {
+                    $document->removeClassTokenInOwnHtml($index, $stale);
+                }
+            }
+            if (preg_match('/\bclass="[^"]*\b' . preg_quote($caseClass, '/') . '\b/', $document->ownHtml($index)) !== 1) {
+                $document->replaceInOwnHtml($index, 'class="', 'class="' . $caseClass . ' ');
+            }
+            $repairs[] = [
+                'code' => 'identity-line-case',
+                'part' => $part,
+                'authored' => 'fit-text identity line',
+                'delivered' => $caseClass,
+                'disposition' => 'repaired',
+            ];
+            return $document->render();
+        }
+        return $markup;
+    }
+
     /**
      * The fit-text identity line carries the site's name, not its title
      * (frm PR-4p): calderr-like5 closed on "Noa — Web Design" where the
