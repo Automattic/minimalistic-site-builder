@@ -14,8 +14,17 @@ const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
-  // Let web fonts and lazy images settle before capturing.
+  // A full-page capture does not scroll, so WordPress's loading="lazy"
+  // images below the fold would stay blank: walk the page first.
+  await page.evaluate(async () => {
+    for (let y = 0; y < document.body.scrollHeight; y += 600) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    window.scrollTo(0, 0);
+  });
   await page.evaluate(() => document.fonts.ready);
+  await page.waitForLoadState('networkidle');
   await page.waitForTimeout(1000);
   await page.screenshot({ path: out, fullPage: true });
   console.log(out);

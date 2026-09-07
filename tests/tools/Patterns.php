@@ -6,8 +6,11 @@ namespace Automattic\SiteBuild\Tools;
 /**
  * Section patterns as spec templates. The model picks a pattern and fills
  * its parameters; each method here turns that into a block spec tree in the
- * idiom of the dapper-garden theme (its preset slugs, its custom classes,
- * its ornament above section headings).
+ * theme's own idiom. The preset slugs are the pipeline's fixed vocabulary
+ * (palette, six type sizes, spacing), so they are the same for every
+ * generated theme; what varies per theme is read from its directory by
+ * idiom(): the ornament asset, the fallback images, the custom classes its
+ * style.css defines, the tinted surface slug and the corner radius.
  *
  * A spec is {name, attrs, innerBlocks}; see SpecRenderer.
  */
@@ -18,20 +21,50 @@ final class Patterns
         'asymmetric-split', 'mixed-width-editorial', 'list-with-thumbnails',
     ];
 
-    private const ORNAMENT = 'olive-sprig-ornament.png';
-
-    /** @var array{slug:string,theme:string} */
+    /** @var array{slug:string,theme:string,idiom:array<string,mixed>} */
     private array $ctx;
 
-    /** @param array{slug:string,theme:string,first?:bool} $ctx */
+    /** @param array{slug:string,theme:string,idiom:array<string,mixed>,first?:bool} $ctx */
     private function __construct(array $ctx)
     {
         $this->ctx = $ctx;
     }
 
     /**
+     * What a theme directory says about itself, so a pattern can be written
+     * once and rendered in any generated theme's idiom.
+     *
+     * @return array{assets:list<string>,ornament:?string,hero:?string,media:?string,classes:list<string>,tinted:string,radius:string}
+     */
+    public static function idiom(string $themeDir): array
+    {
+        $assets = array_values(array_filter(scandir("$themeDir/assets") ?: [], fn ($f) => $f[0] !== '.'));
+        $photos = array_values(array_filter($assets, fn ($f) => preg_match('/\.(jpe?g|png|webp)$/i', $f) && !str_contains($f, 'ornament')));
+        $ornament = array_values(array_filter($assets, fn ($f) => str_contains($f, 'ornament')))[0] ?? null;
+        $hero = array_values(array_filter($photos, fn ($f) => str_starts_with($f, 'hero-')))[0] ?? $photos[0] ?? null;
+        $media = array_values(array_filter($photos, fn ($f) => $f !== $hero))[0] ?? $hero;
+
+        $theme = json_decode((string) file_get_contents("$themeDir/theme.json"), true) ?: [];
+        $palette = array_column($theme['settings']['color']['palette'] ?? [], 'slug');
+        // Cards sit a step rounder than buttons in every July theme (8px -> 12px, 4px -> 6px).
+        $button = $theme['styles']['elements']['button']['border']['radius'] ?? null;
+        $radius = is_string($button) && preg_match('/^(\d+(?:\.\d+)?)px$/', $button, $m) ? ($m[1] * 1.5) . 'px' : '12px';
+
+        preg_match_all('/(?<![\w-])\.([a-z][\w-]*)/', (string) file_get_contents("$themeDir/style.css"), $m);
+        return [
+            'assets' => $assets,
+            'ornament' => $ornament,
+            'hero' => $hero,
+            'media' => $media,
+            'classes' => array_values(array_unique($m[1])),
+            'tinted' => in_array('band', $palette, true) ? 'band' : 'secondary',
+            'radius' => $radius,
+        ];
+    }
+
+    /**
      * @param array<string,mixed> $params
-     * @param array{slug:string,theme:string,first?:bool} $ctx
+     * @param array{slug:string,theme:string,idiom:array<string,mixed>,first?:bool} $ctx
      * @return array<string,mixed>
      */
     public static function spec(string $pattern, array $params, array $ctx): array
@@ -43,11 +76,11 @@ final class Patterns
         return (new self($ctx))->$method($params);
     }
 
-    /** JSON schema for the model's answer. @param list<string> $assets @return array<string,mixed> */
-    public static function schema(array $assets): array
+    /** JSON schema for the model's answer. @param array{assets:list<string>,ornament:?string} $idiom @return array<string,mixed> */
+    public static function schema(array $idiom): array
     {
         $image = ['type' => 'object', 'properties' => [
-            'asset' => ['type' => 'string', 'enum' => array_values(array_diff($assets, [self::ORNAMENT]))],
+            'asset' => ['type' => 'string', 'enum' => array_values(array_diff($idiom['assets'], [$idiom['ornament']]))],
             'alt' => ['type' => 'string'],
         ], 'required' => ['asset', 'alt'], 'additionalProperties' => false];
         $cta = ['type' => 'object', 'properties' => [
@@ -86,7 +119,7 @@ final class Patterns
             isset($p['cta']) ? $this->button($p['cta'], false) : null,
             isset($p['secondary_cta']) ? $this->button($p['secondary_cta'], true) : null,
         ]));
-        $inner = [$this->ornament(96)];
+        $inner = $this->ornamentRow(96);
         $inner[] = $this->heading($p['heading'], 1, ['textColor' => 'base', 'fontFamily' => 'heading', 'fontSize' => 'display',
             'style' => ['spacing' => ['margin' => ['top' => $this->sp('sm')]]]]);
         if (!empty($p['lead'])) {
@@ -98,7 +131,7 @@ final class Patterns
         }
         $cover = $this->block('core/cover', [
             'align' => 'full',
-            'url' => $this->asset($p['image']['asset'] ?? 'hero-sunlit-studio-circle.jpg'),
+            'url' => $this->asset($p['image']['asset'] ?? $this->ctx['idiom']['hero']),
             'alt' => $p['image']['alt'] ?? '',
             'dimRatio' => 50, 'overlayColor' => 'contrast', 'minHeight' => 90, 'minHeightUnit' => 'vh',
             'contentPosition' => 'bottom left',
@@ -149,7 +182,7 @@ final class Patterns
         $bg = $p['background'] ?? 'base';
         $rows = [];
         foreach (array_chunk(array_values($p['items'] ?? []), 3) as $chunk) {
-            $rows[] = $this->block('core/columns', ['align' => 'wide', 'className' => 'equal-cards',
+            $rows[] = $this->block('core/columns', ['align' => 'wide'] + $this->cls('equal-cards') + [
                 'style' => ['spacing' => ['blockGap' => ['top' => $this->sp('lg'), 'left' => $this->sp('lg')]]]],
                 array_map(fn ($it) => $this->block('core/column', [], [$this->mediaCard($it, $bg)]), $chunk));
         }
@@ -160,7 +193,7 @@ final class Patterns
     private function asymmetricSplit(array $p): array
     {
         $bg = $p['background'] ?? 'contrast';
-        $side = [$this->ornament(64, 'left')];
+        $side = $this->ornamentRow(64, 'left');
         if (!empty($p['eyebrow'])) { $side[] = $this->eyebrow($p['eyebrow'], $bg, 'left'); }
         $side[] = $this->heading($p['heading'], 2, ['fontFamily' => 'heading', 'fontSize' => 'section-title'] + $this->textAttrs($bg));
         if (!empty($p['lead'])) { $side[] = $this->para($p['lead'], ['fontSize' => 'lead'] + $this->textAttrs($bg)); }
@@ -170,7 +203,7 @@ final class Patterns
         $columns = $this->block('core/columns', ['verticalAlignment' => 'top', 'align' => 'wide',
             'style' => ['spacing' => ['blockGap' => ['top' => $this->sp('xl'), 'left' => $this->sp('xl')]]]], [
             $this->block('core/column', ['verticalAlignment' => 'top', 'width' => '38%'], [
-                $this->block('core/group', ['className' => 'sticky-side', 'layout' => ['type' => 'constrained', 'contentSize' => '420px', 'justifyContent' => 'left'],
+                $this->block('core/group', $this->cls('sticky-side') + ['layout' => ['type' => 'constrained', 'contentSize' => '420px', 'justifyContent' => 'left'],
                     'style' => ['spacing' => ['blockGap' => $this->sp('sm')]]], $side),
             ]),
             $this->block('core/column', ['verticalAlignment' => 'top', 'width' => '62%', 'style' => ['spacing' => ['blockGap' => $this->sp('lg')]]], $main),
@@ -189,11 +222,11 @@ final class Patterns
             $body[] = $this->para($it['body'], $this->textAttrs($bg));
             $rows[] = $this->block('core/media-text', [
                 'align' => 'wide', 'mediaPosition' => $i % 2 ? 'right' : 'left', 'mediaType' => 'image',
-                'mediaUrl' => $this->asset($it['image']['asset'] ?? 'studio-detail-props-window.jpg'),
+                'mediaUrl' => $this->asset($it['image']['asset'] ?? $this->ctx['idiom']['media']),
                 'mediaAlt' => $it['image']['alt'] ?? '', 'mediaWidth' => 40, 'verticalAlignment' => 'center',
-                'imageFill' => false, 'className' => 'card-media',
+                'imageFill' => false,
                 'style' => ['spacing' => ['margin' => ['bottom' => $this->sp('xl')]]],
-            ], [$this->block('core/group', ['layout' => ['type' => 'constrained', 'contentSize' => '520px', 'justifyContent' => 'left'],
+            ] + $this->cls('card-media'), [$this->block('core/group', ['layout' => ['type' => 'constrained', 'contentSize' => '520px', 'justifyContent' => 'left'],
                 'style' => ['spacing' => ['blockGap' => $this->sp('sm')]]], $body)]);
         }
         return $this->band($bg, [$this->intro($p, $bg, '720px'), $this->spacer('xl'), ...$rows, ...$this->ctaRow($p, $bg)]);
@@ -227,7 +260,7 @@ final class Patterns
     private function bandColors(string $bg): array
     {
         return match ($bg) {
-            'tinted' => ['backgroundColor' => 'secondary', 'textColor' => 'base'],
+            'tinted' => ['backgroundColor' => $this->ctx['idiom']['tinted'], 'textColor' => 'base'],
             'contrast' => ['backgroundColor' => 'contrast', 'textColor' => 'base'],
             default => [],
         };
@@ -242,7 +275,7 @@ final class Patterns
     /** Ornament, eyebrow, heading, lead — centered. @param array<string,mixed> $p @return array<string,mixed> */
     private function intro(array $p, string $bg, string $width): array
     {
-        $children = [$this->ornament(64)];
+        $children = $this->ornamentRow(64);
         if (!empty($p['eyebrow'])) { $children[] = $this->eyebrow($p['eyebrow'], $bg); }
         $children[] = $this->heading($p['heading'], 2, ['fontFamily' => 'heading', 'fontSize' => 'section-title',
             'style' => ['typography' => ['textAlign' => 'center']]] + ($bg === 'base' ? ['textColor' => 'primary'] : $this->textAttrs($bg)));
@@ -273,7 +306,7 @@ final class Patterns
     private function card(string $bg, array $children, string $align = '', string $pad = 'lg'): array
     {
         $colors = $bg === 'base' ? ['backgroundColor' => 'base', 'textColor' => 'contrast'] : ['backgroundColor' => 'base', 'textColor' => 'contrast'];
-        $attrs = $colors + ['className' => 'hover-lift', 'style' => ['border' => ['radius' => '12px', 'width' => '1px', 'color' => 'var:preset|color|secondary'],
+        $attrs = $colors + $this->cls('hover-lift') + ['style' => ['border' => ['radius' => $this->ctx['idiom']['radius'], 'width' => '1px', 'color' => 'var:preset|color|secondary'],
             'spacing' => ['padding' => array_fill_keys(['top', 'bottom', 'left', 'right'], $this->sp($pad)), 'blockGap' => $this->sp('sm')]],
             'layout' => ['type' => 'constrained', 'justifyContent' => 'left']];
         if ($align !== '') { $attrs['align'] = $align; }
@@ -296,13 +329,13 @@ final class Patterns
     {
         $children = [];
         if (!empty($it['image'])) {
-            $children[] = $this->image($it['image'], ['sizeSlug' => 'large', 'className' => 'card-media-tall',
-                'style' => ['border' => ['radius' => '12px'], 'spacing' => ['margin' => ['bottom' => $this->sp('sm')]]]]);
+            $children[] = $this->image($it['image'], ['sizeSlug' => 'large'] + $this->cls('card-media-tall') + [
+                'style' => ['border' => ['radius' => $this->ctx['idiom']['radius']], 'spacing' => ['margin' => ['bottom' => $this->sp('sm')]]]]);
         }
         $children[] = $this->heading($it['title'], 3, ['fontFamily' => 'heading', 'fontSize' => 'heading', 'textColor' => 'contrast']);
         $children[] = $this->para($it['body'], ['textColor' => 'contrast']);
         if (!empty($it['meta'])) { $children[] = $this->para($it['meta'], ['textColor' => 'secondary', 'fontSize' => 'caption']); }
-        if (!empty($it['cta'])) { $children[] = $this->block('core/buttons', ['className' => 'cta-bottom'], [$this->button($it['cta'], true)]); }
+        if (!empty($it['cta'])) { $children[] = $this->block('core/buttons', $this->cls('cta-bottom'), [$this->button($it['cta'], true)]); }
         return $this->card($bg, $children);
     }
 
@@ -315,7 +348,7 @@ final class Patterns
         if (!empty($it['cta'])) { $text[] = $this->block('core/buttons', [], [$this->button($it['cta'], true)]); }
         $cols = [];
         if (!empty($it['image'])) {
-            $cols[] = $this->block('core/column', ['width' => '20%'], [$this->image($it['image'], ['sizeSlug' => 'medium', 'className' => 'card-media-thumb', 'style' => ['border' => ['radius' => '12px']]])]);
+            $cols[] = $this->block('core/column', ['width' => '20%'], [$this->image($it['image'], ['sizeSlug' => 'medium'] + $this->cls('card-media-thumb') + ['style' => ['border' => ['radius' => $this->ctx['idiom']['radius']]]])]);
         }
         $cols[] = $this->block('core/column', ['width' => $cols ? '80%' : '100%', 'style' => ['spacing' => ['blockGap' => $this->sp('sm')]]], $text);
         return $this->block('core/columns', ['verticalAlignment' => 'center', 'style' => ['spacing' => ['blockGap' => ['left' => $this->sp('lg')]]]], $cols);
@@ -355,12 +388,20 @@ final class Patterns
         return $this->block('core/image', ['url' => $this->asset($img['asset']), 'alt' => $img['alt'] ?? ''] + $attrs);
     }
 
-    /** @return array<string,mixed> */
-    private function ornament(int $px, string $align = 'center'): array
+    /** The theme's ornament above a heading, or nothing when the theme ships none. @return list<array<string,mixed>> */
+    private function ornamentRow(int $px, string $align = 'center'): array
     {
+        $file = $this->ctx['idiom']['ornament'];
+        if ($file === null) { return []; }
         $attrs = ['width' => "{$px}px", 'sizeSlug' => 'large', 'className' => 'is-resized'];
         if ($align === 'center') { $attrs['align'] = 'center'; }
-        return $this->block('core/image', ['url' => $this->asset(self::ORNAMENT), 'alt' => ''] + $attrs);
+        return [$this->block('core/image', ['url' => $this->asset($file), 'alt' => ''] + $attrs)];
+    }
+
+    /** A theme class only when its style.css defines it. @return array<string,string> */
+    private function cls(string $class): array
+    {
+        return in_array($class, $this->ctx['idiom']['classes'], true) ? ['className' => $class] : [];
     }
 
     /** @param array<string,mixed> $attrs @return array<string,mixed> */

@@ -40,7 +40,7 @@ $siteSpec = json_decode(file_get_contents("$projectDir/siteSpec.json"), true);
 $direction = json_decode(file_get_contents("$projectDir/designDirection.json"), true);
 $sections = json_decode(file_get_contents("$projectDir/sections.json"), true)['sections'];
 $themeSlug = basename($projectDir);
-$assets = array_values(array_filter(scandir("$projectDir/theme/assets"), fn ($f) => $f[0] !== '.'));
+$idiom = Patterns::idiom("$projectDir/theme");
 $language = $siteSpec['language'] ?? 'English';
 $json = fn ($v) => json_encode($v, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
@@ -51,7 +51,7 @@ if (!is_dir("$outDir/theme")) {
 }
 
 $template = file_get_contents(__DIR__ . '/inner-section-pattern.md');
-$schema = Patterns::schema($assets);
+$schema = Patterns::schema($idiom);
 $llm = new ClaudeCliLlm($model);
 $registry = new BlockRegistry();
 $renderer = new SpecRenderer($registry);
@@ -72,7 +72,7 @@ foreach ($sections as $section) {
         '{{section_spec}}'     => $json($section),
         '{{section_slug}}'     => $slug,
         '{{language}}'         => $language,
-        '{{assets}}'           => implode(', ', array_map(fn ($a) => "`$a`", $assets)),
+        '{{assets}}'           => implode(', ', array_map(fn ($a) => "`$a`", array_diff($idiom['assets'], [$idiom['ornament']]))),
     ]);
     try {
         if ($replay) {
@@ -85,6 +85,7 @@ foreach ($sections as $section) {
         $spec = Patterns::spec($choice['pattern'], $choice['params'], [
             'slug' => $slug,
             'theme' => $themeSlug,
+            'idiom' => $idiom,
             'first' => $slug === $sections[0]['slug'],
         ]);
         $html = $renderer->document([$spec]);
