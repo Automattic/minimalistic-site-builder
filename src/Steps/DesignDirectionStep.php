@@ -2772,6 +2772,21 @@ final class DesignDirectionStep implements Step
                 }
             }
         }
+        // frm PR-5s: a stated wordmark case is the wordmark's own case (PR-2ac),
+        // not the site-wide heading treatment. fabrica-like27 read "a giant
+        // lowercase wordmark" as the lowercase treatment and set every heading
+        // and the team names lowercase; dasstudio's "uppercase section titles"
+        // states the heading case too and keeps its caps treatment.
+        $wordmarkCase = HeroComposition::statedWordmarkCaseFor($meta);
+        if ($wordmarkCase !== null && TypeTreatment::statedHeadingCaseFor($meta) === null) {
+            $treatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+            if ($treatment !== null && TypeTreatment::caseOf($treatment) === $wordmarkCase) {
+                $repairs[] = 'designDirection.json: field type_treatment authored ' . self::describe($treatment)
+                    . ' delivered "' . TypeTreatment::DEFAULT . '"; disposition the brief states the case of the wordmark,'
+                    . ' not of the headings, and the wordmark carries its own case, so the headings keep sentence case';
+                $direction['type_treatment'] = TypeTreatment::DEFAULT;
+            }
+        }
         // frm PR-6b: a numbered row the brief states (PR-3w) needs a
         // committed numeral to draw; parley's "four numbered feature cards"
         // met a direction that committed none. The ghost figure is the

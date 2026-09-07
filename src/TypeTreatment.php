@@ -35,6 +35,70 @@ final class TypeTreatment
         return BoundedChoice::explicit($value, self::ALL);
     }
 
+    /**
+     * Phrases that state a site-wide heading case (frm PR-5s): dasstudio's
+     * "giant uppercase section titles", spector's "uppercase display
+     * headline". A wordmark or name phrase ("giant lowercase wordmark") is
+     * the wordmark's own case (HeroComposition::statedWordmarkCase) and
+     * says nothing about the headings: fabrica-like27 read it as the
+     * site-wide lowercase treatment and set its team names lowercase.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_HEADING_CASE_PHRASES = [
+        'uppercase' => [
+            'uppercase headings', 'uppercase heading', 'uppercase titles', 'uppercase section titles', 'uppercase title',
+            'uppercase headlines', 'uppercase headline', 'uppercase display headline', 'uppercase display', 'uppercase type',
+            'all caps headings', 'all-caps headings', 'all caps titles', 'all-caps titles', 'all caps type', 'all-caps type',
+            'headings in capitals', 'titles in capitals', 'caps headings',
+        ],
+        'lowercase' => [
+            'lowercase headings', 'lowercase heading', 'lowercase titles', 'lowercase section titles', 'lowercase title',
+            'lowercase headlines', 'lowercase headline', 'lowercase display', 'lowercase type', 'all lowercase headings',
+            'all-lowercase headings', 'all lowercase type',
+        ],
+    ];
+
+    /** The site-wide heading case a brief states, or null. */
+    public static function statedHeadingCase(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_HEADING_CASE_PHRASES as $case => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedHeadingCaseFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $case = self::statedHeadingCase($text);
+                if ($case !== null) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The case a treatment transforms headings to, or null for sentence case. */
+    public static function caseOf(mixed $treatment): ?string
+    {
+        $treatment = self::explicit($treatment);
+        return match ($treatment) {
+            'lowercase' => 'lowercase',
+            'caps-tight', 'caps-tracked' => 'uppercase',
+            default => null,
+        };
+    }
+
     /** @return array{textTransform:string,letterSpacing:string}|null */
     public static function typography(mixed $treatment): ?array
     {
