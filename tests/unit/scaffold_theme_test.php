@@ -597,6 +597,26 @@ test('scaffold-theme rounds the panel-stage hero panel from the shape scale (frm
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('scaffold-theme aligns the portrait-backdrop copy row to the top (frm PR-2aa)', function () {
+    with_project('builder_scaffold_portrait_top_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        (new ScaffoldThemeStep())->run($project);
+        $css = $project->readText('theme/style.css');
+        $row = '.hero-composition--portrait-backdrop .hero-composition__copy .wp-block-columns {';
+        assert_contains($row, $css);
+        $rule = substr($css, (int) strpos($css, $row));
+        $rule = substr($rule, 0, (int) strpos($rule, '}'));
+        assert_contains('align-items: flex-start;', $rule);
+        assert_true(!str_contains($rule, 'flex-end'), 'no bottom alignment on the row');
+        $column = '.hero-composition--portrait-backdrop .hero-composition__copy .wp-block-column {';
+        assert_contains($column, $css);
+        $columnRule = substr($css, (int) strpos($css, $column));
+        $columnRule = substr($columnRule, 0, (int) strpos($columnRule, '}'));
+        assert_contains('align-self: flex-start;', $columnRule);
+        assert_true(!str_contains($columnRule, '!important'));
+    });
+});
+
 test('scaffold-theme paints the marquee-name hero name behind a centered stack (frm W2b)', function () {
     $tmp = sys_get_temp_dir() . '/builder_scaffold_marquee_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Ana Popescu');

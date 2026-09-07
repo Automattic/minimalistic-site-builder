@@ -700,8 +700,11 @@ final class ScaffoldThemeStep implements Step
         /* portrait-backdrop (frm W2d): one portrait plate centered on the
            page ground, capped to the viewport so the copy row stays in the
            first screen, rounded from the committed media radius; the copy
-           row under it aligns its two columns to their bottom edge so the
-           line and the action sit level with the headline's last line. */
+           row under it aligns its two columns to their top edge (frm
+           PR-2aa): bottom alignment let a five-line paragraph plus a button
+           start above the headline on luzia-like39, so the headline was not
+           the first text line. Top alignment keeps the headline first
+           whatever the trailing column's height. */
         .hero-composition--portrait-backdrop .hero-composition__media {
             display: flex;
             justify-content: center;
@@ -724,7 +727,12 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 1 / 1;
         }
         .hero-composition--portrait-backdrop .hero-composition__copy .wp-block-columns {
-            align-items: flex-end;
+            align-items: flex-start;
+        }
+        /* Core's is-vertically-aligned-bottom sets align-self on the column
+           (0,2,0); this outranks it without !important. */
+        .hero-composition--portrait-backdrop .hero-composition__copy .wp-block-column {
+            align-self: flex-start;
         }
         .hero-composition--portrait-backdrop .hero-composition__copy h1 {
             margin-block: 0;
