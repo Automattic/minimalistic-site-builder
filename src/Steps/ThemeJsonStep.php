@@ -16,6 +16,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
@@ -581,7 +582,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // readable defaults otherwise. Every fill is recorded durably.
         $direction = DesignDirectionStep::dataFor($project);
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
-        [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
+        // A band colour the brief states keeps its own family (frm PR-2ag).
+        $statedMeta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $statedBand = BandTint::statedFor(is_array($statedMeta) ? $statedMeta : []);
+        [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred, $statedBand['tint'] ?? null);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
         // Mirrors the applyMeasure gate above: on the HTML-first path the
@@ -1705,9 +1709,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *
      * @param array<mixed>         $theme
      * @param array<string,mixed>  $preferredHexes role => "#RRGGBB" (direction palette)
+     * @param string|null          $statedBandTint the band family the brief states (frm PR-2ag)
      * @return array{0:array<mixed>,1:list<string>,2:list<string>} theme, warnings, repairs
      */
-    public static function repairColors(array $theme, array $preferredHexes = []): array
+    public static function repairColors(array $theme, array $preferredHexes = [], ?string $statedBandTint = null): array
     {
         $warnings = [];
         $repairs = [];
@@ -1837,8 +1842,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($baseIndex !== null && $bandIndex !== null) {
             $base = (string) $palette[$baseIndex]['color'];
             $band = (string) $palette[$bandIndex]['color'];
-            if (!BandColor::valid($base, $band)) {
-                $fixedBand = BandColor::fromBase($base);
+            if (!BandColor::valid($base, $band, $statedBandTint)) {
+                $fixedBand = ($statedBandTint !== null ? BandTint::apply($base, $statedBandTint) : null)
+                    ?? BandColor::fromBase($base);
                 if ($fixedBand !== null) {
                     $palette[$bandIndex]['color'] = $fixedBand;
                     $repairs[] = "palette slug 'band': authored {$band}; delivered {$fixedBand}; "
