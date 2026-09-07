@@ -64,12 +64,18 @@ final class HeroComposition
      *
      * @param array<string,mixed>|null $theme
      */
-    public static function wordmarkEm(string $text, ?array $theme = null): float
+    public static function wordmarkEm(string $text, ?array $theme = null, ?string $case = null): float
     {
         // The theme may set every heading uppercase (frm PR-2x): the pin
         // measures the name the way it renders, or "Studio Blank" measured
         // in mixed case wraps as "STUDIO BLANK" and overruns the viewport.
-        if ($theme !== null && self::headingsUppercase($theme)) {
+        // A case the brief states outranks the theme (frm PR-2ac): the
+        // wordmark class sets the transform on the headline itself.
+        if ($case === 'uppercase') {
+            $text = mb_strtoupper($text, 'UTF-8');
+        } elseif ($case === 'lowercase') {
+            $text = mb_strtolower($text, 'UTF-8');
+        } elseif ($theme !== null && self::headingsUppercase($theme)) {
             $text = mb_strtoupper($text, 'UTF-8');
         }
         $upperScale = $theme === null ? 1.0 : HeroHeadlineFit::characterEmFor($theme, true) / self::WORDMARK_UPPER_EM;
@@ -95,6 +101,60 @@ final class HeroComposition
             $em += $width * $scale;
         }
         return max(0.3, round($em, 2));
+    }
+
+    /** The case classes a stated wordmark case stamps on the wordmark headline (frm PR-2ac). */
+    public const WORDMARK_UPPER_CLASS = 'hero-composition__wordmark--upper';
+
+    public const WORDMARK_LOWER_CLASS = 'hero-composition__wordmark--lower';
+
+    /**
+     * Phrases that state the case of the wordmark hero (frm PR-2ac):
+     * dasstudio's "huge uppercase wordmark hero" shipped "Studio Grund" in
+     * mixed case, and fabrica's "giant lowercase wordmark" shipped
+     * "Luminous"; the phrase picked the recipe and nothing carried the case.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_WORDMARK_CASE_PHRASES = [
+        'uppercase' => [
+            'uppercase wordmark', 'uppercase name', 'uppercase site name', 'wordmark in capitals',
+            'all-caps wordmark', 'all caps wordmark', 'capitalised wordmark', 'capitalized wordmark',
+            'name in capitals', 'name set in capitals',
+        ],
+        'lowercase' => [
+            'lowercase wordmark', 'lowercase name', 'lowercase site name', 'all-lowercase wordmark',
+            'all lowercase wordmark', 'wordmark in lowercase', 'name in lowercase',
+        ],
+    ];
+
+    /** The wordmark case a brief states in so many words, or null. */
+    public static function statedWordmarkCase(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_WORDMARK_CASE_PHRASES as $case => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedWordmarkCaseFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $case = self::statedWordmarkCase($text);
+                if ($case !== null) {
+                    return $case;
+                }
+            }
+        }
+        return null;
     }
 
     /** Whether the theme renders headings (or the H1) in uppercase. */
@@ -1407,8 +1467,20 @@ final class HeroComposition
      * @param list<array<string,mixed>> $repairs
      */
     /** @param array<string,mixed>|null $theme the theme.json data, for the heading face's advances (frm PR-2v) */
-    public static function bindWordmarkHeadline(string $markup, string $siteName, string $part, array &$repairs = [], ?array $theme = null): string
-    {
+    public static function bindWordmarkHeadline(
+        string $markup,
+        string $siteName,
+        string $part,
+        array &$repairs = [],
+        ?array $theme = null,
+        ?string $case = null,
+    ): string {
+        $case = in_array($case, ['uppercase', 'lowercase'], true) ? $case : null;
+        $caseClass = match ($case) {
+            'uppercase' => self::WORDMARK_UPPER_CLASS,
+            'lowercase' => self::WORDMARK_LOWER_CLASS,
+            default => null,
+        };
         $siteName = trim($siteName);
         if ($siteName === '') {
             return $markup;
@@ -1432,10 +1504,10 @@ final class HeroComposition
             // size on every screen instead of wrapping at the cap. The width
             // is measured per character and per heading face (PR-2v), at 90%
             // of the container so a wide face keeps a margin.
-            $lineEm = self::wordmarkEm($siteName, $theme);
+            $lineEm = self::wordmarkEm($siteName, $theme, $case);
             $longestEm = 0.3;
             foreach (preg_split('/\s+/u', $siteName, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
-                $longestEm = max($longestEm, self::wordmarkEm($word, $theme));
+                $longestEm = max($longestEm, self::wordmarkEm($word, $theme, $case));
             }
             // Two terms (frm PR-2r): the whole name on one line where the
             // container is wide, and on a narrow container the longest word
@@ -1449,6 +1521,15 @@ final class HeroComposition
             $classes = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'has-display-font-size'));
             if (!in_array(self::WORDMARK_CLASS, $classes, true)) {
                 $classes[] = self::WORDMARK_CLASS;
+            }
+            // A stated case is one class; a stale opposite class from an
+            // earlier pass goes (frm PR-2ac).
+            $classes = array_values(array_filter(
+                $classes,
+                static fn (string $c): bool => !in_array($c, [self::WORDMARK_UPPER_CLASS, self::WORDMARK_LOWER_CLASS], true) || $c === $caseClass,
+            ));
+            if ($caseClass !== null && !in_array($caseClass, $classes, true)) {
+                $classes[] = $caseClass;
             }
             $attrs['className'] = implode(' ', $classes);
             unset($attrs['fontSize']);
@@ -1468,9 +1549,21 @@ final class HeroComposition
                 if (!in_array(self::WORDMARK_CLASS, $tokens, true)) {
                     $tokens[] = self::WORDMARK_CLASS;
                 }
+                $tokens = array_values(array_filter(
+                    $tokens,
+                    static fn (string $c): bool => !in_array($c, [self::WORDMARK_UPPER_CLASS, self::WORDMARK_LOWER_CLASS], true) || $c === $caseClass,
+                ));
+                if ($caseClass !== null && !in_array($caseClass, $tokens, true)) {
+                    $tokens[] = $caseClass;
+                }
                 $open = str_replace($cm[0], 'class="' . implode(' ', $tokens) . '"', $open);
             } else {
-                $open = preg_replace('/^(\s*<h1)/', '$1 class="wp-block-heading ' . self::WORDMARK_CLASS . '"', $open, 1) ?? $open;
+                $open = preg_replace(
+                    '/^(\s*<h1)/',
+                    '$1 class="wp-block-heading ' . self::WORDMARK_CLASS . ($caseClass === null ? '' : ' ' . $caseClass) . '"',
+                    $open,
+                    1,
+                ) ?? $open;
             }
             $open = preg_replace('/>$/', ' style="font-size:' . $size . '">', rtrim($open), 1) ?? $open;
             $document->spliceOwnHtml($index, 0, strlen($own), $open . htmlspecialchars($siteName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . $m[3]);

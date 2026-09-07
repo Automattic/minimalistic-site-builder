@@ -137,6 +137,10 @@ final class HeroUnit extends AbstractPageSectionUnit
                 $key,
                 $repairs,
                 is_array($themeJson) ? $themeJson : null,
+                // The case the brief states for the wordmark (frm PR-2ac).
+                is_string($input['stated_wordmark_case'] ?? null) && $input['stated_wordmark_case'] !== ''
+                    ? $input['stated_wordmark_case']
+                    : null,
             );
         }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
