@@ -603,6 +603,12 @@ test('scaffold-theme paints the marquee-name hero name behind a centered stack (
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
     assert_contains('.hero-composition--marquee-name .hero-composition__marquee {', $css);
+    // The supporting line keeps a reading measure under the objects (frm PR-2z).
+    assert_contains('.hero-composition--marquee-name .hero-composition__copy > p:not(.hero-composition__marquee) {', $css);
+    $line = substr($css, (int) strpos($css, '.hero-composition--marquee-name .hero-composition__copy > p:not(.hero-composition__marquee) {'));
+    $line = substr($line, 0, (int) strpos($line, '}'));
+    assert_contains('max-width: min(100%, 36rem);', $line);
+    assert_contains('margin-inline: auto;', $line);
     $block = substr($css, strpos($css, '.hero-composition--marquee-name .hero-composition__marquee {'));
     $block = substr($block, 0, strpos($block, '}'));
     assert_contains('position: absolute', $block);
