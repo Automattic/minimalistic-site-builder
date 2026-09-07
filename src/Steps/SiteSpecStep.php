@@ -173,12 +173,21 @@ final class SiteSpecStep implements Step
                 // persona at all is the same miss (frm PR-0m): calderr-like26
                 // and -27 answered an empty persona_name on "a personal
                 // portfolio for a web designer", and no retry could fire.
+                $personal = self::personalBrief((string) ($meta['original_prompt'] ?? '')) || self::personalBrief($prompt);
                 $emptyPersona = $placeholder === '' && is_array($spec)
                     && trim((string) ($spec['persona_name'] ?? '')) === ''
-                    && (self::personalBrief((string) ($meta['original_prompt'] ?? '')) || self::personalBrief($prompt));
+                    && $personal;
                 if ($emptyPersona) {
                     $placeholder = '(empty)';
                 }
+                // On a personal site the site is named after the person
+                // (frm PR-0n): calderr-like30's retry answered "Daan Vermeer"
+                // and named the site "Studio Vermeer", and the giant serif
+                // name the brief asks for read as a studio. The retry says
+                // so, and the answer is bound to the person's name.
+                $naming = $personal
+                    ? ' name the site with that person\'s full name itself (the site name IS the person\'s name, not a studio name),'
+                    : ' name the site after that person or their studio,';
                 if ($generic !== '' && self::genericName($generic)) {
                     // When the persona is a placeholder too, the one retry
                     // asks for both (frm PR-0l): calderr-like25's "Studio
@@ -191,8 +200,7 @@ final class SiteSpecStep implements Step
                             : " Your persona_name \"{$placeholder}\" is not a person's full name either: this is a personal"
                                 . ' site about one person, so')
                             . ' give that person a plausible full name (a given name and a'
-                            . ' family name that fit the language and place), name the site after that person or their'
-                            . ' studio, and list both in "invented".'
+                            . ' family name that fit the language and place),' . $naming . ' and list both in "invented".'
                         : '';
                     $retry = $this->llm->completeJson(
                         $rendered . "\n\nRETRY: your previous answer named the site \"{$generic}\", which is a generic"
@@ -205,6 +213,7 @@ final class SiteSpecStep implements Step
                         $spec = $retry;
                         $warnings[] = "siteSpec.json: field name authored \"{$generic}\" delivered \"{$retried}\""
                             . '; disposition a generic category word is not a site name, so one fresh sample replaced it';
+                        $spec = self::namedAfterThePerson($spec, $personal, $warnings);
                         if ($placeholder !== '') {
                             $retriedPersona = trim((string) ($retry['persona_name'] ?? ''));
                             $warnings[] = self::placeholderPersona($retry)
@@ -229,7 +238,7 @@ final class SiteSpecStep implements Step
                             : "your previous answer invented the persona \"{$placeholder}\", which is not a person's full name."
                                 . ' This is a personal site about one person:')
                         . ' Give that person a plausible full name (a given name and a family name that fit the language'
-                        . ' and place), name the site after that person or their studio, list both in "invented", and keep'
+                        . ' and place),' . $naming . ' list both in "invented", and keep'
                         . ' every other fact as before.',
                         $this->withOptions(['log_label' => $this->id() . '-persona-retry']),
                     );
@@ -243,6 +252,7 @@ final class SiteSpecStep implements Step
                         $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered \"{$retriedPersona}\""
                             . " (site name \"{$generic}\" to \"{$retriedName}\"); disposition an invented persona must be a"
                             . " person's full name, so one fresh sample replaced it";
+                        $spec = self::namedAfterThePerson($spec, $personal, $warnings);
                     } else {
                         $warnings[] = "siteSpec.json: field persona_name authored \"{$placeholder}\" delivered as authored"
                             . "; disposition an invented persona must be a person's full name, and the retry answered "
@@ -398,6 +408,37 @@ final class SiteSpecStep implements Step
             }
         }
         return false;
+    }
+
+    /**
+     * Bind a retried spec's site name to the person on a personal site (frm
+     * PR-0n). The retry asks for it; when the model still answers a studio
+     * name beside a full persona, the person's name is the site name. A name
+     * that already is the person's name, or contains it, stands.
+     *
+     * @param array<string,mixed> $spec
+     * @param list<string> $warnings
+     * @return array<string,mixed>
+     */
+    public static function namedAfterThePerson(array $spec, bool $personal, array &$warnings): array
+    {
+        if (!$personal || self::placeholderPersona($spec)) {
+            return $spec;
+        }
+        $persona = trim((string) ($spec['persona_name'] ?? ''));
+        $name = trim((string) ($spec['name'] ?? ''));
+        if ($persona === '' || $name === '' || mb_stripos($name, $persona, 0, 'UTF-8') !== false) {
+            return $spec;
+        }
+        $spec['name'] = $persona;
+        $invented = is_array($spec['invented'] ?? null) ? $spec['invented'] : [];
+        if (!in_array('name', $invented, true)) {
+            $invented[] = 'name';
+        }
+        $spec['invented'] = $invented;
+        $warnings[] = "siteSpec.json: field name authored \"{$name}\" delivered \"{$persona}\""
+            . '; disposition the brief states a personal site, so the site is named after the person';
+        return $spec;
     }
 
     /** Whether a site name is a generic category word rather than a name. */
