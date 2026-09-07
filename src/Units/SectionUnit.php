@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -276,6 +277,12 @@ final class SectionUnit extends AbstractPageSectionUnit
                     'disposition' => 'repaired',
                 ];
             }
+        }
+        // A two-tone heading that glues a label to a second title is reported (frm PR-5w).
+        foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+            $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
         }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
