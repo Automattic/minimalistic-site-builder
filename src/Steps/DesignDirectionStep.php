@@ -243,6 +243,9 @@ final class DesignDirectionStep implements Step
         );
         $recipeAssigned = trim((string) Env::get(self::HERO_RECIPE_ENV)) !== ''
             || array_key_exists('hero_assignment', $meta);
+        $openComposition = !$recipeAssigned
+            && ($meta['graph'] ?? 'blocks') !== 'html-first'
+            && HeroComposition::isCompatible(HeroComposition::AUTHORED, $constraints);
         // Explicit assignments keep reproducible media defaults. Ordinary
         // builds receive the compatible choices instead of an assigned recipe.
         $blueprintDefaults = array_merge(
@@ -266,7 +269,9 @@ final class DesignDirectionStep implements Step
         ]);
 
         if (!$recipeAssigned) {
-            $heroComposition = HeroComposition::choicePrompt($constraints);
+            $heroComposition = $openComposition
+                ? HeroComposition::choicePrompt($constraints)
+                : HeroComposition::recipeChoicePrompt($constraints);
         }
 
         $rendered = $this->renderer->render('design-direction.md', [
@@ -290,7 +295,7 @@ final class DesignDirectionStep implements Step
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
             'color_economy' => $seedColorEconomy === ''
-                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
+                ? 'not committed by the seed — choose the hue relationships that express the requested style'
                 : $seedColorEconomy,
             // A rotating per-site shortlist of real families in the committed
             // tradition. Naming the tradition alone lands every build on its
@@ -301,6 +306,12 @@ final class DesignDirectionStep implements Step
                 $fontCatalog,
             ),
             'hero_composition' => $heroComposition,
+            'hero_blueprint_shape' => json_encode(
+                $openComposition
+                    ? HeroBlueprint::promptValues(HeroBlueprint::defaultFor(HeroComposition::AUTHORED))
+                    : $blueprintDefaults,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
         ]);
         try {
             $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
@@ -314,9 +325,15 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        if (!$recipeAssigned) {
+        if ($openComposition) {
+            // Default blocks builds author their own composition. A generated
+            // recipe label cannot silently re-enable a fixed template.
+            $recipe = HeroComposition::AUTHORED;
+        } elseif (!$recipeAssigned) {
             $authoredRecipe = $payload['direction']['hero_blueprint']['recipe'] ?? null;
-            if (is_string($authoredRecipe) && in_array($authoredRecipe, HeroComposition::compatible($constraints), true)) {
+            if (is_string($authoredRecipe) && HeroComposition::isKnown($authoredRecipe)
+                && ($openComposition || !HeroComposition::isAuthored($authoredRecipe))
+                && HeroComposition::isCompatible($authoredRecipe, $constraints)) {
                 $recipe = $authoredRecipe;
             } else {
                 $warnings[] = 'file=designDirection.json; path=hero_blueprint.recipe; authored='
@@ -1188,11 +1205,10 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The two prose commitments, judged once on the delivered direction: a
-     * blank `tension` means nothing in the direction argues, so the page is
-     * its category's default by construction; a blank `subject_anchor` means
-     * the swap test went unanswered; an anchor naming no palette role binds
-     * no committed hex. None of these can be repaired deterministically
+     * Missing prose commitments are recorded once on the delivered direction.
+     * A subject connection may live in imagery or content, not just a palette
+     * role. Neither an omitted contrast nor a non-palette anchor proves a
+     * generic aesthetic. Missing guidance cannot be repaired deterministically
      * (inventing a subject's world needs a model), so each is rung 4: a
      * durable row for the cohort audit and the future repair pass, and the
      * build continues. Called from run(), not normalize(), so a re-normalized
@@ -1207,18 +1223,12 @@ final class DesignDirectionStep implements Step
         $tension = trim((string) ($direction['tension'] ?? ''));
         if ($tension === '') {
             $rows[] = "file='designDirection.json'; path=\"tension\"; authored=\"\"; delivered=\"\"; "
-                . 'disposition=no deliberate contrast committed; the direction ships as its category default';
+                . 'disposition=composition relationship omitted; remaining design direction retained';
         }
         $anchor = trim((string) ($direction['subject_anchor'] ?? ''));
         if ($anchor === '') {
             $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored=\"\"; delivered=\"\"; "
-                . "disposition=no palette role was tied to the subject's own world, so the swap test is "
-                . 'unanswered; direction delivered unanchored';
-        } elseif (preg_match('/\b(base|contrast|primary|secondary|accent|band)\b/i', $anchor) !== 1) {
-            $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored="
-                . Warnings::value($anchor) . '; delivered=' . Warnings::value($anchor)
-                . '; disposition=anchor names no palette role (base, contrast, primary, secondary, accent, band), '
-                . 'so it binds no committed hex; retained unbound';
+                . 'disposition=subject connection omitted; remaining design direction retained';
         }
         return $rows;
     }
@@ -1715,7 +1725,9 @@ final class DesignDirectionStep implements Step
         // keyword. Directions persisted before the field existed carry none.
         $canvas = trim((string) ($direction['canvas'] ?? ''));
         if ($canvas === 'framed') {
-            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
+            $facts[] = HeroComposition::isAuthored((string) ($direction['hero_blueprint']['recipe'] ?? ''))
+                ? '- **Canvas**: framed — keep a visible mat of page background around the bands, including a framed hero when that serves its composition. Use wide alignment and deliberate gutters. Only an overlay header requires a continuous protected top surface.'
+                : '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
@@ -1967,7 +1979,7 @@ final class DesignDirectionStep implements Step
             throw new \RuntimeException('designDirection.json has no structured hero_blueprint');
         }
         $recipe = trim((string) ($blueprint['recipe'] ?? ''));
-        if (!in_array($recipe, HeroComposition::RECIPES, true)) {
+        if (!HeroComposition::isKnown($recipe)) {
             throw new \RuntimeException("designDirection.json has unknown hero_blueprint recipe '{$recipe}'");
         }
         $repairs = [];
@@ -1993,7 +2005,7 @@ final class DesignDirectionStep implements Step
         HeroBlueprint::recipe($blueprint);
         return "## Front-page hero blueprint (front page only)\n\n```json\n"
             . json_encode(
-                $blueprint,
+                HeroBlueprint::promptValues($blueprint),
                 JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
             )
             . "\n```";

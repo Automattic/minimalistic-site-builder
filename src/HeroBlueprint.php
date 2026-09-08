@@ -6,15 +6,26 @@ namespace Automattic\SiteBuild;
 /**
  * Pure normalizer for the persisted, model-authored hero blueprint.
  *
- * The selected catalog recipe is authoritative. Scalar drift is repaired to
- * bounded recipe defaults, line targets are clamped/ordered, and the result is
- * a fixed point. Repairs and delivered-value loss are collected separately so
- * callers can narrate/report the former without polluting warnings.json.
+ * Authored composition prose survives normalization; inactive recipe defaults
+ * supply the shared header interface without appearing in authoring prompts.
+ * Explicit recipes still normalize against their catalog bounds. Both paths
+ * reach a fixed point and separate repairs from delivered-value losses.
  */
 final class HeroBlueprint
 {
+    /** Keep inactive recipe defaults out of the open-composition brief. */
+    public static function promptValues(array $blueprint): array
+    {
+        if (!HeroComposition::isAuthored((string) ($blueprint['recipe'] ?? ''))) {
+            return $blueprint;
+        }
+        return array_intersect_key($blueprint, array_flip([
+            'version', 'recipe', 'composition', 'rationale', 'mobile_layout', 'media_mode', 'cta_treatment',
+        ]));
+    }
+
     public const VERSION = 1;
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'mixed'];
     public const HEADLINE_REGISTERS = ['restrained', 'display', 'poster'];
     public const TEXT_ANCHORS = [
         'top-start', 'center-start', 'bottom-start', 'center',
@@ -26,7 +37,7 @@ final class HeroBlueprint
     public const CTA_TREATMENTS = ['quiet', 'prominent'];
     public const MOBILE_TRANSFORMATIONS = [
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
-        'flatten-layers',
+        'flatten-layers', 'authored',
     ];
     /**
      * The two media axes the merged contained-split recipe carries (BIGR-912).
@@ -54,7 +65,7 @@ final class HeroBlueprint
             throw new \InvalidArgumentException("hero recipe '{$recipe}' is incompatible with design_constraints");
         }
         $defaults = HeroComposition::metadata($recipe)['defaults'];
-        return [
+        $blueprint = [
             'version' => self::VERSION,
             'recipe' => $recipe,
             'media_mode' => $defaults['media_mode'],
@@ -72,6 +83,14 @@ final class HeroBlueprint
             'media_aspect' => $defaults['media_aspect'],
             'media_weight' => $defaults['media_weight'],
         ];
+        if (HeroComposition::isAuthored($recipe)) {
+            $blueprint += [
+                'composition' => 'Compose the opening from the site concept and supplied content, including at least one image.',
+                'rationale' => 'Let the site concept determine the hierarchy and composition.',
+                'mobile_layout' => 'Reflow supported blocks in source reading order without clipping content.',
+            ];
+        }
+        return $blueprint;
     }
 
     /**
@@ -103,6 +122,19 @@ final class HeroBlueprint
         }
 
         $out = $defaults;
+        if (HeroComposition::isAuthored($assignedRecipe)) {
+            foreach (['composition', 'rationale', 'mobile_layout'] as $field) {
+                if (is_string($raw[$field] ?? null) && trim($raw[$field]) !== '') {
+                    $out[$field] = trim($raw[$field]);
+                } else {
+                    $warnings[] = self::warning($field, $raw[$field] ?? null, $defaults[$field],
+                        'missing composition guidance replaced by concept-led fallback; hero author still chooses the layout');
+                }
+            }
+            // Defaults needed by the shared header interface are not missing
+            // creative decisions; they do not constrain the authored layout.
+            $raw += $defaults;
+        }
 
         if (($raw['version'] ?? null) !== self::VERSION) {
             self::repair($repairs, 'version', $raw['version'] ?? null, self::VERSION);
@@ -123,7 +155,12 @@ final class HeroBlueprint
         if (!in_array($out['media_mode'], $meta['media_modes'], true)) {
             $authored = $out['media_mode'];
             $out['media_mode'] = $defaults['media_mode'];
-            self::repair($repairs, 'media_mode', $authored, $out['media_mode'], 'recipe compatibility');
+            if (HeroComposition::isAuthored($assignedRecipe)) {
+                $warnings[] = self::warning('media_mode', $authored, $out['media_mode'],
+                    'image-free plan replaced by image-bearing default; hero author chooses placement for at least one image');
+            } else {
+                self::repair($repairs, 'media_mode', $authored, $out['media_mode'], 'recipe compatibility');
+            }
         }
 
         $out['headline_register'] = self::enum(
@@ -257,7 +294,9 @@ final class HeroBlueprint
             );
         }
 
-        self::repairSpatialCompatibility($out, $defaults, $repairs);
+        if (!HeroComposition::isAuthored($assignedRecipe)) {
+            self::repairSpatialCompatibility($out, $defaults, $repairs);
+        }
 
         return $out;
     }

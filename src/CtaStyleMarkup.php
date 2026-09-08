@@ -9,7 +9,8 @@ namespace Automattic\SiteBuild;
  * Width is a container decision, not a style decision. A `block` button keeps
  * a model-authored full width only inside a narrow container: a card, or a
  * column chain whose share of the theme's contentSize is at most
- * CtaStyle::NARROW_CONTAINER_SHARE. Everywhere else, and for every other
+ * CtaStyle::NARROW_CONTAINER_SHARE. Authored heroes may intentionally retain a
+ * full-width block CTA too. Everywhere else, and for every other
  * style, an authored width is removed and the button keeps its intrinsic
  * width. The normalizer never adds a width of its own.
  */
@@ -115,8 +116,9 @@ final class CtaStyleMarkup
                 || in_array(self::FULL_WIDTH_CLASS, $tokens, true)
                 || in_array('100', $htmlWidths, true);
             $container = self::container($doc, $i, $contentSize, $wideSize);
-            $keepFullWidth = $style === 'block' && $authoredFullWidth && $container['narrow'];
-            $widthDisposition = $style === 'block' && $authoredFullWidth && !$container['narrow']
+            $authoredHero = self::insideAuthoredHero($doc, $i);
+            $keepFullWidth = $style === 'block' && $authoredFullWidth && ($container['narrow'] || $authoredHero);
+            $widthDisposition = $style === 'block' && $authoredFullWidth && !$container['narrow'] && !$authoredHero
                 ? 'removed full width outside a narrow container (' . $container['reason']
                     . '); enforced committed block CTA construction'
                 : null;
@@ -172,7 +174,7 @@ final class CtaStyleMarkup
                     null,
                     self::FULL_WIDTH_CLASS,
                     $style,
-                    'kept authored full width in a narrow container (' . $container['reason']
+                    'kept authored full width (' . ($authoredHero ? 'concept-led hero' : 'narrow container: ' . $container['reason'])
                         . '); enforced committed block CTA construction',
                 );
             }
@@ -494,6 +496,17 @@ final class CtaStyleMarkup
             'narrow' => $total <= CtaStyle::NARROW_CONTAINER_SHARE + 0.005,
             'reason' => sprintf('column share %d%% of the content width', (int) round($total * 100)),
         ];
+    }
+
+    private static function insideAuthoredHero(BlockMarkup $doc, int $button): bool
+    {
+        for ($node = $doc->parent($button); $node !== null; $node = $doc->parent($node)) {
+            $classes = ($doc->attrs($node) ?? [])['className'] ?? '';
+            if (is_string($classes) && in_array('hero-composition--authored', preg_split('/\s+/', trim($classes)) ?: [], true)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The column's share of its row; unsized columns split what sized siblings leave. */

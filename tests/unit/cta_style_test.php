@@ -544,8 +544,10 @@ test('CTA prompt contract delegates construction and keeps radius separate', fun
     assert_contains('CTA construction is global', $section);
     assert_contains('do not set `backgroundColor`', $section);
 
-    // The one-third container rule is stated once in every markup prompt.
-    foreach (['hero', 'section', 'footer', 'header'] as $prompt) {
+    // Authored heroes may intentionally use their committed full-width block
+    // action; ordinary sections and chrome keep the narrow-container rule.
+    assert_contains('may span its hero container', (string) file_get_contents(repo_path('prompts/hero.md')));
+    foreach (['hero-recipe', 'section', 'footer', 'header'] as $prompt) {
         $text = (string) file_get_contents(repo_path('prompts/' . $prompt . '.md'));
         assert_contains('one third of the content width', $text, $prompt . '.md states the container rule');
     }

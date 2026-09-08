@@ -9,8 +9,8 @@ use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroComposition;
 
 /**
- * Generate the front page's first section from one assigned hero recipe and
- * the canonical above-fold contract. Reads and writes no Project state.
+ * Generate a concept-led front-page opening, or an explicitly selected recipe,
+ * coordinated with the canonical header contract. Reads/writes no Project state.
  */
 final class HeroUnit extends AbstractPageSectionUnit
 {
@@ -36,11 +36,12 @@ final class HeroUnit extends AbstractPageSectionUnit
         $recipe = $context['recipe'];
         $blueprint = $context['blueprint'];
         $mobileTransformation = $context['mobile_transformation'];
-        $imageInstructions = HeroComposition::usesGeneratedImages($blueprint)
+        $authored = HeroComposition::isAuthored($recipe);
+        $imageInstructions = $authored || HeroComposition::usesGeneratedImages($blueprint)
             ? $this->renderer->render('image-generation.md', [])
             : '';
 
-        return $this->siteLayeredRequest('hero.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest($authored ? 'hero.md' : 'hero-recipe.md', $this->commonVars($input) + [
             'site_pages' => $this->inputString($input, 'site_pages'),
             'page_title' => $this->pageString($input, 'title'),
             'page_path' => $this->pageString($input, 'path', '/'),
@@ -51,14 +52,16 @@ final class HeroUnit extends AbstractPageSectionUnit
             'section_purpose' => $this->sectionString($context['section'], 'purpose'),
             'content_notes' => $this->sectionString($context['section'], 'content_notes'),
             'neighbors' => $this->inputString($input, 'neighbors'),
-            'hero_blueprint' => $this->inputJson($input, 'hero_blueprint'),
+            'hero_blueprint' => $authored
+                ? json_encode(HeroBlueprint::promptValues($blueprint), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+                : $this->inputJson($input, 'hero_blueprint'),
             'above_fold_contract' => AboveFoldContract::frontContract($context['contract']),
             'composition_assignment' => "ASSIGNED HERO COMPOSITION for this build: **{$recipe}**. "
                 . 'Build exactly this one recipe; do not substitute or blend another topology. '
                 . 'The root group must carry `className` marker `'
                 . self::MARKER_PREFIX . $recipe . '` and mobile marker `'
                 . self::MOBILE_MARKER_PREFIX . $mobileTransformation . '`.',
-            'composition_recipe' => $this->renderer->render(
+            'composition_recipe' => $authored ? '' : $this->renderer->render(
                 HeroComposition::recipeTemplate($recipe),
                 []
             ),
@@ -95,23 +98,35 @@ final class HeroUnit extends AbstractPageSectionUnit
         $markup = $actionResult['markup'];
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
-        $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
-        $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);
-        $markup = $budget['markup'];
-        array_push($warnings, ...$budget['warnings']);
+        if (!HeroComposition::isAuthored($context['recipe'])) {
+            $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
+            $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);
+            $markup = $budget['markup'];
+            array_push($warnings, ...$budget['warnings']);
+        } else {
+            $emptyActions = HeroCopyBudget::removeEmptyButtonsWrappers($markup, $key);
+            $markup = $emptyActions['markup'];
+            array_push($warnings, ...$emptyActions['warnings']);
+        }
         $recipeMeta = HeroComposition::metadata($context['recipe']);
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
-        $markup = GeneratedMarkup::centerHeroCopy(
-            $markup,
-            (string) ($context['blueprint']['text_anchor'] ?? ''),
-            (string) ($context['contract']['writing_direction'] ?? ''),
-            $key,
-            $repairs,
-            $warnings,
-        );
-        $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
+        if (!HeroComposition::isAuthored($context['recipe'])) {
+            $markup = GeneratedMarkup::centerHeroCopy(
+                $markup,
+                (string) ($context['blueprint']['text_anchor'] ?? ''),
+                (string) ($context['contract']['writing_direction'] ?? ''),
+                $key,
+                $repairs,
+                $warnings,
+            );
+            $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
+        }
+        if (HeroComposition::isAuthored($context['recipe'])) {
+            array_push($warnings, ...HeroComposition::markupWarnings($markup, $context['recipe'], $key, $context['blueprint']));
+            return new MarkupResult($markup, $repairs, $warnings);
+        }
         $band = BandSurfaceContract::enforce(
             $markup,
             $this->sectionString($context['section'], 'background'),

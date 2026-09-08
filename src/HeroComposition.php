@@ -4,14 +4,32 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Reviewed, code-owned catalog and objective selector for front-page heroes.
- *
- * Selection filters caller-owned capabilities first, then uses a stable hash
- * only inside the compatible pool. No prompt prose or site-industry keywords
- * participate in the decision.
+ * Open hero authoring plus optional reviewed recipes. The model composes an
+ * unconstrained opening from the concept; explicit capability limits and
+ * recipe assignments use the catalog. Stable selection is the fallback.
  */
 final class HeroComposition
 {
+    /** An authoring mode, not a fourth layout template. RECIPES remain opt-in references. */
+    public const AUTHORED = 'authored';
+
+    public static function isAuthored(string $recipe): bool
+    {
+        return $recipe === self::AUTHORED;
+    }
+
+    public static function isKnown(string $recipe): bool
+    {
+        return self::isAuthored($recipe) || isset(self::CATALOG[$recipe]);
+    }
+
+    public static function isAuthoredMarkup(string $markup): bool
+    {
+        $doc = BlockMarkup::parse($markup);
+        $root = $doc->topLevel();
+        $classes = $root === null ? '' : (string) (($doc->attrs($root) ?? [])['className'] ?? '');
+        return in_array('hero-composition--authored', preg_split('/\s+/', trim($classes)) ?: [], true);
+    }
     /** @var list<string> */
     public const RECIPES = [
         'cinematic-safe-zone',
@@ -182,6 +200,29 @@ final class HeroComposition
     /** Supported structures, exposed for concept-led choice rather than random assignment. */
     public static function choicePrompt(array $constraints = []): string
     {
+        // Count/mode/copy ceilings currently have executable guarantees in
+        // the recipe path. Never advertise a freer mode that ignores them.
+        if (!self::isCompatible(self::AUTHORED, $constraints)) {
+            return self::recipeChoicePrompt($constraints);
+        }
+        return "Choose the hero composition by starting with this site's concept, not a template. "
+            . "Set hero_blueprint.recipe to authored (the default authoring mode, not a layout). "
+            . "In composition describe the actual arrangement, hierarchy, framing, media and copy; "
+            . "in rationale explain why those decisions express THIS concept; in mobile_layout describe "
+            . "how the composition reflows in source reading order on a narrow screen. Include at least one image; "
+            . "multiple images are welcome when they serve the concept. media_mode is foreground-image, cover-image, or mixed. "
+            . "The supported blocks own their responsive behavior. "
+            . "Do not map aesthetic labels to fixed templates; give the required imagery a meaningful role. "
+            . "Keep hero-specific composition in this blueprint, not the site-wide narrative. "
+            . "Caller limits (capabilities, not creative targets): "
+            . json_encode(self::validateConstraints($constraints), JSON_THROW_ON_ERROR)
+            . "\nBlueprint shape (example values are not assignments):\n"
+            . json_encode(HeroBlueprint::promptValues(HeroBlueprint::defaultFor(self::AUTHORED)), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+    }
+
+    /** Recipe-only reference data for callers that explicitly want a catalog. */
+    public static function recipeChoicePrompt(array $constraints = []): string
+    {
         $choices = [];
         foreach (self::compatible($constraints) as $recipe) {
             $meta = self::metadata($recipe);
@@ -208,7 +249,7 @@ final class HeroComposition
 
     public static function assertKnown(string $recipe): void
     {
-        if (!isset(self::CATALOG[$recipe])) {
+        if (!self::isKnown($recipe)) {
             throw new \InvalidArgumentException(
                 "unknown hero recipe '{$recipe}' (use one of: " . implode(', ', self::RECIPES) . ')'
             );
@@ -219,6 +260,35 @@ final class HeroComposition
     public static function metadata(string $recipe): array
     {
         self::assertKnown($recipe);
+        if (self::isAuthored($recipe)) {
+            return [
+                'canvases' => self::CANVASES,
+                'media_modes' => ['foreground-image', 'cover-image', 'mixed'],
+                'min_images' => 1, 'max_images' => PHP_INT_MAX,
+                'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
+                'default_background' => 'base', 'fallback_background' => 'base',
+                'header_modes' => ['stacked', 'overlay'],
+                'copy_capacity' => 'expanded',
+                'mobile_transformations' => ['authored'],
+                'layout_archetype' => self::AUTHORED,
+                'fallback_family' => 'typographic',
+                'root_hook' => '.hero-composition--authored',
+                'prompt' => 'hero.md',
+                'headline_registers' => HeroBlueprint::HEADLINE_REGISTERS,
+                'height_profiles' => HeroBlueprint::HEIGHT_PROFILES,
+                'media_aspects' => self::MEDIA_ASPECTS,
+                'media_weights' => self::MEDIA_WEIGHTS,
+                'defaults' => [
+                    'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                    'text_anchor' => 'center-start',
+                    'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [1, 6]],
+                    'focal_region' => 'none', 'text_safe_region' => 'full',
+                    'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                    'mobile_transformation' => 'authored',
+                    'media_aspect' => 'landscape', 'media_weight' => 'balanced',
+                ],
+            ];
+        }
         return self::CATALOG[$recipe];
     }
 
@@ -263,7 +333,8 @@ final class HeroComposition
                 return false;
             }
             $mode = strtolower(trim((string) ($recipeOrBlueprint['media_mode'] ?? '')));
-            return in_array($mode, self::IMAGE_MEDIA_MODES, true);
+            return in_array($mode, self::IMAGE_MEDIA_MODES, true)
+                || (self::isAuthored($recipe) && $mode === 'mixed');
         }
         $meta = self::metadata($recipeOrBlueprint);
         return (int) $meta['min_images'] > 0
@@ -400,6 +471,10 @@ final class HeroComposition
     public static function isCompatible(string $recipe, array $constraints = []): bool
     {
         self::assertKnown($recipe);
+        if (self::isAuthored($recipe)) {
+            $constraints = self::validateConstraints($constraints);
+            return array_diff_key($constraints, ['hero_canvas' => true]) === [];
+        }
         return in_array($recipe, self::compatible($constraints), true);
     }
 
@@ -490,6 +565,20 @@ final class HeroComposition
         array $blueprint = [],
     ): array {
         self::assertKnown($recipe);
+        // Authored heroes require imagery, but no fixed topology, image upper
+        // limit, copy count or mandatory helper regions. Missing media cannot
+        // be placed safely without making a new composition decision.
+        if (self::isAuthored($recipe)) {
+            return preg_match('~<img\b~i', $markup) === 1 ? [] : [
+                self::markupWarning(
+                    $part,
+                    'hero image',
+                    ['image_count' => 0],
+                    ['image_count' => 0],
+                    'safe hero retained without its required imagery; add at least one image that serves the composition; no copy or sibling was removed',
+                ),
+            ];
+        }
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();

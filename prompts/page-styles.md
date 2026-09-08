@@ -1,4 +1,4 @@
-You are a senior WordPress block-theme developer. Write a SMALL plain-CSS appendix implementing the layout utility classes that this site's generated sections actually reference. It will be appended to the theme's style.css after validation. This step handles layout utilities, not decorative artwork; image choice, palette and typography carry the site's visual direction elsewhere in the pipeline.
+You are the design lead and a senior WordPress block-theme developer. Complete this site's visual composition with a scoped plain-CSS appendix for the design hooks in its delivered block markup. Implement the committed art direction across EVERY page and the shared header/footer. The requested style must read through structure, typography, image framing and color relationships, not labels or repeated decorative pseudo-element shapes. Use enough CSS to deliver the concept and its responsive states; there is no line-count target.
 
 DESIGN DIRECTION (tune the feel — pull distances, gaps, and structural rhythm — to this mood):
 {{design_direction}}
@@ -6,10 +6,15 @@ DESIGN DIRECTION (tune the feel — pull distances, gaps, and structural rhythm 
 THEME TOKENS (theme.json — its presets are available as CSS custom properties):
 {{theme_json}}
 
-UTILITY CLASSES USED BY THE SECTIONS — write CSS for exactly these, nothing else. Each line is that class's behavior contract; implement it with values suited to the design direction:
+CLASSES PRESENT ACROSS THE DELIVERED SITE — implement these hooks in context. The three named utilities have fixed behaviors; authored design-* hooks express the site's own composition:
 {{used_classes}}
+
+DELIVERED MARKUP (all pages and shared parts; style the actual elements, never imagined markup):
+{{delivered_markup}}
+
+Compose a coherent family of pages, not identical openings. Respect each page's content hierarchy and image role. At narrow widths, preserve reading order, useful gutters, readable text, visible images and functioning navigation. Prefer fluid sizing and explicit responsive grid/stack changes over fixed-height clipping. Do not use generated CSS content as a substitute for real imagery, copy or style-defining artwork. Font sizing uses the supplied theme font-size presets.
 HARD RULES — the output is machine-validated. An unscoped rule or offending declaration is dropped alone; document-level defects or any residual invalid CSS reject the whole appendix:
-- Every rule's selector MUST start with one of the class names listed above (descendant selectors like `.masonry-3 > *` are fine). No element-only, universal, `body`, `:root`, or any other selector not scoped under those classes.
+- Every selector branch MUST start with one of the classes listed above (descendant/child selectors are fine). No element-only, universal, `body`, `:root`, sibling selectors that escape the root, or any other unscoped selector. Write flat rules; @media may contain flat rules, but do not nest style rules with CSS nesting or &.
 - Colors and shadows come from theme presets: `var(--wp--preset--color--<slug>)` (slugs: base, contrast, primary, secondary, accent, band), shadow slugs declared in theme.json, core shadow presets (`var(--wp--preset--shadow--natural)`, `--deep`, `--crisp`, …) only when `settings.shadow.defaultPresets` is not false, or `color-mix()` over those variables. `band` is a large-area surface, never a text color. NEVER write raw hex, rgb()/rgba()/hsl() color literals. The build-owned **Depth** fact owns `box-shadow` on card-style wrappers, contained images, contained covers, and media-text surfaces; do not restate it, override it, or declare `--wp--preset--shadow--depth`.
 - Do not visually hide generated content. NEVER use `opacity: 0`, `visibility: hidden`, or `display: none`; full-page screenshots and non-hover browsing must show all images and text.
 - No `@import`, no `url()`, no `@keyframes`, no `@font-face` — only plain style rules and `@media` blocks. Never write CSS for the motion classes (`reveal`, `reveal-up`, `reveal-fade`, `reveal-scale`, `reveal-blur`, `reveal-wipe`, `reveal-wipe-up`, `reveal-aperture`, `reveal-zoom`, `stagger-children`, `hero-entrance`, `ken-burns`, `gradient-shift`, `ambient-drift`, `hover-lift`, `hover-reveal`) — their CSS plus profile-owned keyframes and timing ship statically with the theme.
@@ -18,6 +23,5 @@ HARD RULES — the output is machine-validated. An unscoped rule or offending de
 - Render-time image treatment is build-owned. Rules targeting `.wp-block-image`, `.wp-block-gallery`, `.wp-block-cover`, `.wp-block-media-text__media`, `.card-media`, `.card-media-tall`, `.card-media-thumb`, or their image/pseudo layers must not declare `filter`, `mix-blend-mode`, `opacity`, or a CSS-wide `all` reset.
 - The **Image crop** fact owns `aspect-ratio` on `.card-media`, `.card-media-tall`, `.card-media-thumb`, and `.feature-media` images. Never restate or animate those ratios, and never use `all` on those targets; the build's one exception is the full-height thumbnail inside `.list-thumb-flush`.
 - The committed CTA style owns button fill/text color, border, padding, width/display construction, text decoration, and arrow content. A utility may position the containing buttons row or animate a button with the documented motion class, but must not declare those construction properties on `.wp-block-button`, `.wp-block-button__link`, `.wp-element-button`, or `button`.
-- Under 80 lines total.
 
 Output ONLY the CSS — no markdown fences, no prose, no HTML.

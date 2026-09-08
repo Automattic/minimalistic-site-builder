@@ -12,6 +12,7 @@ use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PageOpeningFallback;
@@ -1142,6 +1143,8 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
+                    'authored_opening' => $opening && !$frontHero
+                        && HeroComposition::isAuthored((string) ($blueprint['recipe'] ?? '')),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'header_contract' => $opening
                         ? ($frontHero

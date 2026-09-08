@@ -423,10 +423,10 @@ test('validate rejects CSS that hides generated content', function () {
     }
 });
 
-test('validate rejects empty, oversized, and unbalanced CSS', function () {
+test('validate rejects empty and unbalanced CSS without a design line ceiling', function () {
     assert_eq(['empty CSS'], PageStylesStep::validate("  \n "));
     $long = str_repeat(".overlap-up {\n    opacity: 1;\n}\n", 40); // 120 lines
-    assert_true([] !== PageStylesStep::validate($long), 'over the line ceiling');
+    assert_eq([], PageStylesStep::validate($long), 'responsive design is not bounded by a line count');
     assert_true([] !== PageStylesStep::validate(".overlap-up {\n    opacity: 1;\n"), 'unbalanced braces');
     assert_true(
         in_array('unbalanced braces', PageStylesStep::validate("}\n.overlap-up {\n    opacity: 1;\n}\n@media (min-width: 600px) {"), true),
@@ -665,11 +665,9 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(1, $llm->completeCalls, 'legacy path makes one serial text call');
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
-    assert_eq(
-        '405bbf0cd283b1d40eea02389b2504a5bd158b22f9f79d3b670eabf6c961d33d',
-        hash('sha256', $llm->calls[0]['prompt']),
-        'legacy prompt bytes'
-    );
+    assert_contains('DELIVERED MARKUP', $llm->calls[0]['prompt']);
+    assert_contains('class="wp-block-group overlap-up"', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'STALE-HTML-FIRST-CSS'));
     assert_eq(
         [
             'log_label'   => 'page-styles',
@@ -694,7 +692,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-styles declares HTML-first design and delivered markup reads only when enabled', function () {
+test('page-styles declares all delivered markup in both modes and source CSS only in HTML-first', function () {
     $llm = new FakeLlm();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $legacyReads = [
@@ -704,15 +702,16 @@ test('page-styles declares HTML-first design and delivered markup reads only whe
         'designDirection.json',
         'theme/parts/*',
         'theme/templates/*',
+        'plugin/pages/*',
     ];
 
     assert_eq(
         $legacyReads,
         (new PageStylesStep($llm, $renderer))->declaration()->reads,
-        'legacy declaration stays unchanged',
+        'blocks declaration covers every delivered page',
     );
     assert_eq(
-        [...$legacyReads, 'design/page-artifact-map.json', 'design/*', 'plugin/pages/*'],
+        [...$legacyReads, 'design/page-artifact-map.json', 'design/*'],
         (new PageStylesStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
         'HTML-first declaration covers every deterministic CSS and delivered-markup input',
     );

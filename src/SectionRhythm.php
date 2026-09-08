@@ -164,6 +164,12 @@ final class SectionRhythm
         $notes = [];
         $degradations = [];
         foreach ($normalized as $i => $entry) {
+            // Authored heroes own their spacing; siblings still receive the
+            // normal band rhythm rather than inheriting a page-wide bypass.
+            if ($i === 0 && HeroComposition::isAuthoredMarkup($entry['markup'])) {
+                $markups[] = $entry['markup'];
+                continue;
+            }
             $preset = self::DENSITY_PRESETS[$entry['density']];
             $topPreset = $i === 0 ? self::openingTopPreset($entry['markup'], $preset) : $preset;
             $next = $normalized[$i + 1] ?? null;

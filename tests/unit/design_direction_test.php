@@ -129,6 +129,7 @@ test('design-direction retains illustrated art direction without declaring it un
     $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
     $authored['description'] = 'Figurative botanical illustrations include delicate filigree within the generated imagery.';
+    $authored['hero_blueprint'] = HeroBlueprint::defaultFor('authored');
     $authored['device'] = 'none';
     $llm->queueJson(['direction' => $authored]);
 
@@ -176,7 +177,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq(TypeTreatment::DEFAULT, $written['type_treatment']);
     assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
-    assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
+    assert_eq(HeroComposition::AUTHORED, $written['hero_blueprint']['recipe']);
     assert_contains('Seed ', $written['concept_seed']);
     assert_true(!array_key_exists('hero_composition', $written), 'old prose field is gone');
 
@@ -205,7 +206,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $assigned = $written['hero_blueprint']['recipe'];
     assert_contains($assigned, $llm->calls[2]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
-        assert_contains($other, $llm->calls[2]['prompt'], "{$other} is available to the designer");
+        assert_true(!str_contains($llm->calls[2]['prompt'], $other), "{$other} does not anchor the default author");
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -685,7 +686,7 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
 
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'hero_composition' => '', 'hero_blueprint_shape' => '{}', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',
     ]);
@@ -2690,22 +2691,20 @@ test('an absent or empty tension and subject anchor normalize silently to their 
     }
 });
 
-test('commitmentWarnings records a blank tension, a blank anchor, and an anchor bound to no palette role', function () {
+test('commitmentWarnings records omitted guidance but accepts subject connections outside the palette', function () {
     $blank = DesignDirectionStep::commitmentWarnings(['tension' => '', 'subject_anchor' => '']);
     $joined = implode("\n", $blank);
     assert_eq(2, count($blank));
     assert_contains('path="tension"', $joined);
-    assert_contains('category default', $joined);
+    assert_contains('composition relationship omitted', $joined);
     assert_contains('path="subject_anchor"', $joined);
-    assert_contains('swap test is unanswered', $joined);
+    assert_contains('subject connection omitted', $joined);
 
     $unbound = DesignDirectionStep::commitmentWarnings([
         'tension'        => 'A against B.',
         'subject_anchor' => 'the striped rind of a watermelon',
     ]);
-    assert_eq(1, count($unbound), 'the committed tension earns no row');
-    assert_contains('path="subject_anchor"', $unbound[0]);
-    assert_contains('names no palette role', $unbound[0]);
+    assert_eq([], $unbound, 'imagery can connect the subject without dictating its palette');
 
     assert_eq([], DesignDirectionStep::commitmentWarnings([
         'tension'        => 'A against B.',
@@ -2731,9 +2730,8 @@ test('design-direction records blank prose commitments once, in warnings.json, a
         $project->readJson('warnings.json')['design-direction'] ?? [],
         static fn (string $row): bool => str_contains($row, 'path="tension"') || str_contains($row, 'path="subject_anchor"'),
     ));
-    assert_eq(2, count($rows), 'one row per lost commitment, no duplicates');
-    assert_contains('category default', implode("\n", $rows));
-    assert_contains('names no palette role', implode("\n", $rows));
+    assert_eq(1, count($rows), 'only the omitted relationship earns a row');
+    assert_contains('composition relationship omitted', implode("\n", $rows));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -2772,7 +2770,7 @@ test('the expansion prompt asks for a tension and a subject anchor and states th
     $renderer = new PromptRenderer(repo_path('prompts'));
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'hero_composition' => '', 'hero_blueprint_shape' => '{}', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',
     ]);

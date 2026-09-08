@@ -100,7 +100,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     assert_eq(false, $action['anyOf'][1]['additionalProperties']);
     assert_true(!array_key_exists('enum', $item['properties']['type']), 'type remains a free-form semantic label');
     assert_true(!array_key_exists('role', $item['properties']), 'role is derived after generation, not requested from the model');
-    assert_eq(PagePlanStep::ARCHETYPES, $item['properties']['layout_archetype']['enum']);
+    assert_eq([...PagePlanStep::ARCHETYPES, 'authored'], $item['properties']['layout_archetype']['enum']);
     assert_eq(PagePlanStep::BACKGROUNDS, $item['properties']['background']['enum']);
     assert_eq(PagePlanStep::TEXT_PLACEMENTS, $item['properties']['text_placement']['enum']);
 });
