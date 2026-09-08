@@ -23,7 +23,7 @@ HERO SECTION BRIEF:
 NORMALIZED HERO BLUEPRINT (structured creative parameters; execute every compatible value exactly):
 {{hero_blueprint}}
 
-STYLE EXPRESSION: realize the **Style signature**, not merely its style label. When specified, add `design-frame` (wrapper borders) or `design-motif` (empty normal-flow CSS shapes before/after content) to a nested generic `wp:group`, in `className` and its matching HTML class. A later page-styles call supplies the design-specific paint. These hooks are allowed in heroes and are independent of the one-band Device rule. Never attach them to media, buttons, the hero root or a motion-bearing wrapper. Keep the assigned topology, image, readable copy, CTA visibility and first-viewport budget; decoration must fit, not displace essential hero content. Omit ornament when the concept does not need it.
+STYLE EXPRESSION: realize the **Style signature** through image choice, palette, typography and composition. Choose image subjects and viewpoints that belong to this site and carry the requested visual language; generated illustrations and artwork are valid when the concept calls for them. Keep medium and treatment consistent with the shared image grade. Do not add decorative shapes as a shortcut for style. Preserve the assigned topology, at least one image, readable copy, CTA visibility and first-viewport budget.
 
 AUTHORITATIVE ABOVE-FOLD CONTRACT (canonical facts shared byte-for-byte with the independent header author):
 {{above_fold_contract}}

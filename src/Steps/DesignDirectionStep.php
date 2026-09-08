@@ -11,7 +11,6 @@ use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
-use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontShortlist;
@@ -380,17 +379,8 @@ final class DesignDirectionStep implements Step
         // The committed pairing is a creative choice. Font availability and
         // face resolution are checked downstream; familiarity is not a defect.
 
-        // Last, with every field final: does the narrative promise decoration
-        // no step can execute? The prose is handed to every downstream design
-        // and section prompt as the authoritative brief, so a promise outside
-        // the bounded vocabulary is never refused and never delivered — the
-        // page just ships plainer than its own direction (BIGR-884). Nothing
-        // here can be repaired deterministically (rewriting prose needs a
-        // model), so this is rung 4: record it and continue.
-        array_push($warnings, ...DirectionExecutability::problems($direction));
-
-        // Narrate after every source has contributed, including the
-        // executability walk, so its residual problems are counted too.
+        // Artwork vocabulary alone cannot establish whether generated imagery
+        // can deliver a direction. Report actual normalization losses only.
         if ($warnings !== []) {
             Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
                 . " generated-content degradation(s) (recorded in warnings.json)\n");
@@ -1166,7 +1156,6 @@ final class DesignDirectionStep implements Step
             'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
             'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
             'style_signature'  => self::normalizeProseCommitment($raw, 'style_signature', $warnings),
-            'style_hooks'      => \Automattic\SiteBuild\DesignExpression::normalizeHooks($raw['style_hooks'] ?? [], $warnings),
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
             'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
@@ -1671,13 +1660,8 @@ final class DesignDirectionStep implements Step
         $signature = trim((string) ($direction['style_signature'] ?? ''));
         if ($signature !== '') {
             $facts[] = '- **Style signature**: ' . $signature
-                . ' — observable features to deliver, not just a style label. Place named design-frame/design-motif'
-                . ' hooks on generic group wrappers where specified; page-styles supplies their paint.';
-        }
-        $styleHooks = \Automattic\SiteBuild\DesignExpression::normalizeHooks($direction['style_hooks'] ?? []);
-        if ($styleHooks !== []) {
-            $facts[] = '- **Style hooks**: ' . implode(', ', $styleHooks)
-                . ' — deliver these group hooks at the locations in the style signature; they are checked against delivered HTML and CSS.';
+                . ' — express this through image choice and composition, palette, typography and spacing;'
+                . ' use the shared image grade for medium, light and color treatment. This is not a request for added ornaments.';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];

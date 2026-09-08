@@ -123,12 +123,12 @@ function designdir_card_rows(array $rows): array
     ));
 }
 
-test('design-direction persists and narrates an unexecutable ornament promise', function () {
+test('design-direction retains illustrated art direction without declaring it unbuildable', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
-    $authored['description'] = 'Delicate filigree runs along every band edge.';
+    $authored['description'] = 'Figurative botanical illustrations include delicate filigree within the generated imagery.';
     $authored['device'] = 'none';
     $llm->queueJson(['direction' => $authored]);
 
@@ -140,24 +140,12 @@ test('design-direction persists and narrates an unexecutable ornament promise', 
         Narrator::setStream(null);
     }
 
-    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
-    assert_eq(1, count($warnings), 'one defective sentence writes one durable row');
-    foreach ([
-        "file='designDirection.json'",
-        'path="description"',
-        'filigree',
-        'delivered=not executed',
-        'committed no device',
-    ] as $context) {
-        assert_contains($context, $warnings[0]);
-    }
+    $warnings = $project->exists('warnings.json') ? ($project->readJson('warnings.json')['design-direction'] ?? []) : [];
+    assert_eq([], $warnings, 'artwork nouns do not prove a defect in generated images');
+    assert_eq($authored['description'], $project->readJson('designDirection.json')['description']);
 
     rewind($sink);
-    assert_contains(
-        '[design-direction] warning: delivered through 1 generated-content degradation(s)',
-        (string) stream_get_contents($sink),
-        'the durable warning is also narrated live',
-    );
+    assert_true(!str_contains((string) stream_get_contents($sink), '[design-direction] warning:'));
     fclose($sink);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
