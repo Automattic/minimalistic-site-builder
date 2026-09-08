@@ -666,7 +666,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        '64bdbe7496162067c56b333be697e37c057ebd3bd79ae869300f56fdff1d21de',
+        'c52776cee07c9cd9bcf668975e34bdea7672888e75b0ae03936a54edf574190e',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );
@@ -686,7 +686,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
         . "    margin-top: -4rem;\n"
         . "    position: relative;\n"
         . "    z-index: 2;\n"
-        . "}\n\n"
+        . "}\n/* End generated page-styles appendix. */\n\n"
         . ps_wrap(),
         $project->readText('theme/style.css'),
         'legacy style.css bytes'

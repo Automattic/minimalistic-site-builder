@@ -19,13 +19,14 @@ namespace Automattic\SiteBuild;
  * hand-drawn ornament borrowed from Kakhetian textile borders … thin zigzag
  * chains, grape-leaf tendrils, and small eight-point rosettes … used sparingly
  * as band separators, list bullets, and a repeating border strip". The build
- * ships exactly two marks (`Device::ALL` minus `none`), placed on at most one
+ * then shipped exactly two marks (`Device::ALL` minus `none`), placed on at most one
  * non-hero band. What arrived was a single 1px rule, and a page for a
  * traditional Georgian tavern that reads as generic (BIGR-884).
  *
- * `prompts/design-direction.md` already states the rule — "Twine, tape, and
- * illustrated motifs are not devices" — and nothing enforced it. This is the
- * enforcement, at rung 4 of the escalation ladder: the narrative cannot be
+ * The build now also supports explicitly hooked CSS borders and gradient
+ * geometry through DesignExpression. problems() exempts those executable
+ * promises, but not hand-drawn assets merely accompanied by a hook name.
+ * Unsupported artwork remains rung 4 of the escalation ladder: the narrative cannot be
  * deterministically rewritten (that needs a model), so the gap is recorded in
  * `warnings.json` and the build continues. A warning here means the delivered
  * site was always going to be plainer than its own brief.
@@ -167,22 +168,36 @@ final class DirectionExecutability
             return [];
         }
 
-        $found = self::findings($description);
+        $found = array_values(array_filter(self::findings($description), static function (string $sentence): bool {
+            // Only the simple CSS channel is newly executable. Naming a hook
+            // must not excuse an unsupported hand-drawn/illustrated promise.
+            $lower = strtolower($sentence);
+            if (!str_contains($lower, 'design-motif') && !str_contains($lower, 'design-frame')) {
+                return true;
+            }
+            foreach ([...self::ORNAMENT_NOUNS, ...self::DRAWN_QUALIFIERS] as $word) {
+                if (preg_match('/\b' . preg_quote($word, '/') . '\b/u', $lower)) {
+                    return true;
+                }
+            }
+            return !preg_match('/\b(?:gradient|gradients|border|borders|geometry|geometric|css)\b/', $lower);
+        }));
         if ($found === []) {
             return [];
         }
 
         $device = trim((string) ($direction['device'] ?? Device::DEFAULT));
         $shipped = $device === '' || $device === 'none'
-            ? 'the direction committed no device, so the build ships no mark at all'
+            ? 'the direction committed no device; only explicitly authored design-frame/design-motif CSS can add marks'
             : "the build ships one '{$device}' on at most one non-hero band";
 
         return array_map(
             static fn (string $finding): string =>
                 "file='designDirection.json'; path=\"description\"; authored="
                 . Warnings::value($finding)
-                . '; delivered=not executed; disposition=the narrative promises drawn ornament that no'
-                . ' step can produce — the ornament vocabulary is ' . self::vocabulary() . ', and '
+                . '; delivered=not executed; disposition=the narrative promises drawn ornament without'
+                . ' an executable delivery path — built-in devices are ' . self::vocabulary()
+                . '; simple CSS borders/gradient geometry need an explicit design-frame/design-motif hook, and '
                 . $shipped . '. Every downstream design and section prompt receives this narrative as'
                 . ' the authoritative brief, so the delivered page is plainer than its own direction.',
             $found,

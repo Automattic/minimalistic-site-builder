@@ -1165,6 +1165,8 @@ final class DesignDirectionStep implements Step
             'motion_note'      => $motionNote,
             'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
             'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
+            'style_signature'  => self::normalizeProseCommitment($raw, 'style_signature', $warnings),
+            'style_hooks'      => \Automattic\SiteBuild\DesignExpression::normalizeHooks($raw['style_hooks'] ?? [], $warnings),
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
             'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
@@ -1665,6 +1667,17 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Tension**: ' . $tension
                 . ' — the one deliberate contrast the site is built on; a band holds both halves'
                 . ' rather than resolving into one of them.';
+        }
+        $signature = trim((string) ($direction['style_signature'] ?? ''));
+        if ($signature !== '') {
+            $facts[] = '- **Style signature**: ' . $signature
+                . ' — observable features to deliver, not just a style label. Place named design-frame/design-motif'
+                . ' hooks on generic group wrappers where specified; page-styles supplies their paint.';
+        }
+        $styleHooks = \Automattic\SiteBuild\DesignExpression::normalizeHooks($direction['style_hooks'] ?? []);
+        if ($styleHooks !== []) {
+            $facts[] = '- **Style hooks**: ' . implode(', ', $styleHooks)
+                . ' — deliver these group hooks at the locations in the style signature; they are checked against delivered HTML and CSS.';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];

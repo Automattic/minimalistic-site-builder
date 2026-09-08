@@ -10,6 +10,7 @@ use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CssContrastAdjuster;
 use Automattic\SiteBuild\CssContrastCheck;
 use Automattic\SiteBuild\CssScrub;
+use Automattic\SiteBuild\DesignExpression;
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -22,6 +23,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TransformArtifacts;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step: merge HTML-first design CSS, with the LLM utility generator as the
@@ -43,7 +45,9 @@ use Automattic\SiteBuild\TransformArtifacts;
  * In legacy composition mode, the step reads designDirection.json +
  * theme/theme.json + the final section markup (theme/parts/*.html and
  * theme/templates/*.html, after fix-blocks), then appends a small plain-CSS
- * utility appendix to theme/style.css.
+ * utility/decorative-paint appendix to theme/style.css. DesignExpression
+ * supplies optional style-neutral borders and gradient geometry; those hooks
+ * are scoped to actual group wrappers and cannot style descendant content.
  *
  * prompts/section.md documents a fixed vocabulary of utility classes (CLASSES
  * below) that sections MAY reference via "className" — structural devices
@@ -195,6 +199,7 @@ CSS;
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
     private const MARKER = '/* Layout utilities — generated per-design by the page-styles step. */';
+    private const END_MARKER = '/* End generated page-styles appendix. */';
     private const DETERMINISTIC_STYLE_MARKER =
         '/* Wrap at spaces only — never split a word mid-token. */';
     private const VERTICAL_RHYTHM_MARKER =
@@ -339,7 +344,9 @@ CSS;
         }
 
         $used = self::usedClasses($project);
+        $direction = $project->exists('designDirection.json') ? $project->readJson('designDirection.json') : [];
         if ($used === []) {
+            $project->addWarnings($this->id(), DesignExpression::deliveryWarnings($direction, $used, ''));
             echo "  no layout utility classes referenced; nothing to style\n";
             self::writeWordWrapPolicy($project);
             return;
@@ -387,6 +394,7 @@ CSS;
                     self::LOG_FILE,
                 )]);
                 self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
+                $project->addWarnings($this->id(), DesignExpression::deliveryWarnings($direction, $used, ''));
                 self::writeWordWrapPolicy($project);
                 return;
             }
@@ -409,8 +417,29 @@ CSS;
             self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
             $css = $salvaged;
         }
-        $style = rtrim(self::withoutDeterministicStyles($project->readText('theme/style.css')))
-            . "\n\n" . self::MARKER . "\n" . rtrim($css);
+        $project->addWarnings($this->id(), DesignExpression::deliveryWarnings($direction, $used, $css));
+        $ignored = [];
+        $scopeError = null;
+        $scopedCss = self::filterScopedRuleList($css, $ignored, $scopeError, true);
+        if ($scopedCss === null && array_intersect($used, array_keys(DesignExpression::CLASSES)) !== []) {
+            $project->addWarnings($this->id(), [
+                "file='theme/style.css'; path='page-styles appendix'; authored=" . Warnings::value($css)
+                . '; delivered=removed; disposition=unable to isolate decorative selectors: ' . $scopeError,
+                ...DesignExpression::deliveryWarnings($direction, $used, ''),
+            ]);
+            self::writeWordWrapPolicy($project);
+            return;
+        }
+        // Replace only our delimited appendix on resume; preserve later static
+        // or motion CSS rather than truncating everything after the marker.
+        $base = (string) preg_replace('~' . preg_quote(self::MARKER, '~') . '.*?'
+            . preg_quote(self::END_MARKER, '~') . '\s*~s', '', $project->readText('theme/style.css'));
+        // Blocks mode owns only this exact wrap rule, not an HTML-first tail
+        // or later appendices. Removing the marker-to-EOF would lose siblings.
+        $base = str_replace(self::WORD_WRAP_CSS, '', $base);
+        $style = rtrim($base)
+            . "\n\n" . self::MARKER . "\n" . DesignExpression::foundation($css) . rtrim($scopedCss ?? $css)
+            . "\n" . self::END_MARKER;
         $project->writeText('theme/style.css', self::withWordWrapPolicy($style));
         echo '  styled: ' . implode(', ', $used) . "\n";
     }
@@ -4039,7 +4068,7 @@ CSS;
                 $used[] = $class;
             }
         }
-        return $used;
+        return array_merge($used, DesignExpression::classesIn($markup));
     }
 
     /**
@@ -4095,6 +4124,10 @@ CSS;
             $problems[] = 'the depth shadow preset variable is build-owned and cannot be redeclared';
         }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            $expressionProblem = DesignExpression::declarationProblem($declaration);
+            if ($expressionProblem !== null) {
+                $problems[] = $expressionProblem;
+            }
             if (self::declarationTargetsShape($declaration)
                 && CssChecks::isShapeAffectingDeclaration(
                     $declaration['property'],
@@ -4194,6 +4227,7 @@ CSS;
         string $css,
         array &$dropped,
         ?string &$error,
+        bool $scopeExpression = false,
     ): ?string {
         $length = strlen($css);
         $offset = 0;
@@ -4228,7 +4262,7 @@ CSS;
                 $body = substr($css, $offset + 1, $close - $offset - 1);
                 $atRule = self::atRuleName($prelude);
                 if ($atRule === 'media') {
-                    $body = self::filterScopedRuleList($body, $dropped, $error);
+                    $body = self::filterScopedRuleList($body, $dropped, $error, $scopeExpression);
                     if ($body === null) {
                         return null;
                     }
@@ -4243,13 +4277,24 @@ CSS;
                         return null;
                     }
                     $unscoped = [];
+                    $scopedBranches = [];
+                    $hasExpression = false;
                     foreach ($branches as $branch) {
                         $selector = trim((string) preg_replace('/\/\*.*?\*\//s', '', $branch));
                         if (!self::selectorIsScoped($selector)) {
                             $unscoped[] = $selector;
                         }
+                        if ($scopeExpression && DesignExpression::selectorAllowed($selector)) {
+                            $hasExpression = true;
+                            $scopedBranches[] = 'div.wp-block-group' . $selector;
+                        } else {
+                            $scopedBranches[] = $branch;
+                        }
                     }
                     if ($unscoped === []) {
+                        if ($hasExpression) {
+                            $prelude = implode(', ', $scopedBranches);
+                        }
                         $out .= $prelude . '{' . $body . '}';
                     } else {
                         array_push($dropped, ...$unscoped);
@@ -4283,6 +4328,9 @@ CSS;
 
     private static function selectorIsScoped(string $selector): bool
     {
+        if (str_contains($selector, 'design-')) {
+            return DesignExpression::selectorAllowed($selector);
+        }
         $allowed = implode('|', array_map(
             static fn (string $class): string => preg_quote($class, '/'),
             array_keys(self::CLASSES),
@@ -4334,7 +4382,7 @@ CSS;
     {
         $problems = [];
         foreach (CssChecks::scanDeclarations($css) as $declaration) {
-            $problem = self::declarationProblem(
+            $problem = DesignExpression::declarationProblem($declaration) ?? self::declarationProblem(
                 $declaration['raw'],
                 self::declarationTargetsShape($declaration),
                 self::declarationTargetsCta($declaration),
@@ -4515,7 +4563,7 @@ CSS;
     private static function classList(array $used): string
     {
         return implode("\n", array_map(
-            static fn (string $c): string => "- .{$c} — " . self::CLASSES[$c],
+            static fn (string $c): string => "- .{$c} — " . (self::CLASSES + DesignExpression::CLASSES)[$c],
             $used
         ));
     }

@@ -27,7 +27,7 @@ Rules:
     `lead` = the ONE standout line a section gets (if it has one): a single-sentence intro under the section title. One per section, kept short.
   The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
     Unbreakable contact tokens — email addresses, long URLs, and phone numbers that should remain intact — never take a display or heading scale, in a paragraph OR a heading: a long token either overflows its column or breaks inside the address, domain, or path, and both read as broken. A contact email is a `lead`-at-most mailto link or a button labeled with words, never the address as display type.
-- Keep the accent color RARE: buttons/CTAs only. Never use accent for body text, large-area backgrounds, or decorative motifs.
+- Keep accent focused on buttons/CTAs and small decorative details explicitly committed in the style signature. Never use accent for body text or large-area backgrounds; preserve the primary action's hierarchy.
 - **Buttons are budgeted.** A `wp:button` belongs only to the action the page plan assigned this section (its `primary_action`) and to the page's closing next step. Every other action — a card's "see details", a mid-page "full specifications", a link to another page — is a text link: one `wp:paragraph` with `"className":"text-action"` holding a single `<a>`. A page that turns every link into an accent button has no accent left for the one place the visitor must act; a deterministic pass demotes any button outside this budget to exactly that paragraph, so writing one elsewhere only costs its construction.
 - The **Image treatment** fact is executed after generation. Never author `style.color.duotone`, CSS `filter`, `mix-blend-mode`, image opacity, or a tint pseudo-layer in block attributes/HTML. Keep using the documented `card-media*` hooks on card images so `tinted-overlay` has a deterministic target; Cover imagery is targeted automatically.
 - Device: if the DESIGN DIRECTION **Device** fact names a class (`device--hairline-rule`, `device--stamp`) AND the section notes assign this band as the one carrier, put that class on the section root. Never on the hero. Never on more than this one band. If the notes do not assign the device here, do not use the class.
@@ -71,6 +71,8 @@ Layout utility classes (optional, powerful) — a later build step generates the
 - `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
 - `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.
 Combine them with the recipes when the direction calls for that structure.
+
+Style-expression hooks are also supported: `design-frame` paints borders on a generic inner `wp:group`; `design-motif` paints empty normal-flow pseudo-elements before/after that group's content. Follow the **Style signature** for geometry, palette role and placement; a later page-styles call writes the CSS. Put the hook in `className` and the matching HTML class attribute. Do not put these hooks on buttons, media, cards with build-owned depth, or section roots; use a nested generic group. No new artwork, copy, CSS tags or inline CSS is needed. They may repeat when the concept calls for it and are independent of the one-band Device rule. Omit them when the signature calls for no decoration.
 
 {{motion_instructions}}
 
