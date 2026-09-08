@@ -384,6 +384,21 @@ test('CTA warnings verify theme binding and local override inheritance', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('CTA warnings stay silent for a delivered solid construction whose label ink contrast-fix wrote', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['cta_style' => 'solid']);
+    [$theme] = ThemeJsonStep::repairCtaStyle([
+        'version' => 3,
+        'styles' => ['elements' => ['button' => ['typography' => ['fontWeight' => '700']]]],
+    ], 'solid');
+    // contrast-fix's readable label on the accent, in the spelling it writes.
+    $theme['styles']['elements']['button']['color']['text'] = 'var(--wp--preset--color--contrast)';
+    $project->writeJson('theme/theme.json', $theme);
+
+    assert_eq([], ThemeValidator::ctaWarnings($project), 'the delivered construction is the committed one');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings flag long paragraphs at heading-scale presets', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
@@ -506,6 +521,9 @@ test('image source validator judges only unresolvable image references', functio
     $project->writeJson('images.json', [
         ['filename' => 'known.jpg', 'src' => 'theme:./assets/known.jpg', 'status' => 'failed'],
     ]);
+    // "Generated" means the file is really there under this theme's slug —
+    // the path shape alone proves nothing (see the test below).
+    $project->writeText('theme/assets/done.jpg', 'jpeg-bytes');
     $project->writeText('plugin/pages/home.html',
         '<img src="theme:./assets/known.jpg" alt="Collected but not generated"/>'
         . '<img src="/wp-content/themes/demo/assets/done.jpg" alt="Generated"/>'
@@ -515,6 +533,37 @@ test('image source validator judges only unresolvable image references', functio
     );
 
     assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator flags an absolute theme asset path that names no file of this theme', function () {
+    // The PepeneBun build (2026-09-04) shipped a hero cover whose url named an
+    // invented theme slug and a filename nothing generated; the browser showed
+    // a broken image and this validator, trusting the path shape, said
+    // nothing. A root-relative theme asset is resolved only when it names
+    // THIS theme and a file that exists (or a collected placeholder).
+    [$project, $tmp] = validator_project();
+    $project->writeJson('images.json', [
+        ['filename' => 'recorded.jpg', 'src' => 'theme:./assets/recorded.jpg', 'status' => 'completed'],
+    ]);
+    $project->writeText('theme/assets/on-disk.jpg', 'jpeg-bytes');
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:cover {"url":"/wp-content/themes/pepenobun/assets/on-disk.jpg"} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="/wp-content/themes/pepenobun/assets/on-disk.jpg" alt=""/>'
+        . '</div><!-- /wp:cover -->'
+        . '<img src="/wp-content/themes/demo/assets/never-made.jpg" alt="Right slug, no file"/>'
+        . '<img src="/wp-content/themes/demo/assets/recorded.jpg" alt="Right slug, collected"/>'
+        . '<img src="/wp-content/themes/demo/assets/on-disk.jpg" alt="Right slug, on disk"/>'
+    );
+
+    $problems = ThemeValidator::unresolvedImageSourceProblems($project);
+    $joined = implode("\n", $problems);
+    assert_contains('/wp-content/themes/pepenobun/assets/on-disk.jpg', $joined, 'the wrong slug is a 404 even when the file exists');
+    assert_contains('/wp-content/themes/demo/assets/never-made.jpg', $joined, 'the right slug with no file is a 404');
+    assert_true(!str_contains($joined, 'recorded.jpg'), 'a collected placeholder resolves whatever its status');
+    assert_true(!str_contains($joined, '/wp-content/themes/demo/assets/on-disk.jpg'), 'a real file under the right slug resolves');
+    assert_eq(2, count($problems), 'one row per unresolvable source, the cover counted once across url and src');
+    assert_contains('names no file of this theme', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

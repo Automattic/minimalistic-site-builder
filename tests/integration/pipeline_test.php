@@ -72,6 +72,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // random and expanded by the design-direction call below. Runs after
     // site-spec, before the concurrent group.
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
+    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     // design-direction (json) — the expanded direction, read by
     // theme-json/page-plan/sections.
     $llm->queueJson(['direction' => [
@@ -495,7 +496,7 @@ test('pipeline step order is correct', function () {
     $ids = blocks_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
+        'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
         'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], $ids);

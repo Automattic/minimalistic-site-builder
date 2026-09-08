@@ -214,24 +214,27 @@ final class StepDefaults
     public static function temperatures(): array
     {
         return [
-            'refine-prompt'    => self::temperature('REFINE_PROMPT', null),
-            'site-spec'        => self::temperature('SITE_SPEC', null),
-            'design-direction' => self::temperature('DESIGN_DIRECTION', 1.0),
-            'theme-json'       => self::temperature('THEME_JSON', null),
-            'page-plan'        => self::temperature('PAGE_PLAN', null),
-            'sections'         => self::temperature('SECTIONS', 0.9),
-            'page-styles'      => self::temperature('PAGE_STYLES', null),
-            'custom-motion'    => self::temperature('CUSTOM_MOTION', null),
+            'refine-prompt'            => self::temperature('REFINE_PROMPT', null),
+            'site-spec'                => self::temperature('SITE_SPEC', null),
+            'design-direction'         => self::temperature('DESIGN_DIRECTION', 1.0),
+            // Cold on purpose: a global LLM_TEMPERATURE must not heat the
+            // judge. Only LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE overrides.
+            'design-direction-judge'   => self::temperature('DESIGN_DIRECTION_JUDGE', 0.0, inheritGlobal: false),
+            'theme-json'               => self::temperature('THEME_JSON', null),
+            'page-plan'                => self::temperature('PAGE_PLAN', null),
+            'sections'                 => self::temperature('SECTIONS', 0.9),
+            'page-styles'              => self::temperature('PAGE_STYLES', null),
+            'custom-motion'            => self::temperature('CUSTOM_MOTION', null),
         ];
     }
 
     /**
-     * LLM_TEMPERATURE_<STEP> wins, then LLM_TEMPERATURE, then $default.
-     * Non-numeric env values are ignored.
+     * LLM_TEMPERATURE_<STEP> wins, then LLM_TEMPERATURE (unless the step opts
+     * out of the global), then $default. Non-numeric env values are ignored.
      */
-    public static function temperature(string $envSuffix, ?float $default): ?float
+    public static function temperature(string $envSuffix, ?float $default, bool $inheritGlobal = true): ?float
     {
-        $raw = Env::get('LLM_TEMPERATURE_' . $envSuffix) ?? Env::get('LLM_TEMPERATURE');
+        $raw = Env::get('LLM_TEMPERATURE_' . $envSuffix) ?? ($inheritGlobal ? Env::get('LLM_TEMPERATURE') : null);
         return is_numeric($raw) ? (float) $raw : $default;
     }
 }

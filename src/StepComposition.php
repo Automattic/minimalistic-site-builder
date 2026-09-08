@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\CtaBudgetStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
@@ -182,6 +183,8 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
+                $models['design-direction-judge'],
+                $temps['design-direction-judge'] ?? 0.0,
             ),
             new DesignPreviewStep(
                 $llm,
@@ -238,6 +241,7 @@ final class StepComposition
             new ResolveNavLinksStep(),
             new SectionRhythmStep(),
             new SectionLayoutStep(),
+            new CtaBudgetStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
             new HeaderHeroStep(htmlFirst: true),
@@ -309,7 +313,15 @@ final class StepComposition
             // Tradeoff: this is an extra serial LLM round-trip on the critical path
             // (the concurrent group now depends on its output) — a deliberate cost
             // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-            new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+                $models['design-direction-judge'],
+                $temps['design-direction-judge'] ?? 0.0,
+            ),
             // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
             // made inline, steered by designDirection.json.
@@ -336,6 +348,11 @@ final class StepComposition
             // closing-section/footer seam, while the parts are still separate
             // ordered files (BIGR-783). Hero copy stays with HeaderHeroStep.
             new SectionCopyDedupeStep(),
+            // Buttons stay only where the plan placed an action and once in the
+            // closing section; every other authored button becomes a text link,
+            // so the accent keeps meaning "act here". Same window as copy-dedupe:
+            // separate ordered parts, before fix-blocks re-serializes them.
+            new CtaBudgetStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.

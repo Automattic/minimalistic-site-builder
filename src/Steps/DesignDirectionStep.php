@@ -50,19 +50,31 @@ use Automattic\SiteBuild\Warnings;
  *         repeated-item idiom, and a separately consumed structured front-page
  *         hero blueprint).
  *
- * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
+ * Three calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
  * sentence committing the seed's visual world (palette family, typography
  * character, imagery treatment, mood), plus ground/register/accent
  * coordinates — with divergence across the set enforced in the prompt and
- * checked after. One seed is picked uniformly at random, then the
- * main call expands ONLY that seed into the full direction. The random pick
- * over a divergent seed spread is the pipeline's variety injection — repeated
- * builds of one brief land on different concepts — while the expensive
- * model's tokens are spent on a single direction. The DESIGN_DIRECTION_CHOICE
- * env var forces seed N (1-based) for reproducible evals, and a failed seed
+ * checked after. Second, a judge call (large model, cold) reads the brief,
+ * the spec, and the distinct round, and picks the seed that honors what the
+ * brief fixed, belongs to this subject, and is not the category's reflex
+ * (prompts/design-seed-judge.md). Then the main call expands ONLY that seed
+ * into the full direction. The divergent seed spread is still the pipeline's
+ * variety injection; the judge is the taste that used to be a uniform random
+ * pick — the audited failure was a brief asking for "not boring" and the coin
+ * landing on the cool-grey corporate report. A judge that fails or answers
+ * off the ballot degrades to that random pick with a durable warning, so
+ * taste never costs a build. The DESIGN_DIRECTION_CHOICE env var forces seed
+ * N (1-based) for reproducible evals and bypasses the judge, and a failed seed
  * call degrades to a built-in "invent one bold concept" seed instead of
  * aborting the build.
+ *
+ * The expansion also commits two prose facts the bounded fields cannot carry:
+ * `subject_anchor`, which palette roles are taken literally from the subject's
+ * own physical world (the swap test made explicit), and `tension`, the one
+ * deliberate contrast the direction is built on. Both are rendered into every
+ * downstream brief by format(); a direction that commits neither is recorded
+ * as delivered plainer than its own concept.
  *
  * This is the single source of design intent. The theme-json, page-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
@@ -163,6 +175,8 @@ final class DesignDirectionStep implements Step
         private ?string $model = null,
         private ?float $temperature = null,
         private ?string $seedModel = null,
+        private ?string $judgeModel = null,
+        private float $judgeTemperature = 0.0,
     ) {}
 
     public function id(): string
@@ -220,6 +234,7 @@ final class DesignDirectionStep implements Step
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
             'color_economy' => $seedColorEconomy,
+            'choice'        => $seedChoice,
         ] = $this->chooseSeed($prompt, $spec, $warnings, $project);
         $recipe = self::selectHeroRecipe(
             $meta,
@@ -338,6 +353,11 @@ final class DesignDirectionStep implements Step
             $warnings[] = 'designDirection.json: model returned no usable design direction; field direction '
                 . 'authored unusable generated value delivered deterministic assigned-recipe direction; '
                 . 'disposition fallback';
+        } else {
+            // Judged on the model's own direction only: the deterministic
+            // fallback above commits neither prose field by construction, and
+            // its one row already says the concept was lost.
+            array_push($warnings, ...self::commitmentWarnings($direction));
         }
 
         // Carry the user's intent independently of the generated narrative so
@@ -378,6 +398,7 @@ final class DesignDirectionStep implements Step
 
         $report = [
             "Assigned hero recipe: {$recipe}",
+            ...$seedChoice,
             'Successful deterministic repairs: ' . count($repairs),
         ];
         foreach ($repairs as $repair) {
@@ -432,6 +453,8 @@ final class DesignDirectionStep implements Step
                 'accent'  => self::emptyTypeSlot(),
             ],
             'type_scale'       => TypeScale::DEFAULT,
+            'subject_anchor'   => '',
+            'tension'          => '',
             'image_grade'      => '',
             'image_treatment'  => ImageTreatment::DEFAULT,
             'image_crop'       => ImageCrop::DEFAULT,
@@ -462,17 +485,26 @@ final class DesignDirectionStep implements Step
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
      * out of range — including a failed seed call — fails loud, because a
      * forced eval must not silently drift, so it indexes the round as the
-     * model wrote it); otherwise a uniform random pick over the DISTINCT
-     * seeds, since a world the model described twice would otherwise be twice
-     * as likely to win (see ConceptSeeds).
+     * model wrote it, and a style-compatible override bypasses the judge).
+     * The user's requested style wins over an incompatible forced candidate.
+     * Otherwise the judge picks over style-compatible seeds (see judgeSeed),
+     * deduplicated by axes only for open-style briefs, and only when the judge fails
+     * or answers off the ballot does the pick fall to uniform random — over
+     * the distinct seeds, since a world the model described twice would
+     * otherwise be twice as likely to win (see ConceptSeeds). A round with one
+     * distinct seed has nothing to judge and spends no call on it.
      * Without a forced choice, any seed failure (transport error, no usable
      * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
-     * The step's hot temperature is applied here too: the seed spread is now
-     * the pipeline's variety source, and the small models still support
-     * sampling.
+     * The step's hot temperature is applied to the seed call: the seed spread
+     * is the pipeline's variety source, and the small models still support
+     * sampling. The judge runs cold.
+     *
+     * The returned `choice` is the report's account of the pick: how it was
+     * made and, for a judged pick, the judge's one-line reason, so a cohort
+     * audit can read which worlds lost and why without replaying the build.
      *
      * @param list<string> $warnings
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings, Project $project): array
     {
@@ -529,7 +561,10 @@ final class DesignDirectionStep implements Step
             $candidate = $seeds[$n - 1];
             if ($requestedStyle === '' || (is_string($candidate['register'])
                 && ConceptSeeds::styleKey($candidate['register']) === $requestedStyle)) {
-                return self::chosen($candidate);
+                return self::chosen($candidate, [
+                    ...self::seedRoundReport($seeds),
+                    'Seed choice: forced ' . self::CHOICE_ENV . '=' . $n . ' [' . ($n - 1) . '] ' . $candidate['text'],
+                ]);
             }
             $warnings[] = 'file=designDirection.json; path=concept_seed; authored=forced candidate '
                 . $n . '; delivered=style-compatible selection; disposition=forced candidate bypassed because '
@@ -543,7 +578,7 @@ final class DesignDirectionStep implements Step
                     . 'delivered=' . self::describe($requestedStyle)
                     . '; disposition=expand the requested style directly instead of an unrelated seed';
             }
-            return [
+            return self::chosen([
                 'text' => $requestedStyle === '' ? self::SEED_FALLBACK
                     : 'Develop one distinctive interpretation of the user-requested style: ' . $requestedStyle
                         . '. The brief owns the aesthetic; choose all unspecified details to serve it.',
@@ -552,10 +587,19 @@ final class DesignDirectionStep implements Step
                 'register' => $requestedStyle,
                 'type_register' => '',
                 'color_economy' => '',
-            ];
+            ], [
+                'Seed round: no usable style-compatible seeds',
+                $requestedStyle === '' ? 'Seed choice: fallback (built-in "invent one concept" seed)'
+                    : 'Seed choice: fallback (expand user-requested style: ' . $requestedStyle . ')',
+            ]);
         }
         // Coarse labels must not erase different interpretations of one style.
         $pool = $requestedStyle === '' ? ConceptSeeds::distinct($seeds, $warnings) : $seeds;
+        $choice = self::seedRoundReport($pool);
+        if (count($pool) < 2) {
+            $choice[] = 'Seed choice: single seed [0] ' . $pool[0]['text'];
+            return self::chosen($pool[0], $choice);
+        }
         $triples = [];
         foreach ($pool as $seed) {
             $key = ConceptSeeds::axisKey($seed);
@@ -581,7 +625,84 @@ final class DesignDirectionStep implements Step
                     . '-tinted; picked from the one-family round anyway; disposition tolerated';
             }
         }
-        return self::chosen($pool[random_int(0, count($pool) - 1)]);
+
+        $verdict = $this->judgeSeed($brief, $spec, $pool, $warnings);
+        if ($verdict['index'] !== null) {
+            $index = $verdict['index'];
+            $choice[] = 'Seed choice: judge picked [' . $index . '] ' . $pool[$index]['text']
+                . ($verdict['why'] === '' ? '' : ' — ' . $verdict['why']);
+            return self::chosen($pool[$index], $choice);
+        }
+        $index = random_int(0, count($pool) - 1);
+        $choice[] = 'Seed choice: random pick [' . $index . '] ' . $pool[$index]['text']
+            . ' (the judge gave no usable verdict; see warnings)';
+        return self::chosen($pool[$index], $choice);
+    }
+
+    /**
+     * The report's account of one seed round: how many seeds the model wrote,
+     * how many distinct worlds survived, and each candidate on its ballot
+     * index, so the losers are readable next to the winner.
+     *
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
+     * @return list<string>
+     */
+    private static function seedRoundReport(array $pool): array
+    {
+        $lines = ['Seed round: ' . count($pool) . ' candidate(s)'];
+        foreach (array_values($pool) as $index => $seed) {
+            $key = ConceptSeeds::axisKey($seed);
+            $lines[] = '- [' . $index . '] ' . $seed['text'] . ($key === null ? '' : ' (' . $key . ')');
+        }
+        return $lines;
+    }
+
+    /**
+     * Ask the judge which distinct seed becomes the site. Returns the ballot
+     * index and the judge's one-line reason, or a null index when no usable
+     * verdict came back — a transport failure, unusable JSON, or an answer
+     * naming no printed candidate. Each of those is recorded as a durable
+     * warning (rung 4: the pick then falls to uniform random, so the build
+     * loses taste, not the site) and never aborts the build.
+     *
+     * The judge runs cold: it sends temperature 0 (overridable only via
+     * LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE) and never inherits the step's
+     * hot sampling temperature or the seed model. Its own model comes from
+     * the design-direction-judge tier.
+     *
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
+     * @param list<string> $warnings
+     * @return array{index:?int,why:string}
+     */
+    private function judgeSeed(string $brief, string $spec, array $pool, array &$warnings): array
+    {
+        try {
+            $rendered = $this->renderer->render(
+                'design-seed-judge.md',
+                ConceptSeeds::judgePromptVars($brief, $spec, $pool),
+            );
+            $opts = [
+                'log_label'   => 'design-direction-judge',
+                'temperature' => $this->judgeTemperature,
+            ];
+            if ($this->judgeModel !== null) {
+                $opts['model'] = $this->judgeModel;
+            }
+            $payload = $this->llm->completeJson($rendered, $opts);
+        } catch (\Throwable $e) {
+            $warnings[] = 'design-direction: seed judge failed (' . $e->getMessage() . '); picked uniformly at random from the '
+                . count($pool) . ' distinct seeds; disposition fallback';
+            return ['index' => null, 'why' => ''];
+        }
+
+        $index = ConceptSeeds::judgedWinner($payload, count($pool));
+        if ($index === null) {
+            $warnings[] = 'design-direction: seed judge gave no usable verdict (authored winner '
+                . Warnings::value($payload['winner'] ?? null) . ' for a ballot of ' . count($pool)
+                . '); picked uniformly at random from the distinct seeds; disposition fallback';
+            return ['index' => null, 'why' => ''];
+        }
+        return ['index' => $index, 'why' => ConceptSeeds::judgedWhy($payload)];
     }
 
     /**
@@ -595,10 +716,11 @@ final class DesignDirectionStep implements Step
      * prose. Passing them through is what makes the vocabularies levers rather
      * than bookkeeping.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
+     * @param array{text:string,ground?:?string,register?:?string,accent?:?string,tint?:?string,type_register?:?string,color_economy?:?string} $seed
+     * @param list<string> $choice the report lines describing how this seed was picked
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
      */
-    private static function chosen(array $seed): array
+    private static function chosen(array $seed, array $choice): array
     {
         return [
             'text'          => $seed['text'],
@@ -607,6 +729,7 @@ final class DesignDirectionStep implements Step
             'register'      => $seed['register'] ?? '',
             'type_register' => $seed['type_register'] ?? '',
             'color_economy' => $seed['color_economy'] ?? '',
+            'choice'        => $choice,
         ];
     }
 
@@ -1040,10 +1163,73 @@ final class DesignDirectionStep implements Step
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
             'motion_note'      => $motionNote,
+            'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
+            'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
             'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
         ];
+    }
+
+    /**
+     * A prose commitment (subject_anchor, tension), trimmed and delivered as
+     * authored. A non-string is dropped with a warning; an absent or empty
+     * value delivers '' silently, because '' is also the delivered form and
+     * normalize() must be a fixed point. Whether the delivered text is blank
+     * or binds no role is judged once per build by commitmentWarnings().
+     *
+     * @param array<string,mixed> $raw the whole direction payload
+     * @param list<string> $warnings
+     */
+    private static function normalizeProseCommitment(array $raw, string $field, array &$warnings): string
+    {
+        if (!array_key_exists($field, $raw) || $raw[$field] === null) {
+            return '';
+        }
+        $authored = $raw[$field];
+        if (!is_string($authored)) {
+            $warnings[] = "file='designDirection.json'; path=\"{$field}\"; authored="
+                . Warnings::value($authored) . '; delivered=""; disposition=' . $field
+                . ' was not a sentence and was removed';
+            return '';
+        }
+        return trim((string) preg_replace('/\s+/u', ' ', $authored));
+    }
+
+    /**
+     * The two prose commitments, judged once on the delivered direction: a
+     * blank `tension` means nothing in the direction argues, so the page is
+     * its category's default by construction; a blank `subject_anchor` means
+     * the swap test went unanswered; an anchor naming no palette role binds
+     * no committed hex. None of these can be repaired deterministically
+     * (inventing a subject's world needs a model), so each is rung 4: a
+     * durable row for the cohort audit and the future repair pass, and the
+     * build continues. Called from run(), not normalize(), so a re-normalized
+     * artifact does not restate them. Pure — unit-testable.
+     *
+     * @param array<string,mixed> $direction
+     * @return list<string>
+     */
+    public static function commitmentWarnings(array $direction): array
+    {
+        $rows = [];
+        $tension = trim((string) ($direction['tension'] ?? ''));
+        if ($tension === '') {
+            $rows[] = "file='designDirection.json'; path=\"tension\"; authored=\"\"; delivered=\"\"; "
+                . 'disposition=no deliberate contrast committed; the direction ships as its category default';
+        }
+        $anchor = trim((string) ($direction['subject_anchor'] ?? ''));
+        if ($anchor === '') {
+            $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored=\"\"; delivered=\"\"; "
+                . "disposition=no palette role was tied to the subject's own world, so the swap test is "
+                . 'unanswered; direction delivered unanchored';
+        } elseif (preg_match('/\b(base|contrast|primary|secondary|accent|band)\b/i', $anchor) !== 1) {
+            $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored="
+                . Warnings::value($anchor) . '; delivered=' . Warnings::value($anchor)
+                . '; disposition=anchor names no palette role (base, contrast, primary, secondary, accent, band), '
+                . 'so it binds no committed hex; retained unbound';
+        }
+        return $rows;
     }
 
     /**
@@ -1463,6 +1649,22 @@ final class DesignDirectionStep implements Step
         if ($colorEconomy !== null) {
             $facts[] = '- **Color economy**: ' . $colorEconomy . ' ('
                 . ColorEconomy::meaning($colorEconomy) . ').';
+        }
+
+        // The two prose commitments that keep a direction from being its
+        // category's default. Rendered beside the palette because they say
+        // where the hexes came from and what the composition is arguing.
+        $subjectAnchor = trim((string) ($direction['subject_anchor'] ?? ''));
+        if ($subjectAnchor !== '') {
+            $facts[] = '- **Subject anchor**: ' . $subjectAnchor
+                . " — the palette role(s) taken literally from the subject's own world; keep that role"
+                . ' visible wherever the page uses it, never diluted to a neutral.';
+        }
+        $tension = trim((string) ($direction['tension'] ?? ''));
+        if ($tension !== '') {
+            $facts[] = '- **Tension**: ' . $tension
+                . ' — the one deliberate contrast the site is built on; a band holds both halves'
+                . ' rather than resolving into one of them.';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];

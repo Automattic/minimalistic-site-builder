@@ -28,6 +28,24 @@ final class JsonDecoder
     }
 
     /**
+     * One dot-separated path into a decoded document, or null when any
+     * segment is missing. Never emits a notice.
+     *
+     * @param array<mixed> $decoded
+     */
+    public static function path(array $decoded, string $path): mixed
+    {
+        $value = $decoded;
+        foreach (explode('.', $path) as $key) {
+            if (!is_array($value) || !array_key_exists($key, $value)) {
+                return null;
+            }
+            $value = $value[$key];
+        }
+        return $value;
+    }
+
+    /**
      * Decode with an actionable parser error for retry/logging decisions.
      *
      * @return array{data:?array,error:?string}

@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -90,9 +91,22 @@ final class CollectImagesStep implements Step
         /** @var array<string,bool> $canonicalByFilename keyed by filename */
         $canonicalByFilename = [];
         $warnings = [];
+        /** @var list<string> $folds successful path repairs, reported outside warnings.json */
+        $folds = [];
+        $assetsOnDisk = $project->assetFilenames();
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
-            $content = $project->readText('theme/' . $rel);
+            $original = $project->readText('theme/' . $rel);
+            // The model sometimes writes the POST-generation form of a path —
+            // "/wp-content/themes/<slug>/assets/<file>" — instead of the
+            // placeholder it was taught. Fold that guess back so the canonical
+            // parser below sees it (rung 1); a file that really exists on disk
+            // is a resume after generation and is left alone.
+            $folded = self::foldGuessedAssetPaths($original, $assetsOnDisk);
+            $content = $folded['content'];
+            foreach ($folded['folded'] as $from => $to) {
+                $folds[] = "theme/{$rel}: model-written asset path {$from} folded to {$to}";
+            }
             $parsed = self::parseAndNormalize($content);
             $updated = $parsed['content'];
 
@@ -228,9 +242,14 @@ final class CollectImagesStep implements Step
                 $byFilename[$filename] = $img;
                 $canonicalByFilename[$filename] = $entry['canonical'];
             }
-            if ($updated !== $content) {
+            if ($updated !== $original) {
                 $project->writeText('theme/' . $rel, $updated);
             }
+        }
+        if ($folds !== []) {
+            Narrator::write('  [collect-images] folded ' . count($folds)
+                . " model-written absolute asset path(s) back to placeholders (details: logs/collect-images.log)\n");
+            $project->writeText('logs/collect-images.log', implode("\n", $folds) . "\n");
         }
 
         // A part can reference a theme asset that no placeholder declares —
@@ -363,6 +382,55 @@ final class CollectImagesStep implements Step
             }
         }
         return array_keys($sources);
+    }
+
+    /**
+     * Fold a model-written post-generation path ("/wp-content/themes/<slug>/
+     * assets/<file>", the form GenerateImagesStep writes later) back into the
+     * "theme:./assets/<file>" placeholder the parser understands, slugifying
+     * the basename to the `[a-z0-9-]` alphabet the canonical parser requires.
+     * A basename that exists on disk is a resume after generation and is left
+     * alone: folding it would ask for the same photo twice. Covers the same
+     * source syntaxes as recoverPlaceholders(). Pure — unit-testable.
+     *
+     * @param array<string,true> $assetsOnDisk basenames present under theme/assets
+     * @return array{content:string,folded:array<string,string>} content and from => to
+     */
+    public static function foldGuessedAssetPaths(string $content, array $assetsOnDisk): array
+    {
+        $folded = [];
+        $fold = static function (string $value) use ($assetsOnDisk, &$folded): ?string {
+            // The value is already bounded by its quotes, so a basename may
+            // carry spaces; slugification below turns them into hyphens.
+            $value = trim($value);
+            if (preg_match('#^/wp-content/themes/[^/"\']+/assets/([^/"\'?\#]+)$#i', $value, $m) !== 1) {
+                return null;
+            }
+            $basename = $m[1];
+            if (isset($assetsOnDisk[$basename])) {
+                return null;
+            }
+            $extension = strtolower(pathinfo($basename, PATHINFO_EXTENSION)) === 'png' ? 'png' : 'jpg';
+            $to = 'theme:./assets/' . ProjectStore::slugify(pathinfo($basename, PATHINFO_FILENAME), 'image') . '.' . $extension;
+            $folded[$value] = $to;
+            return $to;
+        };
+
+        foreach ([
+            '/(?P<prefix>"(?:url|src)"\s*:\s*")(?P<raw>[^"\\\\]*)(?P<suffix>")/i',
+            '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))(?P<raw>[^"\']*)(?P<suffix>\k<quote>)/i',
+        ] as $pattern) {
+            $content = (string) preg_replace_callback(
+                $pattern,
+                static function (array $match) use ($fold): string {
+                    $to = $fold($match['raw']);
+                    return $to === null ? $match[0] : $match['prefix'] . $to . $match['suffix'];
+                },
+                $content,
+            );
+        }
+
+        return ['content' => $content, 'folded' => $folded];
     }
 
     /**
@@ -801,7 +869,7 @@ final class CollectImagesStep implements Step
      */
     private static function synthesizeFilename(string $subject, string $literal): string
     {
-        $slug = rtrim(substr(ProjectStore::slugify($subject), 0, 40), '-') ?: 'image';
+        $slug = rtrim(substr(ProjectStore::slugify($subject, 'image'), 0, 40), '-');
         return $slug . '-' . substr(sha1($literal), 0, 8) . '.jpg';
     }
 

@@ -8,10 +8,12 @@ same construction and the same crop, so the row reads as one system.
   `"className":"equal-cards"`, each `wp:column` at
   `"verticalAlignment":"stretch"` and `"width":"X%"` where X is 100 divided by
   the card count. The widths sum to exactly 100%. Build every card group with
-  the ASSIGNED CARD STYLE, and put a bottom-aligned action in a `wp:buttons`
-  with `"className":"cta-bottom"`.
+  the ASSIGNED CARD STYLE, and put a card's bottom-aligned action, when it has
+  one, in a `wp:paragraph` with `"className":"text-action cta-bottom"` holding
+  one link — never a button; buttons are the page's planned actions.
 - Copy budget: one heading and one lead line for the band. Each card holds a
-  heading, one short paragraph or a short list, and at most one action.
+  heading, one short paragraph or a short list, and at most one text-link
+  action.
 - Identity: the one top-level group carries the assigned root marker class.
 - Media: at most one image per card, on `"className":"card-media"` so every
   card crops to the same ratio. Use group, columns/column, image, heading,
@@ -26,5 +28,5 @@ same construction and the same crop, so the row reads as one system.
    - Each `wp:column` with `"verticalAlignment":"stretch"` and `"width":"X%"` where X = 100 / number_of_cards (2 cards → 50%, 3 → 33.33%, 4 → 25%). All widths MUST sum to exactly 100%.
    - Inside each column a single `wp:group` card wrapper holding the content (heading, paragraph, image, list), built per the card anatomy above.
    - Any card image: add `"className":"card-media"` to the wp:image and copy that hook alone to its wrapper (`<figure class="card-media">`) — the build crops it to the ordinary-card ratio committed by the **Image crop** fact. NEVER write the cropping as an inline style or `aspectRatio` block attribute.
-   - For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
-     (The supporting `.equal-cards` / `.card-body` / `.cta-bottom` / `.card-media*` / `.card-flush` CSS already ships in the theme's style.css — just use these class hooks.)
+   - For a bottom-aligned action, add a `wp:paragraph` with `"className":"text-action cta-bottom"` holding one link — never a `wp:buttons` (see "Buttons are budgeted" above).
+     (The supporting `.equal-cards` / `.card-body` / `.cta-bottom` / `.text-action` / `.card-media*` / `.card-flush` CSS already ships in the theme's style.css — just use these class hooks.)

@@ -26,7 +26,7 @@ final class BuildReport
 
     /** @var array<string,list<string>> report row id => configured model keys */
     private const MODEL_KEYS_BY_STEP = [
-        'design-direction' => ['design-direction-seeds', 'design-direction'],
+        'design-direction' => ['design-direction-seeds', 'design-direction-judge', 'design-direction'],
         'generate-images'  => ['image-prompt-repair'],
     ];
 

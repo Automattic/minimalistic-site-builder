@@ -124,6 +124,7 @@ test('design model chooses a compatible hero and its media proportions', functio
     [$project, $llm] = make_designdir_fixture();
     $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => '']);
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
     $direction = designdir_direction();
     $direction['hero_blueprint'] = array_replace(HeroBlueprint::defaultFor('foreground-split'), [
         'media_aspect' => 'square', 'media_weight' => 'dominant',
@@ -131,9 +132,36 @@ test('design model chooses a compatible hero and its media proportions', functio
     $llm->queueJson(['direction' => $direction]);
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     assert_eq($direction['hero_blueprint'], $project->readJson('designDirection.json')['hero_blueprint']);
-    assert_contains('Choose the hero composition', $llm->calls[1]['prompt']);
-    assert_contains('layered-poster', $llm->calls[1]['prompt']);
-    assert_contains('cinematic-safe-zone', $llm->calls[1]['prompt']);
+    assert_contains('Choose the hero composition', $llm->calls[2]['prompt']);
+    assert_contains('layered-poster', $llm->calls[2]['prompt']);
+    assert_contains('cinematic-safe-zone', $llm->calls[2]['prompt']);
+});
+
+test('seed judge only sees compatible styles and keeps distinct interpretations of one style', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    try {
+        $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => 'organic']);
+        $llm->queueJson(['seeds' => [
+            designdir_seed_obj('Concrete Grid', 'dark', 'brutalist', 'neutral'),
+            designdir_seed_obj('Garden Path', 'light', 'organic', 'earth'),
+            designdir_seed_obj('Leaf Canopy', 'light', 'organic', 'earth'),
+        ]]);
+        $llm->queueJson(designdir_judge(1, 'The canopy gives this subject a stronger spatial idea.'));
+        $llm->queueJson(['direction' => designdir_direction()]);
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(3, count($llm->calls));
+        $ballot = $llm->calls[1]['prompt'];
+        assert_contains('[0] Garden Path', $ballot);
+        assert_contains('[1] Leaf Canopy', $ballot);
+        assert_true(!str_contains($ballot, 'Concrete Grid'));
+        assert_eq('Leaf Canopy', $project->readJson('designDirection.json')['concept_seed']);
+        assert_eq('organic', $project->readJson('designDirection.json')['requested_style']);
+        assert_contains('Seed choice: judge picked [1] Leaf Canopy', $project->readText('logs/design-direction.txt'));
+        assert_eq(3, count($project->readJson('logs/design-direction-seeds.json')['candidates']));
+    } finally {
+        remove_tree($tmp);
+    }
 });
 
 test('homepage creative emphasis has no section or image quota', function () {

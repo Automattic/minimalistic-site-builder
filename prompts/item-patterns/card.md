@@ -15,3 +15,6 @@ columns.
   dominant, but every item still reads as a self-contained card.
 - Keep one heading and one compact detail block per item. Do not add eyebrow
   labels merely to make every card have three lines.
+- An item's action, when it has one, is a text link (a `wp:paragraph` with
+  `"className":"text-action"`), never a button: buttons are the page's planned
+  actions, and a row of them makes the accent meaningless.

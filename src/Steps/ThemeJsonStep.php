@@ -14,6 +14,7 @@ use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
@@ -3031,13 +3032,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
         // Solid's accent can be light or dark, so ContrastFixStep owns the
         // exact readable label choice. Preserve only a prior deterministic
-        // base/contrast result; arbitrary model colors are not part of the
-        // bounded construction and are replaced before that later check.
+        // base/contrast result — in either preset spelling, because
+        // ContrastFixStep writes the CSS-variable form and this repair is
+        // replayed on its output by validate-theme; arbitrary model colors are
+        // not part of the bounded construction and are replaced before that
+        // later check.
         if ($style === 'solid') {
-            $label = is_string($authoredLabel) && in_array($authoredLabel, [
-                'var:preset|color|base',
-                'var:preset|color|contrast',
-            ], true)
+            $label = self::isDeterministicCtaLabel($authoredLabel)
                 ? $authoredLabel
                 : 'var:preset|color|base';
             if (($button['color']['text'] ?? null) !== $label) {
@@ -3090,7 +3091,66 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (self::sameJsonValue($theme, $authoredTheme)) {
             return [$theme, []];
         }
-        return [$theme, $repairs];
+        return [$theme, self::changedCtaRepairs($repairs, $authoredTheme, $theme)];
+    }
+
+    /**
+     * Whether a label ink is one ContrastFixStep may have chosen (base or
+     * contrast), in either preset spelling theme.json accepts.
+     */
+    private static function isDeterministicCtaLabel(mixed $value): bool
+    {
+        return is_string($value)
+            && preg_match('/^(?:var:preset\|color\|(?:base|contrast)|var\(--wp--preset--color--(?:base|contrast)\))$/', trim($value)) === 1;
+    }
+
+    /**
+     * Only the rows whose leaf really changed. The stripper and the merger
+     * narrate every leaf they pass through — a competing declaration removed,
+     * the committed value enforced — and most of those pairs land back on the
+     * value the theme already held. One foreign label used to surface all
+     * twenty-six of them as warning rows. A row is kept when its path reads
+     * differently in the delivered theme than in the authored one, or when it
+     * names no path this filter can read.
+     *
+     * @param list<string> $repairs
+     * @param array<mixed> $authored
+     * @param array<mixed> $delivered
+     * @return list<string>
+     */
+    private static function changedCtaRepairs(array $repairs, array $authored, array $delivered): array
+    {
+        /** @var array<string,list<string>> $byPath rows per path, in first-seen order */
+        $byPath = [];
+        $kept = [];
+        foreach ($repairs as $repair) {
+            if (preg_match('/^theme\/theme\.json ([^\s:]+):/', $repair, $m) !== 1) {
+                $kept[] = $repair;
+                continue;
+            }
+            $byPath[$m[1]][] = $repair;
+        }
+        foreach ($byPath as $path => $rows) {
+            $before = JsonDecoder::path($authored, $path);
+            $after = JsonDecoder::path($delivered, $path);
+            if (self::sameJsonValue($before, $after)) {
+                continue;
+            }
+            if (count($rows) === 1) {
+                $kept[] = $rows[0];
+                continue;
+            }
+            // A leaf removed and then enforced is one change; the merge row's
+            // "authored null" is the stripper's doing, not the model's. Say
+            // what the model wrote and what shipped, with the final verdict.
+            $last = end($rows);
+            $disposition = preg_match('/; disposition (.*)$/', $last, $d) === 1
+                ? $d[1]
+                : 'enforced committed CTA construction';
+            $kept[] = 'theme/theme.json ' . $path . ': authored ' . Warnings::value($before)
+                . ' delivered ' . Warnings::value($after) . '; disposition ' . $disposition;
+        }
+        return array_values(array_unique($kept));
     }
 
     /** Compare decoded JSON values without treating object-key order as data. */
