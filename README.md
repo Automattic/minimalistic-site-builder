@@ -2,6 +2,8 @@
 
 Generated WordPress Playground bundles.
 
+Latest review set: [PR #625 — five-style eval, screenshots and Playground examples](pr-625/02f7ce63/README.md).
+
 | Project | Created | ZIP | Playground | Size |
 | --- | --- | --- | --- | --- |
 | mellow-cedar | 2026-08-20 10:04:41 UTC | [mellow-cedar-playground-20260820T100434Z.zip](https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/mellow-cedar-playground-20260820T100434Z.zip) | [Open](https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fmellow-cedar-playground-20260820T100434Z.zip) | 941.3 KB |

@@ -1,0 +1,961 @@
+[
+  {
+    "url": "http://localhost:8881/",
+    "width": 1440,
+    "title": "Hearth & Habit",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "pageHeight": 5378,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Small changes at home. Big shifts in climate.",
+        "class": "wp-block-heading has-primary-color has-text-color",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "This week’s practical guides",
+        "class": "wp-block-heading has-text-align-center has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Browse by topic",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Latest from the blog",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Get weekly tips in your inbox",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/hero-cozy-sustainable-room-nocturne.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-dripping-tap-cutaway.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-window-draught-seal.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-compost-layers-cross-section.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-cold-water-wash-drum.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-dripping-tap-washer.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-draught-seal-window.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-compost-layers-cutaway.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-rain-barrel-downspout.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-pantry-jars-refill.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-moth-low-wattage-bulb.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/newsletter-moth-lamp-letter.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Sign up",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8881/",
+    "width": 390,
+    "title": "Hearth & Habit",
+    "viewport": 390,
+    "documentWidth": 390,
+    "pageHeight": 7452,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Small changes at home. Big shifts in climate.",
+        "class": "wp-block-heading has-primary-color has-text-color",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "This week’s practical guides",
+        "class": "wp-block-heading has-text-align-center has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Browse by topic",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Latest from the blog",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      },
+      {
+        "tag": "H2",
+        "text": "Get weekly tips in your inbox",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Caveat, \"Segoe Script\", \"Bradley Hand\", cursive"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/hero-cozy-sustainable-room-nocturne.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-dripping-tap-cutaway.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-window-draught-seal.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-compost-layers-cross-section.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/tip-cold-water-wash-drum.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-dripping-tap-washer.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-draught-seal-window.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-compost-layers-cutaway.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-rain-barrel-downspout.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-pantry-jars-refill.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/post-moth-low-wattage-bulb.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8881/wp-content/themes/pr625-climate-whimsical/assets/newsletter-moth-lamp-letter.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Sign up",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8884/",
+    "width": 1440,
+    "title": "Fuoco",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "pageHeight": 6141,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Pizza Born in Live Flame",
+        "class": "wp-block-heading has-text-align-center has-contrast-color has-text-color has-link-color has-display-font-size wp-elements-1",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Pizza",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Specialties",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The craft",
+        "class": "wp-block-heading reveal-fade has-heading-font-family motion-target is-visible",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Visit",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Fuoco",
+        "class": "wp-block-site-title has-heading-font-size has-heading-font-family has-text-align-center",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/wood-fired-oven-mouth-flame.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/margherita-overhead-marble.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/pizzaiolo-hands-stretching-dough.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/fuoco-footer-oven-mouth.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8884/",
+    "width": 390,
+    "title": "Fuoco",
+    "viewport": 390,
+    "documentWidth": 394,
+    "pageHeight": 6464,
+    "horizontalOverflow": true,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Pizza Born in Live Flame",
+        "class": "wp-block-heading has-text-align-center has-contrast-color has-text-color has-link-color has-display-font-size wp-elements-1",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Pizza",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Specialties",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The craft",
+        "class": "wp-block-heading reveal-fade has-heading-font-family motion-target is-visible",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Visit",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Fuoco",
+        "class": "wp-block-site-title has-heading-font-size has-heading-font-family has-text-align-center",
+        "font": "Cinzel, \"Times New Roman\", Times, Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/wood-fired-oven-mouth-flame.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/margherita-overhead-marble.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/pizzaiolo-hands-stretching-dough.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8884/wp-content/themes/pr625-pizza-art-deco/assets/fuoco-footer-oven-mouth.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8885/",
+    "width": 1440,
+    "title": "Kiln & Grain",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "pageHeight": 6400,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Bread built like a blueprint, baked dark",
+        "class": "wp-block-heading has-base-color has-text-color has-display-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Our breads",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Our approach",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The craft in every loaf",
+        "class": "wp-block-heading has-primary-color has-text-color",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Order & visit",
+        "class": "wp-block-heading has-heading-font-family has-section-title-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Kiln & Grain",
+        "class": "wp-block-site-title has-text-color has-base-color has-section-title-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "On this page",
+        "class": "wp-block-heading has-base-color has-text-color has-accent-font-family has-caption-font-size",
+        "font": "\"IBM Plex Mono\", SFMono-Regular, Menlo, Consolas, monospace"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/hero-sourdough-loaf-bench.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-classic-sourdough.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-whole-grain-rye.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-enriched-milk-bun.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-daily-special-seeded.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/levain-jar-flour-bench.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/order-collection-bench.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8885/",
+    "width": 390,
+    "title": "Kiln & Grain",
+    "viewport": 390,
+    "documentWidth": 390,
+    "pageHeight": 7992,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Bread built like a blueprint, baked dark",
+        "class": "wp-block-heading has-base-color has-text-color has-display-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Our breads",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Our approach",
+        "class": "wp-block-heading has-primary-color has-text-color has-heading-font-family",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The craft in every loaf",
+        "class": "wp-block-heading has-primary-color has-text-color",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Order & visit",
+        "class": "wp-block-heading has-heading-font-family has-section-title-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Kiln & Grain",
+        "class": "wp-block-site-title has-text-color has-base-color has-section-title-font-size",
+        "font": "Jost, \"Century Gothic\", Futura, \"Trebuchet MS\", sans-serif"
+      },
+      {
+        "tag": "H2",
+        "text": "On this page",
+        "class": "wp-block-heading has-base-color has-text-color has-accent-font-family has-caption-font-size",
+        "font": "\"IBM Plex Mono\", SFMono-Regular, Menlo, Consolas, monospace"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/hero-sourdough-loaf-bench.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-classic-sourdough.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-whole-grain-rye.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-enriched-milk-bun.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/loaf-daily-special-seeded.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/levain-jar-flour-bench.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8885/wp-content/themes/pr625-bakery-bauhaus/assets/order-collection-bench.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8886/",
+    "width": 1440,
+    "title": "Terrain & Light",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "pageHeight": 6067,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Ground Held in Weather",
+        "class": "wp-block-heading has-text-color has-display-font-size",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Featured Works",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "About the work",
+        "class": "wp-block-heading has-base-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Get in Touch",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Terrain & Light",
+        "class": "alignwide wp-block-site-title has-text-color has-base-color has-section-title-font-size",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/hero-ridgeline-fog-valley.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/ridgeline-fog-basin.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/salt-flat-cracked-plain.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/dune-slope-shadow-line.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/glacial-braid-river.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/iron-stained-sandstone-wall.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/snowfield-cornice-edge.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/tidal-flat-storm-light.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/glacial-braid-plain-dawn.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Inquire",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8886/",
+    "width": 390,
+    "title": "Terrain & Light",
+    "viewport": 390,
+    "documentWidth": 390,
+    "pageHeight": 7520,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Ground Held in Weather",
+        "class": "wp-block-heading has-text-color has-display-font-size",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Featured Works",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "About the work",
+        "class": "wp-block-heading has-base-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Get in Touch",
+        "class": "wp-block-heading has-contrast-color has-text-color has-heading-font-family",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      },
+      {
+        "tag": "H1",
+        "text": "Terrain & Light",
+        "class": "alignwide wp-block-site-title has-text-color has-base-color has-section-title-font-size",
+        "font": "\"Zilla Slab\", Rockwell, \"Courier New\", Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/hero-ridgeline-fog-valley.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/ridgeline-fog-basin.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/salt-flat-cracked-plain.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/dune-slope-shadow-line.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/glacial-braid-river.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/iron-stained-sandstone-wall.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/snowfield-cornice-edge.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/tidal-flat-storm-light.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8886/wp-content/themes/pr625-photo-brutalist/assets/glacial-braid-plain-dawn.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Inquire",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [
+      {
+        "tag": "P",
+        "text": "Limited-edition prints · High country & salt basin",
+        "class": "has-text-color has-caption-font-size wp-block-paragraph",
+        "left": 40,
+        "right": 438.484375
+      },
+      {
+        "tag": "H1",
+        "text": "Ground Held in Weather",
+        "class": "wp-block-heading has-text-color has-display-font-size",
+        "left": 40,
+        "right": 438.484375
+      },
+      {
+        "tag": "P",
+        "text": "Archival pigment landscapes made at distance and without figures, editioned in small runs for collectors and c",
+        "class": "has-text-color wp-block-paragraph",
+        "left": 40,
+        "right": 438.484375
+      },
+      {
+        "tag": "DIV",
+        "text": "View Gallery",
+        "class": "wp-block-buttons is-content-justification-left is-layout-flex wp-container-core-buttons-is-layout-bc8b01f5 wp-block-buttons-is-layout-flex",
+        "left": 40,
+        "right": 438.484375
+      }
+    ],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8887/",
+    "width": 1440,
+    "title": "Velocity",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "pageHeight": 7199,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Steel Machines Tuned To The Rhythm Of The City",
+        "class": "wp-block-heading has-base-color has-text-color",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Featured Models",
+        "class": "wp-block-heading has-text-align-center has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Steel, Signal Orange & Precision",
+        "class": "wp-block-heading reveal-up has-contrast-color has-text-color has-heading-font-family motion-target is-visible",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The Ordering Process",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Complete Collection",
+        "class": "wp-block-heading has-text-align-center has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Tell Us How You Ride",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-orange-city-bicycle-studio.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-meridian-city-bike.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-transit-cargo-bike.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-vector-single-speed.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/frame-lug-detail-signal-orange.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/workshop-frame-alignment-check.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-meridian-city-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-transit-belt-drive-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-courier-fixed-gear-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-dynamo-lightweight-commuter-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-porteur-front-rack-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-cargo-longtail-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-folding-compact-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-electric-assist-commuter-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-order-desk-fitting-bench.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Start an Inquiry",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [],
+    "pageErrors": []
+  },
+  {
+    "url": "http://localhost:8887/",
+    "width": 390,
+    "title": "Velocity",
+    "viewport": 390,
+    "documentWidth": 390,
+    "pageHeight": 12759,
+    "horizontalOverflow": false,
+    "fontsStatus": "loaded",
+    "headings": [
+      {
+        "tag": "H1",
+        "text": "Steel Machines Tuned To The Rhythm Of The City",
+        "class": "wp-block-heading has-base-color has-text-color",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Featured Models",
+        "class": "wp-block-heading has-text-align-center has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Steel, Signal Orange & Precision",
+        "class": "wp-block-heading reveal-up has-contrast-color has-text-color has-heading-font-family motion-target is-visible",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "The Ordering Process",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Complete Collection",
+        "class": "wp-block-heading has-text-align-center has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      },
+      {
+        "tag": "H2",
+        "text": "Tell Us How You Ride",
+        "class": "wp-block-heading has-heading-font-family",
+        "font": "Besley, \"Bookman Old Style\", Rockwell, Georgia, serif"
+      }
+    ],
+    "images": [
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-orange-city-bicycle-studio.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-meridian-city-bike.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-transit-cargo-bike.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-vector-single-speed.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/frame-lug-detail-signal-orange.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/workshop-frame-alignment-check.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-meridian-city-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-transit-belt-drive-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-courier-fixed-gear-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-dynamo-lightweight-commuter-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-porteur-front-rack-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-cargo-longtail-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-folding-compact-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-electric-assist-commuter-bicycle.jpg",
+        "loaded": true
+      },
+      {
+        "src": "http://localhost:8887/wp-content/themes/pr625-bicycle-retro-futurist/assets/velocity-order-desk-fitting-bench.jpg",
+        "loaded": true
+      }
+    ],
+    "deadLinks": [
+      {
+        "tag": "A",
+        "text": "Start an Inquiry",
+        "class": "wp-block-button__link wp-element-button"
+      }
+    ],
+    "outsideViewport": [],
+    "pageErrors": []
+  }
+]
