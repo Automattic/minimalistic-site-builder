@@ -45,6 +45,6 @@ Beyond these fixed properties, **add any additional factual fields the user actu
 
 A shop is a catalog storefront: product cards, prices only when the user supplied them, and a contact enquiry. Do NOT invent Cart, Checkout, Basket, or WooCommerce pages. The build has no cart backend.
 
-Keep `visual_vibe` to the user's stated mood/style, or "" when none was stated. Leave aesthetic invention to design-direction. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
+Keep `visual_vibe` to the user's stated mood/style, or "" when none was stated. An explicit visual request is a user requirement, not a design decision you are inventing: "I want an organically styled site" must produce a nonempty `visual_vibe` such as "organically styled". Preserve freeform styles, combinations, and exclusions ("organic, not rustic"); do not substitute a nearby aesthetic. Topic adjectives alone ("organic bakery", "brutalist architecture archive") do not request a visual style. Before returning, check that every explicit visual-style instruction in the brief survives in `visual_vibe`. Leave aesthetic invention to design-direction. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
 
 Output JSON only.

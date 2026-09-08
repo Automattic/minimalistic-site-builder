@@ -124,6 +124,11 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        // Refine-prompt may omit user constraints or invent facts. Extract the
+        // factual spec (including explicit style intent) from the user's own
+        // words, using the current prompt only when no original was recorded.
+        $stated = $meta['original_prompt'] ?? null;
+        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
         // Validate an explicit caller value before spending the site-spec LLM
         // call. The generated spec never owns this field.
         $callerWritingDirection = array_key_exists('writing_direction', $meta)
@@ -150,7 +155,7 @@ final class SiteSpecStep implements Step
             Narrator::write("  using host-supplied site spec (no site-spec LLM call)\n");
         } else {
             $rendered = $this->renderer->render('site-spec.md', [
-                'user_prompt'     => $prompt,
+                'user_prompt'     => $statedPrompt,
                 'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
                     : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
                 'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
@@ -166,14 +171,6 @@ final class SiteSpecStep implements Step
                     . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
             }
         }
-
-        // Contact facts are grounded in what the USER wrote. refine-prompt runs
-        // immediately before this step and replaces meta's `prompt` with its own
-        // rewrite, so grounding against that would let a contact detail refine
-        // invented vouch for itself. `original_prompt` is absent only when no
-        // refinement happened, and `prompt` is then the raw input.
-        $stated = $meta['original_prompt'] ?? null;
-        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
 
         $spec = self::normalize(
             $spec,
@@ -192,6 +189,32 @@ final class SiteSpecStep implements Step
                 . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
+    }
+
+    /**
+     * Recover an omitted style only from unambiguous, standalone instructions.
+     * This is not a style classifier or a general natural-language parser: the
+     * model still handles ordinary prose. In particular, subject adjectives
+     * ("organic bakery") must never become design constraints. Keep freeform,
+     * hybrid and negative wording; do not reduce it to a catalog entry.
+     */
+    private static function explicitStyleFromPrompt(string $prompt): string
+    {
+        $styles = [];
+        // Semicolons can join exclusions to a style; keep those together.
+        foreach (preg_split('/[.!?\r\n]+/u', $prompt) ?: [] as $sentence) {
+            $sentence = trim($sentence);
+            if (preg_match('/^(?:visual\s+)?(?:style|aesthetic)\s*:\s*(.+)$/iu', $sentence, $match)
+                || preg_match(
+                    '/^(?:(?:I|we)\s+(?:want|would\s+like)|(?:please\s+)?(?:create|build|design|make)'
+                    . '(?:\s+(?:me|us))?)\s+(?:an?|the)\s+(.+?[-\s]styled)\s+(?:site|website)$/iu',
+                    $sentence,
+                    $match,
+                )) {
+                $styles[] = trim($match[1]);
+            }
+        }
+        return implode('; ', array_unique($styles));
     }
 
     /**
@@ -331,6 +354,16 @@ final class SiteSpecStep implements Step
         foreach (self::REQUIRED as $key) {
             if (trim((string) ($spec[$key] ?? '')) === '') {
                 $spec[$key] = '';
+            }
+        }
+
+        // A populated field can contain additional user constraints that the
+        // bounded recovery does not understand. Never overwrite it, or a
+        // host-supplied spec (including an intentionally empty visual_vibe).
+        if (!$hostSupplied && $spec['visual_vibe'] === '') {
+            $spec['visual_vibe'] = self::explicitStyleFromPrompt($statedPrompt);
+            if ($spec['visual_vibe'] !== '') {
+                Narrator::write("  [site-spec] restored omitted visual_vibe from explicit user wording\n");
             }
         }
 

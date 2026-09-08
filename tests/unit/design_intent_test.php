@@ -6,6 +6,34 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 
+test('organic style lost by site-spec survives through design selection after recovery', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    try {
+        $project->writeJson('meta.json', [
+            'original_prompt' => 'A coaching website. I want an organically styled site.',
+            'prompt' => 'Create a professional coaching website.',
+        ]);
+        $llm->queueJson(['name' => 'Super Coaching', 'visual_vibe' => '']);
+        $renderer = new PromptRenderer(repo_path('prompts'));
+        (new Automattic\SiteBuild\Steps\SiteSpecStep($llm, $renderer))->run($project);
+        $llm->queueJson(['seeds' => [
+            designdir_seed_obj('Garden Path', 'light', 'organic', 'earth'),
+            designdir_seed_obj('Concrete Grid', 'dark', 'brutalist', 'neutral'),
+        ]]);
+        $llm->queueJson(['direction' => designdir_direction()]);
+        (new DesignDirectionStep($llm, $renderer))->run($project);
+
+        $direction = $project->readJson('designDirection.json');
+        assert_eq('organically styled', $direction['requested_style']);
+        assert_eq('Garden Path', $direction['concept_seed']);
+        assert_contains('USER-REQUESTED STYLE: "organically styled"', DesignDirectionStep::readFor($project));
+        assert_contains('**Design tradition**: organic', $llm->calls[2]['prompt']);
+        assert_eq(3, count($llm->calls), 'normal spec + seeds + expansion calls only');
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 test('explicit style filters conflicting seeds without prescribing fonts or colors', function () {
     $seeds = array_map(static fn (array $raw): array => ConceptSeeds::normalize($raw), [
         ['seed' => 'Concrete Clarity', 'register' => 'brutalist', 'ground' => 'light'],
