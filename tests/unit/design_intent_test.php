@@ -10,8 +10,7 @@ test('organic style lost by site-spec survives through design selection after re
     [$project, $llm, $tmp] = make_sitespec_fixture();
     try {
         $project->writeJson('meta.json', [
-            'original_prompt' => 'A coaching website. I want an organically styled site.',
-            'prompt' => 'Create a professional coaching website.',
+            'prompt' => 'A coaching website. I want an organically styled site.',
         ]);
         $llm->queueJson(['name' => 'Super Coaching', 'visual_vibe' => '']);
         $renderer = new PromptRenderer(repo_path('prompts'));

@@ -39,3 +39,37 @@ test('PlaygroundArtifact still answers siteOptions after the move', function () 
         );
     });
 });
+
+test('siteDescription prefers the stated tagline and never invents one', function () {
+    // The header's site-tagline block renders this exact option whenever the
+    // header kept one, and a header keeps one only when a tagline was stated —
+    // so the tagline has to win, or the two would disagree on the page.
+    assert_eq('Bread, daily', SitePreset::siteDescription([
+        'tagline' => 'Bread, daily',
+        'description' => 'A bakery on the corner.',
+        'topic' => 'sourdough',
+    ]));
+    // With no tagline the header carries no block, so the option is free to
+    // describe the site for anyone who shares a link to it.
+    assert_eq('A bakery on the corner.', SitePreset::siteDescription([
+        'description' => 'A bakery on the corner.',
+        'topic' => 'sourdough',
+    ]));
+    // WordPress appends this option to the front page's <title>, so a bare
+    // topic phrase would read as "Corner Bakery – sourdough" in the tab.
+    assert_eq('', SitePreset::siteDescription(['topic' => 'sourdough']), 'the topic is not a description');
+    assert_eq('', SitePreset::siteDescription(['name' => 'Corner Bakery']), 'the name is not a description');
+    // What the header reads to decide is untouched (BIGR-773).
+    assert_eq('', SitePreset::blogDescription(['description' => 'A bakery on the corner.']));
+});
+
+test('the blueprint carries the same description the seeder applies', function () {
+    with_project('sitepreset_description_', function ($project) {
+        $spec = ['name' => 'Corner Bakery', 'description' => 'A bakery on the corner.'];
+        $project->writeJson('siteSpec.json', $spec);
+        assert_eq(
+            SitePreset::siteDescription($spec),
+            SitePreset::siteOptions($project)['blogdescription'],
+        );
+    });
+});

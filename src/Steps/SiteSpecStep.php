@@ -124,11 +124,6 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
-        // Refine-prompt may omit user constraints or invent facts. Extract the
-        // factual spec (including explicit style intent) from the user's own
-        // words, using the current prompt only when no original was recorded.
-        $stated = $meta['original_prompt'] ?? null;
-        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
         // Validate an explicit caller value before spending the site-spec LLM
         // call. The generated spec never owns this field.
         $callerWritingDirection = array_key_exists('writing_direction', $meta)
@@ -155,7 +150,7 @@ final class SiteSpecStep implements Step
             Narrator::write("  using host-supplied site spec (no site-spec LLM call)\n");
         } else {
             $rendered = $this->renderer->render('site-spec.md', [
-                'user_prompt'     => $statedPrompt,
+                'user_prompt'     => $prompt,
                 'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
                     : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
                 'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
@@ -178,21 +173,17 @@ final class SiteSpecStep implements Step
             $requested,
             $warnings,
             self::nameFromPrompt($prompt),
-            $statedPrompt,
+            $prompt,
             array_key_exists('site_spec', $meta),
         );
-        // The refine step rewrites the brief on a small model, and a small
-        // model sometimes respells a brand it was told to preserve. The spec
-        // then reads the rewrite. site-spec.md tells the model to treat a
-        // name sitting in that rewrite as stated, so `invented` often does
-        // not contain `name` — the misspelling still has to be restored.
-        // The user's own words outrank both: a generated name within two
-        // edits of a brand-shaped proper noun the user actually typed is
-        // that noun. Rung 1 — restored in the spec and in the brief every
-        // later step reads, reported, never a warning. A host-supplied spec
-        // is trusted as-is: no refine step touched its name.
+        // A small model sometimes respells a brand the user stated, and then
+        // lists the respelling as its own. The user's own words outrank the
+        // spec: a generated name within two edits of a brand-shaped proper
+        // noun the user actually typed is that noun. Rung 1 — restored in the
+        // spec, reported, never a warning. A host-supplied spec is trusted
+        // as-is.
         if (!array_key_exists('site_spec', $meta)) {
-            $restored = self::statedNameNear($statedPrompt, (string) $spec['name']);
+            $restored = self::statedNameNear($prompt, (string) $spec['name']);
             if ($restored !== null) {
                 $from = (string) $spec['name'];
                 if ($spec['slug'] === ProjectStore::slugify($from)) {
@@ -200,11 +191,9 @@ final class SiteSpecStep implements Step
                 }
                 $spec = self::replaceIdentityToken($spec, $from, $restored);
                 $spec['invented'] = array_values(array_diff($spec['invented'], ['name']));
-                $meta['prompt'] = self::replaceIdentityToken($meta['prompt'], $from, $restored);
-                $project->writeJson('meta.json', $meta);
-                $report = 'Identity: the refined brief and the generated spec spelled the name "' . $from
+                $report = 'Identity: the generated spec spelled the name "' . $from
                     . '"; the user wrote "' . $restored . '", so the stated spelling was restored across the spec '
-                    . 'and the brief, and the invented claim on "name" withdrawn (disposition repaired)';
+                    . 'and the invented claim on "name" withdrawn (disposition repaired)';
                 $project->writeText('logs/site-spec.txt', $report . "\n");
                 Narrator::write("  [site-spec] restored the stated name \"{$restored}\" over \"{$from}\"\n");
             }

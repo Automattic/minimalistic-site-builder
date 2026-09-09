@@ -962,6 +962,62 @@ test('centerHeroCopy enforces the resolved physical side on the cover center row
     assert_contains('"contentPosition":"center left"', $end, 'RTL logical end resolves to physical left');
 });
 
+test('centerHeroCopy justifies an unjustified copy group to the anchored side (BIGR-992)', function () {
+    // portfolio10 / luzia-like4: the copy group bounds its measure with a
+    // contentSize but carries no justifyContent. With the cover's inner
+    // container held at full width, WordPress centers that group's
+    // children inside it, so the copy drifts toward the focal half.
+    $doc = '<!-- wp:group {"className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--layered-poster">'
+        . '<!-- wp:cover {"url":"x.jpg","contentPosition":"center left","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover has-custom-content-position is-position-center-left hero-composition__media"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"48rem"}} --><div class="wp-block-group">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"32rem"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Twenty Years of Witness</h1><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link">See the work</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center-start', 'ltr', 'p', $repairs);
+    assert_contains('"contentSize":"48rem","justifyContent":"left"', $out, 'the wrapper group directly inside the cover takes the side');
+    assert_contains('"contentSize":"32rem","justifyContent":"left"', $out, 'the copy root takes the side');
+    assert_true(!str_contains($out, '"textAlign"'), 'text alignment is untouched on a side anchor');
+    assert_true(!str_contains($out, 'wp:buttons {'), 'the buttons row keeps its default alignment');
+    assert_contains('"contentPosition":"center left"', $out);
+    assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center-start', 'ltr', 'p', $again));
+    assert_eq([], $again);
+
+    // The physical side follows the delivery contract, so an RTL logical
+    // start justifies right; an authored opposite side is repaired too.
+    $rtlRepairs = [];
+    $rtl = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center-start', 'rtl', 'p', $rtlRepairs);
+    assert_contains('"contentSize":"32rem","justifyContent":"right"', $rtl);
+    assert_contains('"contentPosition":"center right"', $rtl);
+
+    // A flow group and a columns copy zone have no constrained layout to
+    // justify; they are left byte-identical.
+    $flow = '<!-- wp:group {"className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--layered-poster">'
+        . '<!-- wp:cover {"url":"x.jpg","contentPosition":"center left","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover has-custom-content-position is-position-center-left hero-composition__media"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"56%","className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"620px"}} --><div class="wp-block-column hero-composition__copy" style="flex-basis:56%">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Pull Up A Chair</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:column --></div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->'
+        . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($flow, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($flow, 'center-start', 'ltr', 'p', $r));
+    assert_eq([], $r);
+});
+
 test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {
     // Regression: portfolio26's framed canvas capped the layered-poster cover
     // at alignwide, insetting the hero band from both viewport edges. The

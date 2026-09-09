@@ -23,8 +23,7 @@ test('site-spec recovers the organic coaching style from the original brief', fu
             . 'I want an organically styled site. The site is called Super Coaching and the tagline '
             . 'is When your best just is not good enough. The business is located in Plymouth, NH.';
         $meta = $project->readJson('meta.json');
-        $meta['original_prompt'] = $original;
-        $meta['prompt'] = 'Create a professional business coaching website for Super Coaching in Plymouth, NH.';
+        $meta['prompt'] = $original;
         $project->writeJson('meta.json', $meta);
         $llm->queueJson(['name' => 'Super Coaching', 'visual_vibe' => '']);
 
@@ -34,6 +33,7 @@ test('site-spec recovers the organic coaching style from the original brief', fu
         assert_eq('organically styled', $spec['visual_vibe']);
         assert_eq('organic', Automattic\SiteBuild\ConceptSeeds::requestedStyle(json_encode($spec)));
         assert_contains($original, $llm->calls[0]['prompt']);
+        assert_eq($meta, $project->readJson('meta.json'), 'style recovery leaves the user brief unchanged');
         assert_eq(1, count($llm->calls), 'recovery needs no additional model call');
     } finally {
         remove_tree($tmp);
@@ -111,12 +111,11 @@ test('site-spec respects an empty host style and recovered specs reach a fixed p
     }
 });
 
-test('site-spec style recovery never grounds itself in an invented refined style', function () {
+test('site-spec passes an unstyled user brief through without inventing a style', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     try {
         $project->writeJson('meta.json', [
-            'original_prompt' => 'A coaching business website.',
-            'prompt' => 'I want an organically styled site.',
+            'prompt' => 'A coaching business website.',
         ]);
         $llm->queueJson(['name' => 'Demo', 'visual_vibe' => '']);
         (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
@@ -885,7 +884,6 @@ test('site-spec normalizes subject_is_visual_work to a strict boolean', function
 test('copy prompts never mint or invent contact details', function () {
     $files = [
         'prompts/site-spec.md',
-        'prompts/refine-prompt.md',
         'prompts/section.md',
         'prompts/footer.md',
         'prompts/page-plan.md',
@@ -911,41 +909,13 @@ test('copy prompts never mint or invent contact details', function () {
     }
 });
 
-test('site-spec grounds contact facts in the original prompt, not the refined rewrite', function () {
-    // refine-prompt replaces meta's `prompt` with its own rewrite immediately
-    // before this step, so a contact fact IT invented must not vouch for itself.
+test('site-spec restores a stated brand name the model misspelled, across the spec', function () {
+    // PepeneBun build (2026-09-04): the model respelled the stated
+    // "PepeneBun" as "PepenoBun", and every page of the site carried the
+    // wrong brand.
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'A cozy neighborhood bakery';
-    $meta['prompt'] = 'A cozy neighborhood bakery. Reach the team at hello@hearthandcrumb.com.';
-    $project->writeJson('meta.json', $meta);
-    $llm->queueJson([
-        'name' => 'Hearth & Crumb',
-        'language' => 'en',
-        'email_domain' => 'hearthandcrumb.com',
-        'invented' => ['name'],
-        'email' => 'hello@hearthandcrumb.com',
-    ]);
-
-    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-
-    $spec = $project->readJson('siteSpec.json');
-    assert_eq('', $spec['email_domain'], 'the refined brief cannot ground a contact fact it invented');
-    assert_true(!isset($spec['email']), 'an email only the refined brief carries is dropped');
-    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
-    assert_contains('not stated in the prompt', $joined);
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('site-spec restores a stated brand name the refine step misspelled, in the spec and in the brief', function () {
-    // PepeneBun build (2026-09-04): refine-prompt rewrote the stated
-    // "PepeneBun" as "PepenoBun", site-spec read the rewrite, listed the name
-    // as invented, and every page of the site carried the wrong brand.
-    [$project, $llm, $tmp] = make_sitespec_fixture();
-    $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni. PepeneBun sells seeds to growers.';
-    $meta['prompt'] = 'PepenoBun is a professional watermelon supply business in Dabuleni, Romania. PepenoBun sells seeds to growers.';
+    $meta['prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni. PepeneBun sells seeds to growers.';
     $project->writeJson('meta.json', $meta);
     $llm->queueJson([
         'name'        => 'PepenoBun',
@@ -966,11 +936,6 @@ test('site-spec restores a stated brand name the refine step misspelled, in the 
     assert_eq('Introduce PepeneBun', $spec['pages'][0]['purpose'], 'every string in the spec is restored');
     assert_eq([], $spec['invented'], 'a stated name is not an invented one');
 
-    $prompt = (string) $project->readJson('meta.json')['prompt'];
-    assert_true(!str_contains($prompt, 'PepenoBun'), 'the refined brief no longer carries the misspelling');
-    assert_contains('PepeneBun sells seeds to growers', $prompt);
-    assert_contains('professional watermelon supply', $prompt, 'the rest of the rewrite is kept');
-
     $warnings = $project->exists('warnings.json') ? ($project->readJson('warnings.json')['site-spec'] ?? []) : [];
     assert_true(!str_contains(implode(' ', $warnings), 'PepenoBun'), 'a successful repair is not a warning row');
     $report = $project->readText('logs/site-spec.txt');
@@ -987,7 +952,7 @@ test('site-spec leaves a host-supplied near-miss name alone', function () {
         'pages'    => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Introduce PepenoBun']],
     ]);
     $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni.';
+    $meta['prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni.';
     $project->writeJson('meta.json', $meta);
 
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
@@ -1003,8 +968,7 @@ test('site-spec leaves a host-supplied near-miss name alone', function () {
 test('site-spec leaves a genuinely invented name alone', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'A watermelon supply business in Dabuleni, Romania, for industrial buyers.';
-    $meta['prompt'] = 'A professional watermelon supply business in Dabuleni, Romania, for industrial buyers.';
+    $meta['prompt'] = 'A watermelon supply business in Dabuleni, Romania, for industrial buyers.';
     $project->writeJson('meta.json', $meta);
     $llm->queueJson(['name' => 'Dabuleni Melons', 'language' => 'en', 'invented' => ['name']]);
 
@@ -1023,8 +987,7 @@ test('site-spec does not mistake a sentence-opening common word for a stated bra
     // is not a brand the user stated; only a proper noun can be restored.
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'Create a website for my bakery in Portland.';
-    $meta['prompt'] = 'A neighborhood bakery in Portland with a small storefront.';
+    $meta['prompt'] = 'Create a website for my bakery in Portland.';
     $project->writeJson('meta.json', $meta);
     $llm->queueJson(['name' => 'Crate', 'language' => 'en', 'invented' => ['name']]);
 
@@ -1076,29 +1039,6 @@ final class SiteSpecNearProbe
         return SiteSpecStep::statedNameNear($stated, 'Pepperbin');
     }
 }
-
-test('site-spec keeps a contact fact the user stated even when refinement reworded around it', function () {
-    [$project, $llm, $tmp] = make_sitespec_fixture();
-    $meta = $project->readJson('meta.json');
-    $meta['original_prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
-    $meta['prompt'] = 'A warm neighborhood bakery serving naturally leavened bread and seasonal pastries.';
-    $project->writeJson('meta.json', $meta);
-    $llm->queueJson([
-        'name' => 'Hearth & Crumb',
-        'language' => 'en',
-        'email_domain' => 'hearthandcrumb.com',
-        'invented' => ['name'],
-        'email' => 'hello@hearthandcrumb.com',
-    ]);
-
-    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-
-    $spec = $project->readJson('siteSpec.json');
-    assert_eq('hearthandcrumb.com', $spec['email_domain']);
-    assert_eq('hello@hearthandcrumb.com', $spec['email']);
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
 
 test('site-spec scrubs contact facts hiding in a list and reindexes what survives', function () {
     // A list item carries no key of its own, so it inherits its parent's.
@@ -1204,26 +1144,4 @@ test('site-spec keeps camelCase contact facts the prompt stated', function () {
     assert_eq('+1 207 555 0100', $spec['phoneNumber']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('site-spec falls back to the prompt when original_prompt is unusable', function () {
-    // A blank or non-string original_prompt must not ground everything to
-    // nothing — that would scrub every contact fact the real prompt states.
-    foreach (['' => 'blank', '   ' => 'whitespace', 0 => 'non-string'] as $bad => $label) {
-        [$project, $llm, $tmp] = make_sitespec_fixture();
-        $meta = $project->readJson('meta.json');
-        $meta['prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
-        $meta['original_prompt'] = $bad === 0 ? ['not', 'a', 'string'] : $bad;
-        $project->writeJson('meta.json', $meta);
-        $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'email' => 'hello@hearthandcrumb.com']);
-
-        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-
-        assert_eq(
-            'hello@hearthandcrumb.com',
-            $project->readJson('siteSpec.json')['email'] ?? null,
-            "a {$label} original_prompt must fall back to the prompt, not scrub everything",
-        );
-        exec('rm -rf ' . escapeshellarg($tmp));
-    }
 });

@@ -2338,6 +2338,12 @@ final class GeneratedMarkup
      * edit per the shared convention — stale
      * saved-HTML classes are corrected by fix-blocks re-serialization; the
      * contradictory position class tokens are removed here.
+ *
+ * On a side anchor the copy group and every constrained group between it
+ * and the cover are also justified to the resolved side (BIGR-992): the
+ * skeleton keeps the cover's inner container at full width, so a
+ * constrained group with no `justifyContent` would otherwise center its
+ * children over the focal half (audited: portfolio10, luzia-like4).
      *
      * @param list<array<string,mixed>> $repairs
      * @param list<string>              $warnings
@@ -2372,6 +2378,9 @@ final class GeneratedMarkup
         }
 
         $document = BlockMarkup::parse($markup);
+        $sideTargets = !$horizontallyCentered && in_array($coverHorizontal, ['left', 'right'], true)
+            ? self::anchoredCopyGroups($document)
+            : [];
         $adjusted = 0;
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
@@ -2416,6 +2425,30 @@ final class GeneratedMarkup
                 continue;
             }
             if (!$horizontallyCentered) {
+                if ($name !== 'group' || !isset($sideTargets[$index])) {
+                    continue;
+                }
+                $layout = $attrs['layout'] ?? null;
+                if (!is_array($layout)) {
+                    if (array_key_exists('layout', $attrs)) {
+                        $warnings[] = self::heroAlignmentShapeWarning(
+                            $document,
+                            $index,
+                            $part,
+                            'layout',
+                            $layout,
+                        );
+                    }
+                    continue;
+                }
+                if (($layout['type'] ?? null) !== 'constrained'
+                    || ($layout['justifyContent'] ?? null) === $coverHorizontal
+                ) {
+                    continue;
+                }
+                $attrs['layout']['justifyContent'] = $coverHorizontal;
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
                 continue;
             }
             $className = $attrs['className'] ?? '';
@@ -2526,11 +2559,63 @@ final class GeneratedMarkup
         $repairs[] = [
             'code' => 'hero-copy-centered',
             'part' => $part,
-            'authored' => "{$adjusted} block(s) off the blueprint's centered anchor",
+            'authored' => "{$adjusted} block(s) off the blueprint's '{$textAnchor}' anchor",
             'delivered' => "cover position and copy alignment on the '{$textAnchor}' anchor",
             'disposition' => 'repaired',
         ];
         return $document->render();
+    }
+
+    /**
+     * The groups whose constrained layout places the side-anchored copy:
+     * every group directly inside a cover, plus each marked copy root and
+     * the groups between it and its cover. The cover's inner container
+     * stays full width (ScaffoldThemeStep, BIGR-992), so these are the
+     * boxes whose default auto margins would otherwise center the copy.
+     *
+     * @return array<int,true> indexed by block index
+     */
+    private static function anchoredCopyGroups(BlockMarkup $document): array
+    {
+        $targets = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'group') {
+                continue;
+            }
+            $parent = $document->parent($index);
+            if ($parent !== null && $document->name($parent) === 'cover') {
+                $targets[$index] = true;
+                continue;
+            }
+            $className = ($document->attrs($index) ?? [])['className'] ?? '';
+            $classes = preg_split(
+                '/\s+/',
+                is_string($className) ? trim($className) : '',
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            if (!in_array('hero-composition__copy', $classes, true)) {
+                continue;
+            }
+            $chain = [];
+            $insideCover = false;
+            for ($i = $index; $i !== null; $i = $document->parent($i)) {
+                $name = $document->name($i);
+                if ($name === 'cover') {
+                    $insideCover = true;
+                    break;
+                }
+                if ($name === 'group') {
+                    $chain[] = $i;
+                }
+            }
+            if ($insideCover) {
+                foreach ($chain as $i) {
+                    $targets[$i] = true;
+                }
+            }
+        }
+        return $targets;
     }
 
     private static function heroAlignmentShapeWarning(

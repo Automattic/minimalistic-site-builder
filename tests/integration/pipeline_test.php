@@ -52,8 +52,6 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $tmp = sys_get_temp_dir() . '/builder_int_' . uniqid();
     $llm = new FakeLlm();
 
-    // refine-prompt (text) — fast small-model clean-up of the raw prompt, runs first
-    $llm->queueText('A cozy neighborhood bakery selling artisan bread and pastries to local residents, with a warm and rustic feel.');
     // site-spec (json) — factual info only, no design fields; carries the page tree
     $llm->queueJson([
         'name' => 'Hearth & Crumb', 'slug' => 'hearth-crumb',
@@ -499,7 +497,7 @@ test('pipeline step order is correct', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
     $ids = blocks_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
-        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
         'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
