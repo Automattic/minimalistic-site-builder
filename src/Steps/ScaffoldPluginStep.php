@@ -259,6 +259,30 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
+                // Put the build's own image references back in placeholder
+                // form first. generate-images rewrites them to the served theme
+                // URL before delivery, assembled plugin pages included, so that
+                // is the spelling that actually arrives — while every rule
+                // below is written against `theme:./assets/`, including the one
+                // that decides whether an inline `url()` may stay. Folding here
+                // is what keeps this side's sanitizer identical to the build's,
+                // and it corrects a stale build-workspace slug on the way.
+                //
+                // Deliberately narrow, because folding is not free: a `theme:`
+                // URL the sweep below does not recognise is an unknown scheme,
+                // and kses replaces the whole attribute with '#'. So fold only
+                // what that sweep accepts — a root-relative path, a lowercase
+                // hyphenated jpg/png — and leave every other reference as the
+                // working URL it already is: a subdirectory, a font, a query
+                // string, an underscore in the name. The reference must also
+                // start an attribute value, so a host is never left stranded in
+                // front of the placeholder, and a foreign one is never laundered
+                // into a spelling the source guard trusts.
+                $content = (string) preg_replace(
+                    '#(?<=["\'(\s])/wp-content/themes/[^/"\'\s]+/assets/([a-z0-9-]+\.(?:jpe?g|png))(?=["\')\s])#i',
+                    'theme:./assets/$1',
+                    $content
+                );
                 // Sanitize FIRST, on the same placeholder form the build's
                 // intake sanitizer saw, so one rule holds on both sides: an
                 // inline `url()` is allowed only when it names a
@@ -478,17 +502,11 @@ final class ScaffoldPluginStep implements Step
          * transparent one, so .png is the site mark or an ornament an older
          * project still carries, and a wheat sprig makes a terrible card.
          *
-         * Matches both spellings of a reference: pages keep
-         * "theme:./assets/<file>" until generate-images rewrites them to
-         * "/wp-content/themes/<slug>/assets/<file>", assembled plugin pages
-         * included. Must run before the markup is pointed at the media.
+         * Runs on the normalized placeholder form, before the markup is
+         * pointed at the imported media.
          */
         function {{FN_PREFIX}}_content_featured_image($content, $map) {
-            if (!preg_match_all(
-                '#(?:theme:\./|/wp-content/themes/[^/"\']+/)assets/([A-Za-z0-9-]+\.jpe?g)#i',
-                (string) $content,
-                $matches
-            )) {
+            if (!preg_match_all('#theme:\./assets/([A-Za-z0-9-]+\.jpe?g)#i', (string) $content, $matches)) {
                 return 0;
             }
             foreach ($matches[1] as $filename) {

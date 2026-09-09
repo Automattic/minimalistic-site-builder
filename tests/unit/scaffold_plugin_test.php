@@ -1315,3 +1315,83 @@ test('every seeded page carries its own first image as the card thumbnail', func
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the seeder resolves the served URLs a build with images actually delivers', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'served-urls';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0],
+    ]]);
+    // What generate-images leaves behind: every reference already rewritten to
+    // the served URL, under the build workspace's own slug rather than the one
+    // the theme ships as.
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:image {"sizeSlug":"full"} --><figure class="wp-block-image size-full">'
+        . '<img src="/wp-content/themes/build-9f2c/assets/hero.jpg" alt="Dawn"/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:cover {"url":"/wp-content/themes/build-9f2c/assets/hero.jpg"} -->'
+        . '<div class="wp-block-cover" style="background-image:url(/wp-content/themes/build-9f2c/assets/hero.jpg)"></div><!-- /wp:cover -->' . "\n"
+        . '<img src="/wp-content/themes/build-9f2c/assets/never-generated.jpg" alt="Skipped">' . "\n"
+        // Outside the placeholder allowlist. Folding these would hand kses an
+        // unknown scheme, and it replaces the whole attribute with '#'.
+        . '<img src="/wp-content/themes/demo/assets/bg_hero.jpg" alt="Underscore">' . "\n"
+        . '<img src="/wp-content/themes/demo/assets/hero.2x.jpg" alt="Dotted">' . "\n"
+        // A foreign host must not reach the placeholder spelling, or it arrives
+        // at the source guard already wearing one the guard trusts.
+        . '<img src="https://evil.tld/wp-content/themes/x/assets/track.jpg" alt="Foreign">' . "\n"
+        . '<div style="background-image:url(https://evil.tld/wp-content/themes/x/assets/bg.jpg)"></div>',
+    );
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'Hero'],
+        ['filename' => 'never-generated.jpg', 'title' => 'Skipped'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/hero.jpg'), 'JPEGDATA');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    $home = '';
+    foreach ($GLOBALS['wp_posts'] as $post) {
+        if (($post['post_name'] ?? '') === 'home') {
+            $home = (string) $post['post_content'];
+        }
+    }
+    $attId = array_keys($GLOBALS['wp_attachments'])[0];
+
+    // The imported attachment is what the markup points at now: core keys
+    // srcset and the lightbox off the id/class pair, and it is the pair
+    // Jetpack's image scan needs to see a picture at all.
+    assert_contains('"id":' . $attId, $home, 'the block carries the attachment id');
+    assert_contains('wp-image-' . $attId, $home, 'the img carries the paired class');
+    assert_contains('http://example.test/wp-content/uploads/2026/07/hero.jpg', $home);
+    assert_contains(
+        'background-image:url(http://example.test/wp-content/uploads/2026/07/hero.jpg)',
+        $home,
+        'the inline background got the plain URL swap',
+    );
+    assert_true(!str_contains($home, 'build-9f2c'), 'no reference is left pointing at the build workspace slug');
+    // An image the build never shipped still falls back to the active theme,
+    // which also corrects the stale slug it arrived with.
+    assert_contains(
+        'https://example.test/wp-content/themes/demo/assets/never-generated.jpg',
+        $home,
+        'an unimported file resolves against the active theme',
+    );
+    // A reference the placeholder allowlist would reject keeps the working URL
+    // it arrived with. Folding it would have stored src="#" instead.
+    assert_contains('/wp-content/themes/demo/assets/bg_hero.jpg', $home, 'an underscore in the name is left alone');
+    assert_contains('/wp-content/themes/demo/assets/hero.2x.jpg', $home, 'a dotted name is left alone');
+    assert_true(!str_contains($home, 'src="#"'), 'nothing was folded into a scheme kses then stripped');
+    // The foreign host never became a placeholder, so the source guard still
+    // sees it for what it is.
+    assert_true(!str_contains($home, 'evil.tld'), 'a foreign host is removed, not laundered');
+    assert_true(!str_contains($home, 'theme:./assets/track.jpg'), 'a foreign reference never reaches the trusted spelling');
+    assert_true(!str_contains($home, 'theme:./assets/bg.jpg'), 'nor through an inline background');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
