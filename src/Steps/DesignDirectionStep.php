@@ -460,6 +460,7 @@ final class DesignDirectionStep implements Step
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
+            'surface_reason'   => '',
             'device'           => Device::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
@@ -1006,6 +1007,15 @@ final class DesignDirectionStep implements Step
             'invalid CTA construction replaced by deterministic solid fallback',
         );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
+        $surfaceReason = is_string($raw['surface_reason'] ?? null) ? trim($raw['surface_reason']) : '';
+        if ($surface !== 'none' && $surfaceReason === '') {
+            $warnings[] = 'file=designDirection.json; path=surface; authored=' . $surface
+                . '; delivered=none; disposition=the texture has no design reason in surface_reason';
+            $surface = 'none';
+        }
+        if ($surface === 'none') {
+            $surfaceReason = '';
+        }
         $device = self::rationHairlineDevice(
             self::normalizeDevice($raw['device'] ?? null, $warnings),
             $conceptRegister,
@@ -1119,6 +1129,7 @@ final class DesignDirectionStep implements Step
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
+            'surface_reason'   => $surfaceReason,
             'device'           => $device,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
@@ -1842,14 +1853,13 @@ final class DesignDirectionStep implements Step
 
         $surface = Surface::explicit($direction['surface'] ?? null);
         if ($surface !== null && $surface !== 'none') {
-            $surfaceMeaning = match ($surface) {
-                'paper'    => 'a paper tooth overlay on the page',
-                'concrete' => 'a concrete grit overlay on the page',
-                'film'     => 'a film grain overlay on the page',
-                'fabric'   => 'a fabric weave overlay on the page',
-                default    => 'the committed surface overlay',
-            };
-            $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
+            $class = Surface::className($surface);
+            $reason = is_string($direction['surface_reason'] ?? null) ? trim($direction['surface_reason']) : '';
+            $facts[] = "- **Surface**: {$surface}. Optional class: {$class}. Design reason: {$reason}. "
+                . 'Use at most one section per page, only where the content supports this reason. '
+                . 'Keep the hero, header, footer, tables, forms, and other sections plain. '
+                . 'A page can use no texture. The build supplies the CSS below section content. '
+                . 'Do not combine a texture with a decorative device.';
         }
 
         $imageKind = ImageKind::explicit($direction['image_kind'] ?? null);
@@ -2264,7 +2274,7 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The committed page surface, or `none` when no direction was persisted
+     * The optional section texture, or `none` when no direction exists
      * or the field is absent.
      */
     public static function surfaceFor(Project $project): string

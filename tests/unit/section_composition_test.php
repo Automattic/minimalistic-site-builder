@@ -494,6 +494,22 @@ test('the section catalog reports an ignored assignment as an advisory warning',
     assert_contains('"image_count":5', $joined);
 });
 
+test('centered-stack budgets one supporting image and retains excess authored media with a warning (BIGR-988)', function () {
+    $image = '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure><!-- /wp:image -->';
+    $single = section_composition_markup('centered-stack', $image);
+    assert_eq([], SectionComposition::markupWarnings($single, 'centered-stack', 'page-home--invitation'));
+
+    $pair = section_composition_markup('centered-stack', $image . $image);
+    $before = $pair;
+    $warnings = SectionComposition::markupWarnings($pair, 'centered-stack', 'page-home--invitation');
+    assert_eq($before, $pair, 'an advisory check never removes supplied media');
+    assert_eq(1, count($warnings));
+    assert_contains('"max_images":1', $warnings[0]);
+    assert_contains('"image_count":2', $warnings[0]);
+    assert_contains('page-home--invitation', $warnings[0]);
+    assert_contains('disposition=safe parseable section was retained', $warnings[0]);
+});
+
 test('the section catalog advisory check never throws on hostile markup', function () {
     foreach ([
         '',
@@ -505,4 +521,469 @@ test('the section catalog advisory check never throws on hostile markup', functi
         $rows = SectionComposition::markupWarnings($markup, 'asymmetric-split', 'page-home--band');
         assert_true(is_array($rows), 'the advisory check always returns rows, never an exception');
     }
+});
+
+test('the bento-grid archetype checks two unequal card rows and one highlight (frm W3a)', function () {
+    assert_true(in_array('bento-grid', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('bento-grid');
+    assert_eq('section-compositions/bento-grid.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq('.section-composition--bento-grid', $meta['root_hook']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+
+    $card = static fn (string $extra = ''): string => '<!-- wp:column {"width":"50%","verticalAlignment":"stretch"} --><div class="wp-block-column">'
+        . '<!-- wp:group {"className":"card-style--flush card-flush' . $extra . '"} --><div class="wp-block-group card-style--flush card-flush' . $extra . '">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Tile</h3><!-- /wp:heading -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (string $cards): string => '<!-- wp:columns {"className":"equal-cards","align":"wide"} --><div class="wp-block-columns alignwide equal-cards">'
+        . $cards . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--bento-grid","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--bento-grid">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Capabilities</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($card(' card-highlight') . $card()) . $row($card() . $card() . $card()));
+    assert_eq([], SectionComposition::markupWarnings($good, 'bento-grid', 'page-home--capabilities'));
+
+    $oneRow = $band($row($card(' card-highlight') . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($oneRow, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('bento row count', $joined);
+    assert_contains('"column_row_count":1', $joined);
+
+    $noHighlight = $band($row($card() . $card()) . $row($card() . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHighlight, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('bento highlight', $joined);
+    assert_contains('"highlighted_cards":0', $joined);
+
+    $twoHighlights = $band($row($card(' card-highlight') . $card(' card-highlight')) . $row($card() . $card() . $card()));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoHighlights, 'bento-grid', 'page-home--capabilities'));
+    assert_contains('"highlighted_cards":2', $joined);
+
+    $plain = str_replace('section-composition--bento-grid', 'section-composition--equal-card-grid', $oneRow);
+    assert_true(
+        !str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'bento'),
+    );
+});
+
+test('the faq-split archetype requires an accordion of three or more details blocks (frm W3b)', function () {
+    assert_true(in_array('faq-split', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('faq-split');
+    assert_eq('section-compositions/faq-split.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_true(!in_array('image', $meta['backgrounds'], true), 'an accordion never sits on an image band');
+
+    $item = static fn (string $q): string => '<!-- wp:details --><details class="wp-block-details"><summary>' . $q . '</summary>'
+        . '<!-- wp:paragraph --><p>Answer.</p><!-- /wp:paragraph --></details><!-- /wp:details -->';
+    $band = static fn (string $items): string => '<!-- wp:group {"className":"section-composition--faq-split","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--faq-split">'
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column"><!-- wp:heading --><h2 class="wp-block-heading">Questions</h2><!-- /wp:heading --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column"><!-- wp:group {"className":"faq-list"} --><div class="wp-block-group faq-list">'
+        . $items . '</div><!-- /wp:group --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+
+    $good = $band($item('One?') . $item('Two?') . $item('Three?'));
+    assert_eq([], SectionComposition::markupWarnings($good, 'faq-split', 'page-home--faq'));
+
+    $thin = $band($item('One?') . $item('Two?'));
+    $joined = implode("\n", SectionComposition::markupWarnings($thin, 'faq-split', 'page-home--faq'));
+    assert_contains('faq accordion items', $joined);
+    assert_contains('"details_block_count":2', $joined);
+
+    $plain = str_replace('section-composition--faq-split', 'section-composition--asymmetric-split', $thin);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'faq'));
+});
+
+test('the cta-panel archetype checks one contained panel and exactly one action (frm W3d)', function () {
+    assert_true(in_array('cta-panel', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('cta-panel');
+    assert_eq('section-compositions/cta-panel.md', $meta['prompt']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_eq(['base', 'tinted'], $meta['backgrounds'], 'the band stays on the page ground; the panel carries contrast');
+
+    $button = '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/start/">Start</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
+    $panel = static fn (string $inner, string $class = 'cta-panel'): string => '<!-- wp:group {"className":"' . $class . '","align":"wide","backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide ' . $class . ' has-contrast-background-color has-base-color has-text-color has-background">'
+        . '<!-- wp:heading {"style":{"typography":{"textAlign":"center"}}} --><h2 class="wp-block-heading has-text-align-center">Start tonight</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"style":{"typography":{"textAlign":"center"}}} --><p class="has-text-align-center">One line.</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+
+    assert_eq([], SectionComposition::markupWarnings($band($panel($button)), 'cta-panel', 'page-home--closing'));
+
+    $noPanel = $band($panel($button, 'closing-box'));
+    $joined = implode("\n", SectionComposition::markupWarnings($noPanel, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel container', $joined);
+    assert_contains('"panel_groups":0', $joined);
+
+    $twoButtons = $band($panel($button . $button));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoButtons, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel action', $joined);
+    assert_contains('"buttons":2', $joined);
+
+    $noButton = $band($panel(''));
+    assert_contains('"buttons":0', implode("\n", SectionComposition::markupWarnings($noButton, 'cta-panel', 'x')));
+
+    $startAligned = str_replace('<p class="has-text-align-center">', '<p class="has-text-align-left">', str_replace('"textAlign":"center"}}} --><p', '"textAlign":"left"}}} --><p', $band($panel($button))));
+    $joined = implode("\n", SectionComposition::markupWarnings($startAligned, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel alignment', $joined, 'a panel with no image reports a start-aligned lead');
+    assert_contains('"start_aligned_text_blocks":1', $joined);
+
+    $other = str_replace('section-composition--cta-panel', 'section-composition--centered-stack', $noPanel);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'centered-stack', 'x')), 'cta panel'));
+});
+
+test('the pricing-tiers archetype checks one row of two or three tiers, one highlight, and one list and action per tier (frm W3c)', function () {
+    assert_true(in_array('pricing-tiers', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('pricing-tiers');
+    assert_eq('section-compositions/pricing-tiers.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq(0, $meta['max_images'], 'pricing carries no image');
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'cta-panel, pricing-tiers'), 'the page plan enum lists it');
+
+    $tier = static fn (string $extra = '', bool $list = true, bool $button = true): string => '<!-- wp:column {"width":"33.33%","verticalAlignment":"stretch"} --><div class="wp-block-column">'
+        . '<!-- wp:group {"className":"card-style--flush card-flush' . $extra . '"} --><div class="wp-block-group card-style--flush card-flush' . $extra . '">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Starter</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"className":"price-figure"} --><p class="price-figure">$29 / month</p><!-- /wp:paragraph -->'
+        . ($list ? '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item --><li>Three seats</li><!-- /wp:list-item --></ul><!-- /wp:list -->' : '')
+        . ($button ? '<!-- wp:buttons {"className":"cta-bottom"} --><div class="wp-block-buttons cta-bottom"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/signup/">Choose</a></div><!-- /wp:button --></div><!-- /wp:buttons -->' : '')
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (string $tiers): string => '<!-- wp:columns {"className":"equal-cards","align":"wide"} --><div class="wp-block-columns alignwide equal-cards">'
+        . $tiers . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--pricing-tiers","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--pricing-tiers">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Plans</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $three = $band($row($tier() . $tier(' card-highlight') . $tier()));
+    assert_eq([], SectionComposition::markupWarnings($three, 'pricing-tiers', 'page-home--plans'));
+    $two = $band($row($tier() . $tier(' card-highlight')));
+    assert_eq([], SectionComposition::markupWarnings($two, 'pricing-tiers', 'page-home--plans'), 'two plans are a legitimate set');
+
+    $four = $band($row($tier() . $tier(' card-highlight') . $tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($four, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing tier row', $joined);
+    assert_contains('"tiers_per_row":[4]', $joined);
+
+    $twoRows = $band($row($tier() . $tier(' card-highlight')) . $row($tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoRows, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('"column_rows":2', $joined);
+
+    $noHighlight = $band($row($tier() . $tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHighlight, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing highlight', $joined);
+    assert_contains('"highlighted_tiers":0', $joined);
+
+    $noButton = $band($row($tier() . $tier(' card-highlight') . $tier('', true, false)));
+    $joined = implode("\n", SectionComposition::markupWarnings($noButton, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing tier anatomy', $joined);
+    assert_contains('"buttons":2', $joined);
+
+    $noList = $band($row($tier() . $tier(' card-highlight') . $tier('', false, true)));
+    $joined = implode("\n", SectionComposition::markupWarnings($noList, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('"lists":2', $joined);
+
+    $plain = str_replace('section-composition--pricing-tiers', 'section-composition--equal-card-grid', $four);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'pricing'));
+});
+
+test('the stat-ledger archetype checks one row of three or four figure-led columns and no media (frm W3e)', function () {
+    assert_true(in_array('stat-ledger', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('stat-ledger');
+    assert_eq('section-compositions/stat-ledger.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'pricing-tiers, stat-ledger'), 'the page plan enum lists it');
+
+    $column = static fn (string $figure, string $label = 'projects shipped'): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $figure . '</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">' . $label . '</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--stat-ledger","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--stat-ledger">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">By the numbers</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $four = $band($row($column('120+') . $column('98%') . $column('$4.2M') . $column('1,200')));
+    assert_eq([], SectionComposition::markupWarnings($four, 'stat-ledger', 'page-home--metrics'));
+    $three = $band($row($column('12 km') . $column('40') . $column('3x')));
+    assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
+    $unitWord = $band($row($column('4 years') . $column('40') . $column('3x')));
+    assert_contains('stat ledger figures', implode("\n", SectionComposition::markupWarnings($unitWord, 'stat-ledger', 'page-home--metrics')), 'a unit word belongs in the label');
+    assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
+
+    $two = $band($row($column('120+') . $column('98%')));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('stat ledger row', $joined);
+    assert_contains('"columns_per_row":[2]', $joined);
+
+    $sentence = $band($row($column('120+') . $column('98%') . $column('Over 4 million raised')));
+    $joined = implode("\n", SectionComposition::markupWarnings($sentence, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('stat ledger figures', $joined);
+    assert_contains('"figure_led_columns":2', $joined);
+
+    $withImage = str_replace('<h3 class="wp-block-heading">120+</h3><!-- /wp:heading -->', '<h3 class="wp-block-heading">120+</h3><!-- /wp:heading --><!-- wp:image --><figure class="wp-block-image"><img src="x.jpg" alt=""/></figure><!-- /wp:image -->', $four);
+    $joined = implode("\n", SectionComposition::markupWarnings($withImage, 'stat-ledger', 'page-home--metrics'));
+    assert_contains('archetype media count', $joined);
+
+    $plain = str_replace('section-composition--stat-ledger', 'section-composition--equal-card-grid', $two);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'stat ledger'));
+});
+
+test('the feature-row-hairlines archetype checks one row of three or four heading-led text columns without cards (frm W3e)', function () {
+    assert_true(in_array('feature-row-hairlines', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('feature-row-hairlines');
+    assert_eq('section-compositions/feature-row-hairlines.md', $meta['prompt']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'stat-ledger, feature-row-hairlines'));
+
+    $column = static fn (string $inner): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">' . $inner . '</div><!-- /wp:column -->';
+    $text = static fn (string $title): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One line of support.</p><!-- /wp:paragraph -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--feature-row-hairlines","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--feature-row-hairlines">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Four pillars</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $four = $band($row($column($text('Dashboards')) . $column($text('Reports')) . $column($text('Workspace')) . $column($text('Bank sync'))));
+    assert_eq([], SectionComposition::markupWarnings($four, 'feature-row-hairlines', 'page-home--features'));
+
+    $two = $band($row($column($text('A')) . $column($text('B'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row shape', $joined);
+
+    $noHeading = $band($row($column('<!-- wp:paragraph --><p>No heading.</p><!-- /wp:paragraph -->') . $column($text('B')) . $column($text('C'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHeading, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row headings', $joined);
+    assert_contains('"heading_led_columns":2', $joined);
+
+    $carded = $band($row($column('<!-- wp:group {"className":"card-style--flush"} --><div class="wp-block-group card-style--flush">' . $text('A') . '</div><!-- /wp:group -->') . $column($text('B')) . $column($text('C'))));
+    $joined = implode("\n", SectionComposition::markupWarnings($carded, 'feature-row-hairlines', 'page-home--features'));
+    assert_contains('feature row cards', $joined);
+    assert_contains('"card_columns":1', $joined);
+});
+
+test('the ruled-idiom cleanup keeps a composition marker that names hairlines (frm W3e)', function () {
+    $markup = '<!-- wp:group {"className":"section-composition--feature-row-hairlines is-style-rule-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--feature-row-hairlines is-style-rule-row"><!-- wp:paragraph --><p>Row</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $repairs = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($markup, 'page-home--features', $repairs);
+    assert_contains('section-composition--feature-row-hairlines', $out, 'the archetype marker survives');
+    assert_true(!str_contains($out, 'is-style-rule-row'), 'the authored rule class still goes');
+});
+
+test('the zigzag-steps archetype checks three to five two-column rows whose copy side alternates (frm W3g)', function () {
+    assert_true(in_array('zigzag-steps', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('zigzag-steps');
+    assert_eq('section-compositions/zigzag-steps.md', $meta['prompt']);
+    assert_eq(5, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'feature-row-hairlines, zigzag-steps'));
+
+    $copy = static fn (string $t): string => '<!-- wp:column {"width":"55%"} --><div class="wp-block-column"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading --><!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph --></div><!-- /wp:column -->';
+    $media = '<!-- wp:column {"width":"45%"} --><div class="wp-block-column"><!-- wp:group {"className":"step-plate","backgroundColor":"band"} --><div class="wp-block-group step-plate has-band-background-color has-background"></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (bool $copyFirst, string $t): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . ($copyFirst ? $copy($t) . $media : $media . $copy($t)) . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--zigzag-steps","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--zigzag-steps"><!-- wp:heading --><h2 class="wp-block-heading">How we work</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row(true, 'Discovery') . $row(false, 'Strategy') . $row(true, 'Design'));
+    assert_eq([], SectionComposition::markupWarnings($good, 'zigzag-steps', 'page-home--process'));
+
+    $two = $band($row(true, 'A') . $row(false, 'B'));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'zigzag-steps', 'page-home--process'));
+    assert_contains('zigzag step rows', $joined);
+
+    $sameSide = $band($row(true, 'A') . $row(true, 'B') . $row(false, 'C'));
+    $joined = implode("\n", SectionComposition::markupWarnings($sameSide, 'zigzag-steps', 'page-home--process'));
+    assert_contains('zigzag alternation', $joined);
+    assert_contains('"copy_column_per_row":[0,0,1]', $joined);
+
+    $plain = str_replace('section-composition--zigzag-steps', 'section-composition--asymmetric-split', $sameSide);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'zigzag'));
+
+    $wrapped = static fn (string $t): string => '<!-- wp:column {"width":"55%"} --><div class="wp-block-column"><!-- wp:group {"className":"card-style--flush"} --><div class="wp-block-group card-style--flush"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading --></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $empty = '<!-- wp:column {"width":"45%"} --><div class="wp-block-column"></div><!-- /wp:column -->';
+    $deep = $band('<!-- wp:columns --><div class="wp-block-columns">' . $wrapped('A') . $empty . '</div><!-- /wp:columns -->'
+        . '<!-- wp:columns --><div class="wp-block-columns">' . $empty . $wrapped('B') . '</div><!-- /wp:columns -->'
+        . '<!-- wp:columns --><div class="wp-block-columns">' . $wrapped('C') . $empty . '</div><!-- /wp:columns -->');
+    assert_eq([], SectionComposition::markupWarnings($deep, 'zigzag-steps', 'page-home--process'), 'a wrapped heading still names the copy side');
+});
+
+test('the statement-lines archetype checks one marked group of three to six heading lines and nothing else (frm W3e)', function () {
+    assert_true(in_array('statement-lines', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('statement-lines');
+    assert_eq('section-compositions/statement-lines.md', $meta['prompt']);
+    assert_eq(false, $meta['requires_row']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'zigzag-steps, statement-lines'));
+
+    $line = static fn (string $t): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading -->';
+    $list = static fn (string $inner): string => '<!-- wp:group {"className":"statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group statement-lines">' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--statement-lines"><!-- wp:heading --><h2 class="wp-block-heading">What we stand for</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($list($line('Contrast is a decision') . $line('Type carries the argument') . $line('Nothing without weight')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'statement-lines', 'page-home--values'));
+    $two = $band($list($line('A') . $line('B')));
+    assert_contains('statement lines list', implode("\n", SectionComposition::markupWarnings($two, 'statement-lines', 'page-home--values')));
+    $mixed = $band($list($line('A') . $line('B') . $line('C') . '<!-- wp:paragraph --><p>Not a line.</p><!-- /wp:paragraph -->'));
+    $joined = implode("\n", SectionComposition::markupWarnings($mixed, 'statement-lines', 'page-home--values'));
+    assert_contains('"others":1', $joined);
+    $none = $band($line('A') . $line('B') . $line('C'));
+    assert_contains('"list_groups":0', implode("\n", SectionComposition::markupWarnings($none, 'statement-lines', 'page-home--values')));
+    $plain = str_replace('section-composition--statement-lines', 'section-composition--centered-stack', $two);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'statement'));
+});
+
+test('the project-grid-2x2 archetype checks rows of two cover tiles, each naming its project once (frm W3h)', function () {
+    assert_true(in_array('project-grid-2x2', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('project-grid-2x2');
+    assert_eq('section-compositions/project-grid-2x2.md', $meta['prompt']);
+    assert_eq(2, $meta['min_images']);
+    assert_eq(4, $meta['max_images']);
+    assert_true($meta['requires_row']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'statement-lines, project-grid-2x2'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), '- project-grid-2x2 — '));
+    assert_eq([2, 4], SectionComposition::PROJECT_TILE_COUNTS);
+    assert_eq('project-meta', SectionComposition::PROJECT_META_CLASS);
+
+    $tile = static fn (string $name, int $headings = 1): string => '<!-- wp:column --><div class="wp-block-column"><!-- wp:cover {"url":"assets/x.jpg","dimRatio":40,"overlayColor":"contrast","contentPosition":"bottom left","textColor":"base"} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="assets/x.jpg" alt="AI_IMAGE: a studio | project tile | photorealistic | landscape"/><div class="wp-block-cover__inner-container">'
+        . str_repeat('<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $name . '</h3><!-- /wp:heading -->', $headings)
+        . '<!-- wp:paragraph {"className":"project-meta"} --><p class="project-meta">Identity · Web</p><!-- /wp:paragraph --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $columns): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $columns . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2"><!-- wp:heading --><h2 class="wp-block-heading">Selected work</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($tile('Atlas') . $tile('Berg')) . $row($tile('Cove') . $tile('Dune')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'project-grid-2x2', 'page-home--work'));
+    $pair = $band($row($tile('Atlas') . $tile('Berg')));
+    assert_eq([], SectionComposition::markupWarnings($pair, 'project-grid-2x2', 'page-home--work'), 'two tiles are a valid grid');
+
+    $three = $band($row($tile('A') . $tile('B') . $tile('C')));
+    $joined = implode("\n", SectionComposition::markupWarnings($three, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project grid tiles', $joined);
+    assert_contains('"columns_per_row":[3]', $joined);
+
+    $noCover = $band($row('<!-- wp:column --><div class="wp-block-column"><!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt=""/></figure><!-- /wp:image --></div><!-- /wp:column -->' . $tile('B')));
+    $joined = implode("\n", SectionComposition::markupWarnings($noCover, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project grid tiles', $joined);
+
+    $twoNames = $band($row($tile('Atlas', 2) . $tile('Berg')));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoNames, 'project-grid-2x2', 'page-home--work'));
+    assert_contains('project tile heading', $joined);
+    assert_contains('"headings_per_tile":[2,1]', $joined);
+
+    $plain = str_replace('section-composition--project-grid-2x2', 'section-composition--equal-card-grid', $three);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'project grid'));
+});
+
+test('the logo-strip archetype checks one marked row of four to eight one-line names and no images (frm PR-3h2)', function () {
+    assert_true(in_array('logo-strip', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('logo-strip');
+    assert_eq('section-compositions/logo-strip.md', $meta['prompt']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'project-grid-2x2, logo-strip'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), '- logo-strip — '));
+    assert_eq([4, 5, 6, 7, 8], SectionComposition::LOGO_STRIP_COUNTS);
+
+    $name = static fn (string $t): string => '<!-- wp:paragraph --><p>' . $t . '</p><!-- /wp:paragraph -->';
+    $row = static fn (string $inner): string => '<!-- wp:group {"className":"logo-strip","align":"wide","layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"}} --><div class="wp-block-group alignwide logo-strip">' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--logo-strip","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--logo-strip"><!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">Trusted by teams at</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row($name('Northline') . $name('Atlas Harbor') . $name('Vellum Press') . $name('Observatory') . $name('Kite Labs')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'logo-strip', 'page-home--partners'));
+
+    $three = $band($row($name('A') . $name('B') . $name('C')));
+    $joined = implode("\n", SectionComposition::markupWarnings($three, 'logo-strip', 'page-home--partners'));
+    assert_contains('logo strip names', $joined);
+    assert_contains('"names":3', $joined);
+
+    $long = $band($row($name('A') . $name('B') . $name('C') . $name('The Very Long Studio Name')));
+    assert_contains('logo strip names', implode("\n", SectionComposition::markupWarnings($long, 'logo-strip', 'page-home--partners')), 'a four-word name is not a wordmark');
+
+    $picture = $band($row($name('A') . $name('B') . $name('C') . '<!-- wp:image --><figure class="wp-block-image"><img src="logo.png" alt="AI_IMAGE: a logo | strip | flat | square"/></figure><!-- /wp:image -->'));
+    assert_contains('logo strip names', implode("\n", SectionComposition::markupWarnings($picture, 'logo-strip', 'page-home--partners')), 'a logo image is the text-in-image defect');
+
+    $unmarked = $band(str_replace('logo-strip', 'brand-row', $row($name('A') . $name('B') . $name('C') . $name('D'))));
+    assert_contains('"rows":0', implode("\n", SectionComposition::markupWarnings($unmarked, 'logo-strip', 'page-home--partners')));
+
+    $plain = str_replace('section-composition--logo-strip', 'section-composition--centered-stack', $three);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'logo strip'));
+});
+
+test('a highlighted card the brief states reaches an equal-card-grid as one committed highlight (frm PR-3s)', function () {
+    assert_eq('three service cards with one highlighted in violet', SectionComposition::statedHighlight('Light page, tight sans headings, three service cards with one highlighted in violet, a dark band.'));
+    assert_eq(null, SectionComposition::statedHighlight('three pricing tiers with the middle one highlighted, a photo testimonial'), 'a pricing row carries its own highlight');
+    assert_eq(null, SectionComposition::statedHighlight('highlight the craft in every card'), 'a verb is not a stated card');
+    assert_eq(null, SectionComposition::statedHighlight('Create a website for a Georgian restaurant.'));
+    assert_eq('three cards with one highlighted in violet', SectionComposition::statedHighlightFor(['original_prompt' => 'three cards with one highlighted in violet', 'prompt' => 'three cards']));
+    assert_eq(null, SectionComposition::statedHighlightFor([]));
+    $clause = 'three service cards with one highlighted in violet';
+    assert_true(SectionComposition::highlightAppliesTo($clause, ['slug' => 'services', 'title' => 'Three ways to work together', 'type' => 'services']));
+    assert_true(!SectionComposition::highlightAppliesTo($clause, ['slug' => 'work', 'title' => 'Selected work', 'type' => 'portfolio']), 'the work grid is not the services row');
+    assert_true(!SectionComposition::highlightAppliesTo(null, ['slug' => 'services']));
+    assert_true(!SectionComposition::highlightAppliesTo('one highlighted card', ['slug' => 'services']), 'a clause with no subject reaches nothing');
+
+    assert_contains('exactly ONE card group adds `"className":"card-highlight"`', SectionComposition::highlightDirective('equal-card-grid', true));
+    assert_eq('', SectionComposition::highlightDirective('equal-card-grid', false));
+    assert_eq('', SectionComposition::highlightDirective('bento-grid', true), 'bento carries its own highlight rule');
+    $vars = SectionComposition::recipeVars('equal-card-grid', 'card', true);
+    assert_contains('backgroundColor":"accent"', $vars['highlight_directive']);
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/section-compositions/equal-card-grid.md')), '{{highlight_directive}}'));
+
+    $card = static fn (string $extra = ''): string => '<!-- wp:column {"width":"33.33%","verticalAlignment":"stretch"} --><div class="wp-block-column"><!-- wp:group {"className":"item-pattern__item card-style--flush' . $extra . '","layout":{"type":"constrained"}} --><div class="wp-block-group item-pattern__item card-style--flush' . $extra . '"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Brand</h3><!-- /wp:heading --><!-- wp:paragraph --><p>Identity.</p><!-- /wp:paragraph --></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $band = static fn (string $cards): string => '<!-- wp:group {"className":"section-composition--equal-card-grid","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--equal-card-grid"><!-- wp:columns {"align":"wide","className":"equal-cards"} --><div class="wp-block-columns alignwide equal-cards">' . $cards . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+
+    $one = $band($card() . $card(' card-highlight') . $card());
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($one, 'equal-card-grid', 'page-home--services', 'card', true)), 'stated highlight'));
+    $none = $band($card() . $card() . $card());
+    $joined = implode("\n", SectionComposition::markupWarnings($none, 'equal-card-grid', 'page-home--services', 'card', true));
+    assert_contains('stated highlight', $joined);
+    assert_contains('"highlighted_cards":0', $joined);
+    $two = $band($card(' card-highlight') . $card(' card-highlight') . $card());
+    assert_contains('"highlighted_cards":2', implode("\n", SectionComposition::markupWarnings($two, 'equal-card-grid', 'page-home--services', 'card', true)));
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($none, 'equal-card-grid', 'page-home--services', 'card')), 'stated highlight'), 'no stated highlight, no check');
+});
+
+test('a project grid wrapped in the band\'s own cover counts only the column tiles (frm PR-3x)', function () {
+    $tile = static fn (string $title): string => '<!-- wp:column {"width":"50%"} --><div class="wp-block-column"><!-- wp:cover {"url":"/x.jpg","dimRatio":50,"className":"project-tile"} --><div class="wp-block-cover project-tile"><img class="wp-block-cover__image-background" src="/x.jpg" alt=""/><div class="wp-block-cover__inner-container"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $tiles): string => '<!-- wp:columns --><div class="wp-block-columns">' . $tiles . '</div><!-- /wp:columns -->';
+    $grid = $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four'));
+    $wrapped = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">'
+        . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70,"align":"full"} --><div class="wp-block-cover alignfull"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Gallery</h2><!-- /wp:heading -->' . $grid
+        . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $joined = implode("\n", SectionComposition::markupWarnings($wrapped, 'project-grid-2x2', 'page-home--gallery'));
+    assert_true(!str_contains($joined, 'project grid tiles'), 'the band cover is not a tile');
+    assert_true(!str_contains($joined, 'archetype media count'), 'the band cover picture is not budgeted media (frm PR-3x2)');
+
+    $five = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">'
+        . $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four')) . $row($tile('Five'))
+        . '</div><!-- /wp:group -->';
+    $joined = implode("\n", SectionComposition::markupWarnings($five, 'project-grid-2x2', 'page-home--gallery'));
+    assert_contains('project grid tiles', $joined, 'five column tiles still fail');
+    assert_contains('"tiles":5', $joined);
+});
+
+test('a project grid counts its tile pictures and image blocks, never the band cover picture (frm PR-3x2)', function () {
+    $tile = static fn (string $title): string => '<!-- wp:column {"width":"50%"} --><div class="wp-block-column"><!-- wp:cover {"url":"/x.jpg","dimRatio":50} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="/x.jpg" alt=""/><div class="wp-block-cover__inner-container"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $tiles): string => '<!-- wp:columns --><div class="wp-block-columns">' . $tiles . '</div><!-- /wp:columns -->';
+    $open = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">';
+    $close = '</div><!-- /wp:group -->';
+
+    $wrapped = $open . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70,"align":"full"} --><div class="wp-block-cover alignfull"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four')) . '</div></div><!-- /wp:cover -->' . $close;
+    $joined = implode("\n", SectionComposition::markupWarnings($wrapped, 'project-grid-2x2', 'page-home--gallery'));
+    assert_true(!str_contains($joined, 'archetype media count'), $joined);
+
+    $one = $open . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . $row($tile('One')) . '</div></div><!-- /wp:cover -->' . $close;
+    $joined = implode("\n", SectionComposition::markupWarnings($one, 'project-grid-2x2', 'page-home--gallery'));
+    assert_contains('archetype media count', $joined);
+    assert_contains('"image_count":1', $joined);
 });
