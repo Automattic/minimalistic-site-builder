@@ -57,7 +57,7 @@ final class SitePreset
                 $spec = [];
             }
             $blogname = (string) ($spec['name'] ?? $blogname);
-            $blogdescription = self::blogDescription($spec);
+            $blogdescription = self::siteDescription($spec);
         }
 
         return [
@@ -94,6 +94,28 @@ final class SitePreset
     public static function blogDescription(array $spec): string
     {
         return trim((string) ($spec['tagline'] ?? ''));
+    }
+
+    /**
+     * The string WordPress stores in `blogdescription` — the front page's
+     * og:description, which Jetpack builds from this option and no other.
+     *
+     * The stated tagline has to come first: a header that keeps a
+     * wp:site-tagline block renders this exact option, and it keeps one only
+     * when a tagline was stated (AboveFoldContract::headerTextFacts). With no
+     * tagline nothing on the page renders this, so it carries the spec's
+     * `description` instead.
+     *
+     * `topic` is not a third rung. WordPress appends this option to the front
+     * page's <title>, where a bare phrase reads as "Corner Bakery – sourdough".
+     *
+     * @param array<string,mixed> $spec
+     */
+    public static function siteDescription(array $spec): string
+    {
+        $tagline = self::blogDescription($spec);
+
+        return $tagline !== '' ? $tagline : trim((string) ($spec['description'] ?? ''));
     }
 
     /** Mu-plugin body that fails outbound HTTP fast in the local preview. */

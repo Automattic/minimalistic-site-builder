@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SitePreset;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
@@ -13,7 +14,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * and content plugin.
  *
  * Input:  siteSpec.json (name, slug, factual fields) + scaffolded theme files
- * Output: theme/style.css and theme/readme.txt with {{placeholders}} replaced.
+ * Output: theme/style.css and theme/readme.txt with {{placeholders}} replaced,
+ *         plus plugin/site.json — the site description the seeder applies.
  *
  * Identity is purely factual, so it sources from siteSpec.json. The spec no
  * longer carries a fixed "description" field, so we compose one from the
@@ -22,6 +24,9 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class ApplyIdentityStep implements Step
 {
+    /** Site facts the seeder plugin reads at activation, project-relative. */
+    public const SITE_FILE = 'plugin/site.json';
+
     public function id(): string
     {
         return 'apply-identity';
@@ -38,7 +43,7 @@ final class ApplyIdentityStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['siteSpec.json', 'theme/style.css', 'theme/readme.txt', ScaffoldPluginStep::MAIN_FILE],
-            writes: ['theme/style.css', 'theme/readme.txt', ScaffoldPluginStep::MAIN_FILE],
+            writes: ['theme/style.css', 'theme/readme.txt', ScaffoldPluginStep::MAIN_FILE, self::SITE_FILE],
             concurrent: false,
         );
     }
@@ -74,6 +79,16 @@ final class ApplyIdentityStep implements Step
         foreach ($files as $file) {
             $filled = PromptRenderer::fill($project->readText($file), $vars);
             $project->writeText($file, $filled);
+        }
+
+        // The seeder applies this at activation. JSON, beside the pages.json
+        // and images.json it already reads, rather than a placeholder in the
+        // plugin PHP: the string is model-authored and needs no escaping to
+        // stay inert here.
+        if ($project->exists(ScaffoldPluginStep::MAIN_FILE)) {
+            $project->writeJson(self::SITE_FILE, [
+                'description' => SitePreset::siteDescription($spec),
+            ]);
         }
     }
 
