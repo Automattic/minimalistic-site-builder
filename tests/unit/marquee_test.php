@@ -97,3 +97,9 @@ test('a marquee wraps whole under reduced motion or without the script, never an
     $js = (string) file_get_contents(repo_path('assets/motion/motion.js'));
     assert_contains("matchMedia('(prefers-reduced-motion: reduce)')", $js, 'the script never builds a track under reduced motion');
 });
+
+test('the marquee note has a separate budget from ambient motion', function () {
+    $result = Motion::validateNote('ken-burns, marquee', 'dramatic');
+    assert_eq(['ken-burns', 'marquee'], $result['classes']);
+    assert_eq([], $result['dropped']);
+});
