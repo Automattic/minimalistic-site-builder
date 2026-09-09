@@ -89,7 +89,7 @@ With `multiPage` omitted, a supplied spec retains its complete page tree. An
 explicit `multiPage: false` still forces the homepage-only product. A non-empty
 `pages:` list implies multi-page scope and has highest precedence over the
 supplied tree. A missing `siteSpec` keeps the CLI/default behavior: the step
-generates the candidate from the refined prompt.
+generates the candidate from the user prompt.
 
 The machine-readable input contract is
 [`schemas/site-spec.schema.json`](../schemas/site-spec.schema.json), with a

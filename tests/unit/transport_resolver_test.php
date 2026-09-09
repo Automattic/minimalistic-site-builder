@@ -1527,7 +1527,7 @@ test('W17 codex-cli implies OpenAI models for transport and steps', function ():
         assert_eq('openai', $details['provider']);
         assert_eq('gpt-5.5', $details['model']);
         assert_eq($details['model'], $details['default']);
-        assert_eq('gpt-5.4-mini', $details['steps']['refine-prompt']);
+        assert_eq('gpt-5.4-mini', $details['steps']['site-spec']);
         assert_eq('gpt-5.5', $details['steps']['sections']);
         assert_true(!str_starts_with($details['steps']['sections'], 'claude-'));
     });

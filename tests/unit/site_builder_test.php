@@ -21,7 +21,7 @@ test('SiteBuilder pipeline exposes the default blocks step order and stop ids', 
         $builder = make_test_builder(new FakeLlm(), $tmp);
 
         assert_eq([
-            'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+            'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
             // normalize-layout MUST precede contrast-fix and motion-sanity: the
             // attribute repair can activate previously-inert color/motion
@@ -49,7 +49,7 @@ test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallbac
         $pipeline = $builder->pipeline();
 
         assert_eq([
-            'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+            'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
             'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout', 'cta-budget',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
             'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
@@ -176,7 +176,6 @@ test('SiteBuilder fixed pages override a host-supplied siteSpec tree', function 
 
 test('SiteBuilder supplied siteSpec bypasses the site-spec LLM in the default pipeline', function () {
     $llm = new FakeLlm();
-    $llm->queueText('A refined brief for the host-provided cafe.'); // refine-prompt only
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
     $builder = make_test_builder($llm, $tmp);
 
@@ -194,7 +193,7 @@ test('SiteBuilder supplied siteSpec bypasses the site-spec LLM in the default pi
     );
     $builder->pipeline()->runThrough($project, 'site-spec');
 
-    assert_eq(1, $llm->completeCalls, 'refine-prompt still consumes the user prompt');
+    assert_eq(0, $llm->completeCalls, 'no text call runs before site-spec');
     assert_eq(0, $llm->completeJsonCalls, 'site-spec candidate generation is bypassed');
     assert_eq('Provided Cafe', $project->readJson('siteSpec.json')['name']);
     assert_eq(2, count($project->readJson('siteSpec.json')['pages']));
@@ -232,8 +231,7 @@ test('SiteBuilder explicit single-page scope still overrides a supplied siteSpec
 
 test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
     $llm = new FakeLlm();
-    // refine-prompt (text), then site-spec (json) — same order as the integration harness
-    $llm->queueText('A cozy neighborhood bakery selling artisan bread and pastries.');
+    // site-spec (json) — same order as the integration harness
     $llm->queueJson([
         'name' => 'Test Cafe', 'slug' => 'test-cafe',
         'title' => 'Test Cafe', 'description' => 'A test cafe',

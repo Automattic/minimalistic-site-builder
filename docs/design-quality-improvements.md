@@ -221,7 +221,7 @@ The masthead, footer copyright, and persona never agree, and the long generic ti
 footer wordmark to wrap mid-word ("PHOTOJOURNALIS T PORTFOLIO").
 
 **Fix:** site-spec should record `language` (and enforce it in section/header/footer prompts), and when the
-user gives no name, the refine or spec step should commit to one invented brand/persona name that everything
+user gives no name, the spec step should commit to one invented brand/persona name that everything
 downstream reuses (masthead, email domain, copyright).
 
 ### D4. Fake contact form — P2

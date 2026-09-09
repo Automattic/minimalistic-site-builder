@@ -310,6 +310,35 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.hero-facts--panel .hero-composition__facts {', $css);
     assert_contains('.hero-facts--panel .hero-composition__facts > p {', $css);
     assert_contains('.wp-block-group.hero-frame--rounded .wp-block-cover.alignfull {', $css);
+    // A side-anchored copy zone gives the cover a custom contentPosition,
+    // and core's `width: auto` on the inner container then shrink-wraps a
+    // columns copy zone to a fraction of its own contentSize (BIGR-992).
+    // The skeleton restores full width on both cover recipes above core's
+    // (0,5,0) width rule, and justifies the zone to the anchored side
+    // itself, because the full-width flex item leaves the cover's
+    // justify-content nothing to move.
+    foreach (['cinematic-safe-zone', 'layered-poster'] as $recipe) {
+        assert_contains(
+            '.hero-composition--' . $recipe
+                . ' > .wp-block-cover.has-custom-content-position.has-custom-content-position'
+                . ' > .wp-block-cover__inner-container.wp-block-cover__inner-container',
+            $css,
+        );
+    }
+    assert_contains(
+        ':is(.hero-composition--cinematic-safe-zone, .hero-composition--layered-poster) > .wp-block-cover'
+            . ':is(.is-position-top-left, .is-position-center-left, .is-position-bottom-left)'
+            . ' > .wp-block-cover__inner-container > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {'
+            . "\n    margin-left: 0 !important;\n    margin-right: auto !important;",
+        $css,
+    );
+    assert_contains(
+        ':is(.hero-composition--cinematic-safe-zone, .hero-composition--layered-poster) > .wp-block-cover'
+            . ':is(.is-position-top-right, .is-position-center-right, .is-position-bottom-right)'
+            . ' > .wp-block-cover__inner-container > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {'
+            . "\n    margin-left: auto !important;\n    margin-right: 0 !important;",
+        $css,
+    );
     assert_contains('@media (max-width: 781.98px)', $css);
     foreach ([
         'stack-copy-first',
