@@ -213,3 +213,10 @@ test('section badges use the committed pill radius without another token kit', f
         assert_contains('var(--shape-radius-pill, 9999px)', SectionLabel::kitCss('section-badge', $shape));
     }
 });
+
+test('a badge uses a block flex box so auto margins can center it', function () {
+    $css = SectionLabel::kitCss('section-badge');
+    assert_contains('display: flex;', $css);
+    assert_contains('inline-size: fit-content;', $css);
+    assert_contains('margin-inline: auto !important;', $css);
+});

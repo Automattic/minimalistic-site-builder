@@ -102,7 +102,7 @@ final class SectionLabel
                section heading. Written by the build, never by a model. The pill
                keeps the heading ink; only the dot takes the accent. */
             p.{$hook} {
-                display: inline-flex;
+                display: flex;
                 align-items: center;
                 gap: 0.5em;
                 inline-size: fit-content;
