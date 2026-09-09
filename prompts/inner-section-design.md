@@ -51,6 +51,8 @@ Return exactly one closed root `<section id="{{section_slug}}">...</section>` an
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `section`, `nav`, `article`, `aside`, `div`, and `span`.
 
+- Surface: the DESIGN DIRECTION's `surface--<name>` class is an optional exception to the existing-class rule. Use it only when this section's content directly supports the stated texture reason. Read the full page outline. Only the first suitable section after the hero may use it; every later section remains plain. Use no texture when no section benefits. Put the class on the root section only. Keep tables, forms, navigation, image backgrounds, and sections with a decorative device plain. The build supplies the CSS and removes extra texture classes.
+
 - Device: when the DESIGN DIRECTION carries a **Device** fact naming a class, put that class on the root element of exactly ONE band, and never the hero — the build ships the CSS for it and strips the class from any extra band or from the hero. When there is no Device fact, never invent one.
 
 There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with the established HTML classes only. A shop is a catalog storefront: no cart, checkout, quantity input, add-to-cart control, price-per-unit purchase flow, or WooCommerce block — product cards that invite a contact enquiry are the whole store.
