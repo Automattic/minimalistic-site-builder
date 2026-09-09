@@ -117,6 +117,7 @@ final class ImagePromptComposer
         bool $transparent = false,
         ?PromptRenderer $renderer = null,
         string $imageCrop = '',
+        string $imageKind = '',
     ): string {
         $renderer ??= new PromptRenderer(Package::promptsDir());
 
@@ -140,6 +141,23 @@ final class ImagePromptComposer
         $gradeClause = ($imageGrade !== '' && !$transparent)
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
+        // Apply the image kind to opaque images and transparent assets.
+        $kindClause = ImageKind::promptClause($imageKind, $transparent);
+        // Use a portrait for a person on a ui-mockup site.
+        if (!$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
+            && ImageKind::namesPerson($subject . ' ' . $pageContext)) {
+            $kindClause = ImageKind::portraitClause();
+            // The portrait clause replaces the interface grade.
+            $gradeClause = '';
+        }
+        // A screenshot uses the interface clause without a photographic grade.
+        $screenshot = !$transparent && ImageKind::skipsGrade($imageKind) && $kindClause !== ImageKind::portraitClause();
+        if ($screenshot) {
+            $gradeClause = '';
+        }
+        if ($kindClause !== '') {
+            $gradeClause = trim($gradeClause . ' ' . $kindClause);
+        }
 
         // Like the grade, this is a render instruction: it sits before the
         // guidance so end-trimming under token pressure never sheds it. The model
@@ -171,7 +189,8 @@ final class ImagePromptComposer
         // assets use a dedicated clause because their carrier is the isolated
         // focal subject rather than set dressing in a scene.
         $letteringClause = '';
-        if (self::subjectNamesTextCarrier($subject)) {
+        // A screenshot uses interface content without scene props.
+        if (!$screenshot && self::subjectNamesTextCarrier($subject)) {
             $letteringClause = $transparent
                 ? 'The isolated subject has a plain, unmarked material surface; its'
                     . ' form is conveyed only through shape, color and texture.'

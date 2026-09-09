@@ -30,6 +30,10 @@ final class ImageQa
         if ($filename === '' || GeminiImage::mimeForFilename($filename) === 'image/png') {
             return false;
         }
+        // Inspect every product screen for text defects.
+        if (ImageKind::inspectsEveryImage((string) ($spec['image_kind'] ?? ''))) {
+            return true;
+        }
         if (preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1) {
             return true;
         }
@@ -51,7 +55,7 @@ final class ImageQa
      *
      * @return array{ok:bool,findings:list<string>,note:string}|null
      */
-    public static function verdict(string $answer): ?array
+    public static function verdict(string $answer, bool $keepsTilt = false): ?array
     {
         $start = strpos($answer, '{');
         $end = strrpos($answer, '}');
@@ -72,7 +76,8 @@ final class ImageQa
             return null;
         }
         $findings = [];
-        if (($data['upright'] ?? true) === false) {
+        // Preserve the intended tilt of mockups and 3D objects.
+        if (!$keepsTilt && ($data['upright'] ?? true) === false) {
             $findings[] = 'camera not upright (scene rotated or tilted)';
         }
         if (($data['rendered_text'] ?? false) === true) {

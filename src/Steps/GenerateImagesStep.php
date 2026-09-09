@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -210,6 +211,14 @@ final class GenerateImagesStep implements Step
         }
 
         $specs = $project->readJson('images.json');
+        // Keep the image kind on each row for generation, repair, and request logs.
+        $imageKind = DesignDirectionStep::imageKindFor($project);
+        foreach ($specs as &$row) {
+            if (is_array($row)) {
+                $row['image_kind'] = $imageKind;
+            }
+        }
+        unset($row);
         if ($specs === []) {
             $this->markComplete($project);
             return;
@@ -558,6 +567,7 @@ final class GenerateImagesStep implements Step
                 $imageGrade,
                 $mime === 'image/png',
                 imageCrop: $imageCrop,
+                imageKind: (string) ($spec['image_kind'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
@@ -656,7 +666,8 @@ final class GenerateImagesStep implements Step
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => $imageGrade,
-        ] + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
+        ] + (($spec['image_kind'] ?? '') !== '' ? ['image_kind' => (string) $spec['image_kind']] : [])
+          + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
           + self::deliveredSubjectLog($spec, $imageGrade, $subject);
     }
 
@@ -715,6 +726,7 @@ final class GenerateImagesStep implements Step
             ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                 (string) $result['bytes'],
                 $genSpec['mime'],
+                ImageKind::keepsSolidCutout((string) ($specs[$i]['image_kind'] ?? '')) && ($specs[$i]['role'] ?? '') !== 'site-logo',
             );
             if ($genSpec['mime'] === 'image/png' && ($specs[$i]['role'] ?? '') === 'site-logo') {
                 if (!ImageTransparency::isKeyed($bytes)) {
@@ -784,7 +796,7 @@ final class GenerateImagesStep implements Step
      *
      * @return array{bytes:string,borderTrimmed:int}
      */
-    private function deliverableBytes(string $bytes, string $mime): array
+    private function deliverableBytes(string $bytes, string $mime, bool $solidCutout = false): array
     {
         // Defense in depth: ImageClient implementations are replaceable.
         // WpcomImageClient already requested and, only if needed, locally
@@ -796,7 +808,7 @@ final class GenerateImagesStep implements Step
             // The image model cannot render real alpha: the prompt asked for a flat
             // solid white background instead, keyed out here so the asset
             // gets the transparency its .png promises.
-            $bytes = ImageTransparency::keyOutBackground($bytes);
+            $bytes = ImageTransparency::keyOutBackground($bytes, !$solidCutout);
         } else {
             // Opaque images sometimes arrive as a printed photograph with
             // a flat white border painted into the pixels (BIGR-956);
@@ -902,7 +914,9 @@ final class GenerateImagesStep implements Step
         $filename = (string) ($spec['filename'] ?? '');
         try {
             $prompt = $this->renderer->render('image-qa.md', [
-                'subject' => (string) ($spec['subject'] ?? ''),
+                'subject'      => (string) ($spec['subject'] ?? ''),
+                'upright_rule' => ImageKind::qaUprightRule((string) ($spec['image_kind'] ?? '')),
+                'text_rule'    => ImageKind::qaTextRule((string) ($spec['image_kind'] ?? '')),
             ]);
             $answer = $this->llm->completeWithImage(
                 $prompt,
@@ -915,7 +929,7 @@ final class GenerateImagesStep implements Step
             Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
             return null;
         }
-        $verdict = ImageQa::verdict($answer);
+        $verdict = ImageQa::verdict($answer, ImageKind::keepsTilt((string) ($spec['image_kind'] ?? '')));
         if ($verdict === null) {
             Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
         }
@@ -956,6 +970,7 @@ final class GenerateImagesStep implements Step
                 ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                     (string) $result['bytes'],
                     $genSpec['mime'],
+                    ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
                 );
             } catch (\Throwable $e) {
                 $error = $e->getMessage();

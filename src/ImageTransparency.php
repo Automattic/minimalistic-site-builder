@@ -97,7 +97,8 @@ final class ImageTransparency
      * itself matched), the input bytes are returned unchanged — a decorative
      * asset with a baked background is still better than a broken one.
      */
-    public static function keyOutBackground(string $pngBytes): string
+    /** Disable edge transparency to preserve the pale surfaces of solid 3D objects. */
+    public static function keyOutBackground(string $pngBytes, bool $unmatteEdges = true): string
     {
         if (!self::available()) {
             return $pngBytes;
@@ -152,7 +153,9 @@ final class ImageTransparency
                 $im->transparentPaintImage($seed, 0.0, $fuzz, false);
             }
 
-            self::unmatteEdges($im);
+            if ($unmatteEdges) {
+                self::unmatteEdges($im);
+            }
             self::trimToInk($im);
 
             $im->setImageFormat('png');
