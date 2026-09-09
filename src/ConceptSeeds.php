@@ -57,6 +57,55 @@ final class ConceptSeeds
         'transitional', 'condensed', 'mono', 'script', 'display-serif',
     ];
 
+    /**
+     * Bounded phrases a brief uses to name its letterform tradition (frm
+     * PR-5f): read as whole words, first match wins, the way GroundKey and
+     * HeroComposition read a stated ground and hero. "bold black type" is
+     * Cohesion's own description of its grotesque; a serif named plainly
+     * lands on the transitional shelf, the one that reads as "a serif".
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_TYPE_PHRASES = [
+        'mono'          => ['monospace', 'monospaced', 'mono type', 'mono headings', 'typewriter type'],
+        'slab'          => ['slab serif', 'slab headings', 'slab type'],
+        'condensed'     => ['condensed sans', 'condensed type', 'condensed headings', 'compressed sans'],
+        'didone'        => ['didone', 'high-contrast serif', 'fashion serif'],
+        'display-serif' => ['display serif', 'chunky serif', 'soft serif'],
+        'script'        => ['script type', 'script headings', 'handwritten headings'],
+        'geometric'     => ['geometric sans', 'geometric type', 'geometric headings'],
+        'humanist'      => ['humanist sans', 'humanist type'],
+        'grotesque'     => [
+            'bold black type', 'bold black sans', 'grotesk', 'grotesque', 'bold sans', 'tight sans', 'sans-serif headings',
+            'sans headings', 'sans display', 'black sans', 'heavy sans', 'swiss type', 'neo-grotesque',
+            // A brief that names the hero name or headline's face names the
+            // tradition too (frm PR-5o).
+            'sans name', 'sans headline', 'sans headlines', 'sans wordmark', 'sans title', 'giant sans', 'sans-serif name',
+            'sans-serif headline', 'sans-serif wordmark',
+        ],
+        'transitional'  => [
+            'serif headings', 'serif display', 'serif type', 'editorial serif', 'classic serif', 'bookish serif',
+            // calderr-like20 asked for "a giant serif name as the hero
+            // headline" and the seed's grotesque won (frm PR-5o).
+            'serif name', 'serif headline', 'serif headlines', 'serif wordmark', 'serif title', 'giant serif', 'big serif',
+            'large serif', 'serif hero',
+        ],
+    ];
+
+    /** The letterform tradition a brief names in so many words, or null. */
+    public static function statedTypeRegister(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_TYPE_PHRASES as $register => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $register;
+                }
+            }
+        }
+        return null;
+    }
+
     /** Which part of the color wheel the accent family comes from. */
     public const ACCENTS = ['warm', 'cool', 'earth', 'jewel', 'neutral'];
 

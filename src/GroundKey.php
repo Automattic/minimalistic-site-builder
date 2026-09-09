@@ -20,6 +20,98 @@ final class GroundKey
     /** Small clearance keeps 8-bit rounding from landing on the wrong side. */
     private const CLEARANCE = 0.02;
 
+    /**
+     * Where a moved page ground lands (frm PR-4h). Crossing the boundary by
+     * the clearance alone put a "white page" brief on #949596: a mid grey
+     * that classifies as light and reads as neither. A page ground that has
+     * to move lands where pages live: near-white or near-black, in the
+     * authored hue.
+     */
+    public const PAGE_LIGHT_LUMINANCE = 0.88;
+    public const PAGE_DARK_LUMINANCE = 0.03;
+
+    /**
+     * The ground a brief states in so many words, or null when it is silent
+     * (frm PR-4g). A bounded phrase list, not a category matcher: these are
+     * the client's own instructions about the page ground, and a seed or a
+     * scene sentence never outranks them. Checked in order, dark phrases
+     * first, so "white text on a dark ground" reads as dark.
+     *
+     * @var array<string,list<string>>
+     */
+    private const STATED_PHRASES = [
+        'dark' => [
+            'dark ground', 'dark page', 'dark background', 'dark site', 'dark landing', 'dark mode',
+            'black ground', 'black page', 'black background', 'near-black', 'near black',
+            'midnight ground', 'charcoal ground', 'on a dark', 'on black',
+        ],
+        'light' => [
+            'white page', 'white ground', 'white background', 'light page', 'light ground',
+            'light background', 'pale page', 'pale ground', 'cream page', 'cream ground',
+            'off-white page', 'light grey page', 'light gray page', 'grey page', 'gray page',
+            'light grey ground', 'light gray ground', 'off-white ground', 'off-white background',
+            'on white', 'on a white', 'on a light',
+        ],
+    ];
+
+    /**
+     * Whether a phrase names the page itself (frm PR-4m): "light grey page",
+     * "dark ground". Such a phrase outranks a loose colour word ("near-black",
+     * "on black") that names a panel or a band later in the same brief;
+     * fabrica's "Light grey page with rounded near-black panels" read dark.
+     */
+    private static function namesThePage(string $phrase): bool
+    {
+        return preg_match('/(?:page|ground|background|site|landing|mode)$/', $phrase) === 1;
+    }
+
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        // Ignore a phrase when a direct negative instruction precedes it.
+        foreach (self::STATED_PHRASES as $phrases) {
+            foreach ($phrases as $phrase) {
+                $negative = '/(?<![\\p{L}-])(?:avoid|without|not|no|never|don[\'’]t)'
+                    . '(?: (?:a|an|the|use|choose|want|on))* '
+                    . preg_quote($phrase, '/') . '(?![\\p{L}-])/u';
+                $text = preg_replace($negative, ' ', $text) ?? $text;
+            }
+        }
+        // Two passes (frm PR-4m): the phrases that name the page itself
+        // first, the earliest in the text winning when both keys appear,
+        // then the loose colour words in the reviewed order (dark first).
+        $pagePick = null;
+        $pageAt = null;
+        foreach (self::STATED_PHRASES as $key => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (!self::namesThePage($phrase)) {
+                    continue;
+                }
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $text, $m, PREG_OFFSET_CAPTURE) === 1) {
+                    $at = (int) $m[0][1];
+                    if ($pageAt === null || $at < $pageAt) {
+                        $pagePick = $key;
+                        $pageAt = $at;
+                    }
+                }
+            }
+        }
+        if ($pagePick !== null) {
+            return $pagePick;
+        }
+        foreach (self::STATED_PHRASES as $key => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (self::namesThePage($phrase)) {
+                    continue;
+                }
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $text) === 1) {
+                    return $key;
+                }
+            }
+        }
+        return null;
+    }
+
     public static function classify(string $hex): ?string
     {
         $rgb = ContrastMath::hexToRgb($hex);
@@ -45,9 +137,7 @@ final class GroundKey
             return self::toHex($rgb);
         }
 
-        $target = $key === 'dark'
-            ? self::DARK_THRESHOLD - self::CLEARANCE
-            : self::DARK_THRESHOLD + self::CLEARANCE;
+        $target = $key === 'dark' ? self::PAGE_DARK_LUMINANCE : self::PAGE_LIGHT_LUMINANCE;
         $extreme = $key === 'dark' ? [0, 0, 0] : [255, 255, 255];
         $lo = 0.0;
         $hi = 1.0;

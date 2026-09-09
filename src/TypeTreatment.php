@@ -27,6 +27,144 @@ final class TypeTreatment
         return BoundedChoice::explicit($value, self::ALL);
     }
 
+    /**
+     * Phrases that state a site-wide heading case (frm PR-5s): dasstudio's
+     * "giant uppercase section titles", spector's "uppercase display
+     * headline". A wordmark or name phrase ("giant lowercase wordmark") is
+     * the wordmark's own case (HeroComposition::statedWordmarkCase) and
+     * says nothing about the headings: fabrica-like27 read it as the
+     * site-wide lowercase treatment and set its team names lowercase.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_HEADING_CASE_PHRASES = [
+        'uppercase' => [
+            'uppercase headings', 'uppercase heading', 'uppercase titles', 'uppercase section titles', 'uppercase title',
+            'uppercase headlines', 'uppercase headline', 'uppercase display headline', 'uppercase display', 'uppercase type',
+            'all caps headings', 'all-caps headings', 'all caps titles', 'all-caps titles', 'all caps type', 'all-caps type',
+            'headings in capitals', 'titles in capitals', 'caps headings',
+        ],
+        'lowercase' => [
+            'lowercase headings', 'lowercase heading', 'lowercase titles', 'lowercase section titles', 'lowercase title',
+            'lowercase headlines', 'lowercase headline', 'lowercase display', 'lowercase type', 'all lowercase headings',
+            'all-lowercase headings', 'all lowercase type',
+        ],
+    ];
+
+    /**
+     * Phrases that state the tight sentence-case treatment (frm PR-5t):
+     * luzia's "tight sans headings with muted-plus-dark two-tone lines" met
+     * a caps-tight commitment and every heading shipped uppercase.
+     *
+     * @var list<string>
+     */
+    private const STATED_TIGHT_PHRASES = [
+        'tight sans headings', 'tight sans heading', 'tight headings', 'tight heading', 'tight sans type',
+        'tight uppercase headings', 'tight uppercase heading', 'tight uppercase titles', 'tight uppercase headlines',
+        'tight tracking', 'tightly tracked headings', 'tight display type', 'tight display headings',
+        'tight grotesque headings', 'tight geometric headings', 'tight sans-serif headings',
+    ];
+
+    /**
+     * The treatment a brief states in so many words, or null: `tight` for a
+     * stated tight sans heading, `caps-tight` when the brief also states
+     * uppercase titles, `lowercase` for stated lowercase headings.
+     */
+    public static function statedTreatment(string $brief): ?string
+    {
+        $tight = self::statedTight($brief);
+        $case = self::statedHeadingCase($brief);
+        if ($case === 'uppercase') {
+            // A stated uppercase heading is the caps treatment (frm PR-5u):
+            // spector-like47's "three-line uppercase display headline" met a
+            // tight commitment and shipped in mixed case. Compact tracking is
+            // the default; a committed caps-tracked keeps its tracking.
+            return 'caps-tight';
+        }
+        if ($case === 'lowercase') {
+            return 'lowercase';
+        }
+        return $tight ? 'tight' : null;
+    }
+
+    /** Whether the brief explicitly requests tight letter spacing. */
+    public static function statedTight(string $brief): bool
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_TIGHT_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTightFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            if (is_string($meta[$key] ?? null) && self::statedTight($meta[$key])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTreatmentFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $treatment = self::statedTreatment($text);
+                if ($treatment !== null) {
+                    return $treatment;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The site-wide heading case a brief states, or null. */
+    public static function statedHeadingCase(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_HEADING_CASE_PHRASES as $case => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedHeadingCaseFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $case = self::statedHeadingCase($text);
+                if ($case !== null) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The case a treatment transforms headings to, or null for sentence case. */
+    public static function caseOf(mixed $treatment): ?string
+    {
+        $treatment = self::explicit($treatment);
+        return match ($treatment) {
+            'lowercase' => 'lowercase',
+            'caps-tight', 'caps-tracked' => 'uppercase',
+            default => null,
+        };
+    }
+
     /** @return array{textTransform:string,letterSpacing:string}|null */
     public static function typography(mixed $treatment): ?array
     {
