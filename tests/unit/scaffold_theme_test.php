@@ -80,16 +80,6 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             . '}',
         $css,
     );
-    // When the square thumb out-measures a short text stack the row takes the
-    // thumb's height; the text column centers its copy in the extra space.
-    assert_contains(
-        ".wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
-            . "    display: flex;\n"
-            . "    flex-direction: column;\n"
-            . "    justify-content: center;\n"
-            . '}',
-        $css,
-    );
     assert_contains(
         ".list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {\n"
             . "    height: 100%;\n"
@@ -104,6 +94,52 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             . "    border-radius: 0 !important;\n"
             . '}',
         $css,
+    );
+
+    // Every list-thumb row carries its own bounds at a wide viewport
+    // (BIGR-999). The recipe's 18/82 percentages let a 1560px band run a
+    // paragraph line to about 180 characters and grow the thumbnail to 275px,
+    // so the row caps its own width, the media column caps the thumbnail, and
+    // the text column caps the reading measure. The row keeps the band's
+    // leading edge, because the section heading and lead copy start there and
+    // core's constrained layout writes both auto margins with !important. The
+    // media column grows into what the capped text column leaves, so a
+    // bordered flush row ends where its content ends.
+    assert_contains(
+        ".wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {\n"
+            . "    max-inline-size: calc(9rem + 52ch + var(--wp--style--block-gap, 2rem));\n"
+            . "    margin-inline-start: 0 !important;\n"
+            . "    margin-inline-end: auto !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        '.wp-block-columns:has(> .wp-block-column > figure.card-media-thumb)'
+            . " > .wp-block-column:has(figure.card-media-thumb) {\n"
+            . "    flex-grow: 1;\n"
+            . "    max-inline-size: 9rem;\n"
+            . '}',
+        $css,
+    );
+    // One rule serves both variants: the text column holds the reading measure
+    // and centers its copy when the thumbnail drives the row height. The flush
+    // variant used to own a centering rule of its own; the plain row had none.
+    assert_contains(
+        '.wp-block-columns:has(> .wp-block-column > figure.card-media-thumb)'
+            . " > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    justify-content: center;\n"
+            . "    max-inline-size: 52ch;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains(
+            $css,
+            '.wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb))',
+        ),
+        'the flush-only centering rule is replaced by the shared list-thumb rule',
     );
 
     // Card media fills the card's content box even though the equal-cards card
