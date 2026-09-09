@@ -634,7 +634,7 @@ TEXT;
     {
         $worst = null;
         foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'columns') {
+            if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
                 continue;
             }
             $perRegion = [];
@@ -724,5 +724,21 @@ TEXT;
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+    private static function isSideLabelSplit(BlockMarkup $document, int $index): bool
+    {
+        $columns = array_values(array_filter(
+            $document->children($index),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        if (count($columns) < 2) {
+            return false;
+        }
+        $leading = $document->children($columns[0]);
+        if (count($leading) !== 1 || $document->name($leading[0]) !== 'paragraph') {
+            return false;
+        }
+        return in_array(SectionLabel::SIDE_CLASS, self::classTokens($document, $leading[0]), true);
     }
 }

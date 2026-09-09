@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -166,7 +167,12 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
+        $labelShipped = self::writeOverlayKit($project, self::labelKit(), SectionLabel::kitCss($sectionLabel, $shape), $headerWarnings);
         $overlays = [];
+        if ($labelShipped) {
+            $overlays[] = self::labelKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -284,7 +290,12 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::labelKit()];
+    }
+
+    public static function labelKit(): OverlayKit
+    {
+        return new OverlayKit('label', '// Apply the section_label token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit
