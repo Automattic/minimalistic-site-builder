@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -1681,6 +1682,52 @@ test('generate-images keeps a hero that fails twice and records the finding', fu
     assert_contains('disposition: delivered, still failing after one regeneration', $rows[0]);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a screen that keeps lettering itself earns three regenerations, and every other case keeps one', function () {
+    $text = '{"upright": true, "rendered_text": true, "matches_subject": true, "note": ""}';
+
+    // A reworded prompt does not move a painted-pixel defect: an A/B over nine
+    // generated screens left the first-pass leak rate flat at 6 of 9 clean
+    // under the old clause and the reworded one. Each draw is independent and
+    // ImageQa reads every one, so the extra draws are what move the DELIVERED
+    // rate. Four looks: the first plus one per regeneration.
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('designDirection.json', ['image_kind' => 'ui-mockup']);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    for ($i = 0; $i < 4; $i++) {
+        $llm->queueText($text);
+    }
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(4, count($llm->imageCalls), 'one first look plus one per regeneration');
+    assert_eq(4, count($images->batches), 'the original batch plus three regenerations');
+    assert_contains('no glyphs inside it', $images->batches[1][0]['prompt'], 'the screen correction, not the photographic one');
+    $rows = $project->readJson('warnings.json')['generate-images'];
+    assert_eq(1, count($rows), 'one row for the image, not one per attempt');
+    assert_contains('disposition: delivered, still failing after 3 regenerations', $rows[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    // A screen that clears on the second draw spends nothing further.
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('designDirection.json', ['image_kind' => 'ui-mockup']);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText($text);
+    $llm->queueText($text);
+    $llm->queueText(GI_QA_PASS);
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(3, count($images->batches), 'the loop stops at the passing draw');
+    assert_true(!$project->exists('warnings.json'), 'a screen that clears owes no warning');
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    // The budget is scoped to that one pairing.
+    assert_eq(3, ImageKind::regenerationBudget('ui-mockup', ['rendered text or lettering in the picture']));
+    assert_eq(1, ImageKind::regenerationBudget('ui-mockup', ['camera not upright (scene rotated or tilted)']));
+    assert_eq(1, ImageKind::regenerationBudget('ui-mockup', ['picture does not show the requested subject']));
+    foreach (['photo', '3d-object', 'line-illustration', 'abstract-gradient', ''] as $kind) {
+        assert_eq(1, ImageKind::regenerationBudget($kind, ['rendered text or lettering in the picture']), $kind);
+    }
 });
 
 test('generate-images keeps the first hero when its regeneration fails', function () {

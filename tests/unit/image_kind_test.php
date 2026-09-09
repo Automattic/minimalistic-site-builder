@@ -18,11 +18,11 @@ test('image kind is a closed vocabulary with one style keyword and one render cl
         assert_contains('Imagery kind for all site imagery:', $clause);
         assert_true(!str_contains(ImageKind::meaning($kind), 'photograph') || $kind === 'photo');
     }
-    assert_contains('no readable words', ImageKind::promptClause('ui-mockup'));
+    assert_contains('no readable letters, words or numerals', ImageKind::promptClause('ui-mockup'));
     assert_eq('3d-render', ImageKind::styleKeyword('3d-object'));
     assert_eq('ui-screenshot', ImageKind::styleKeyword('ui-mockup'), 'flat-design was itself a retro cue');
     $screen = ImageKind::promptClause('ui-mockup');
-    foreach (['edge-to-edge screenshot', 'contemporary', 'filling the canvas to all four edges', 'never written on the screen', 'layered', 'soft elevation', 'no outer margin', 'no soft focus', 'no depth-of-field blur', 'no window frame', 'no title bar', 'no traffic-light dots', 'no browser tabs', 'no drop shadow', 'no backdrop', 'screen content only'] as $needle) {
+    foreach (['edge-to-edge screenshot', 'contemporary', 'filling the canvas to all four edges', 'never lettered onto the screen itself', 'layered', 'soft elevation', 'no outer margin', 'no soft focus', 'no depth-of-field blur', 'no window frame', 'no title bar', 'no traffic-light dots', 'no browser tabs', 'no drop shadow', 'no backdrop', 'screen content only'] as $needle) {
         assert_contains($needle, $screen);
     }
     assert_true(!str_contains($screen, 'blurred'), 'the placeholder bars are soft, not blurred');

@@ -12,6 +12,24 @@ final class ImageKind
 
     public const TILT_CLASS = 'screen-frame--tilt';
 
+    /**
+     * The one no-text rule for a product screen, shared by the first-pass
+     * prompt and the QA correction so the two can never drift.
+     *
+     * It enumerates the elements that actually leaked on a generated page —
+     * panel titles, table cells and summary figures — and it says what the
+     * panel names in the authored subject are FOR. The subject has to name
+     * them to describe the layout ("a load-curve chart panel", "a settlement
+     * rate table"), and the model letters those very nouns onto the panels,
+     * the same way a hex in the prompt gets painted as a label
+     * (see screenTheme()).
+     */
+    public const SCREEN_NO_TEXT =
+        'Every text run, panel title, label, heading, legend, axis value, summary figure and table cell is'
+        . ' a plain rounded placeholder bar with no glyphs inside it, so the screen carries no readable'
+        . ' letters, words or numerals anywhere. The panel names in this description identify the layout for'
+        . ' you; they are never lettered onto the screen itself.';
+
     private const STYLE = [
         'photo'             => 'photorealistic',
         '3d-object'         => '3d-render',
@@ -67,10 +85,9 @@ final class ImageKind
                 . ' of layered panels and cards with soft elevation over a calm ground: one large chart with a'
                 . ' smooth gradient fill, a row of summary tiles, a slim icon sidebar, toggle switches, an'
                 . ' avatar stack of plain coloured discs, thin hairline dividers, generously rounded corners,'
-                . ' ample breathing room and a restrained palette with one vivid accent. Every text run,'
-                . ' heading, figure and axis value is rendered as a soft rounded placeholder bar, so the screen'
-                . ' carries no readable words, letters or numerals anywhere; the words of this request describe'
-                . ' the layout and are never written on the screen. Pin-sharp, flat, straight-on and evenly lit'
+                . ' ample breathing room and a restrained palette with one vivid accent. '
+                . self::SCREEN_NO_TEXT
+                . ' Pin-sharp, flat, straight-on and evenly lit'
                 . ' at full resolution; no soft focus, no depth-of-field blur, no window frame, no title bar,'
                 . ' no traffic-light dots, no browser tabs, no address bar, no bezel, no device, no drop shadow'
                 . ' around the screen, no desk, no backdrop, no perspective, no reflections, no grain.'
@@ -171,6 +188,66 @@ final class ImageKind
                 . ' down or rotated a full quarter turn.';
         }
         return '';
+    }
+
+    /**
+     * The correction for a text finding on a product screen.
+     *
+     * The generic photographic correction ("every surface is plain and
+     * unmarked") tells an interface nothing: a screen is MADE of marked
+     * panels, so the model reads the sentence as inapplicable and letters the
+     * screen again. A generated page proved it — one regeneration left
+     * "Load-curve chart", "Settlement rate" and "6.3K" on the panels.
+     *
+     * The cause is the authored subject itself. It has to name the panels to
+     * describe the layout ("a load-curve chart panel", "a settlement rate
+     * table"), and the model letters those very nouns onto them, the same way
+     * a hex in the prompt gets painted as a label (see screenTheme()). So the
+     * correction speaks the interface's own language and says what the panel
+     * names are FOR.
+     *
+     * Returns '' for every other kind, which keeps the photographic wording.
+     */
+    /** Every kind takes one regeneration; a screen takes more for a text leak. */
+    public const REGENERATION_BUDGET = 1;
+    public const SCREEN_TEXT_BUDGET = 3;
+
+    /**
+     * How many regenerations a finding earns.
+     *
+     * A text leak on a product screen is the one defect a reworded prompt
+     * measurably does not fix: an A/B over nine screens left the first-pass
+     * leak rate flat at 6 of 9 clean under the old clause and the reworded one.
+     * Every draw is independent and ImageQa reads each one, so extra draws are
+     * the lever that moves the DELIVERED rate. At the measured per-draw pass
+     * rate, three retries take an expected leak from roughly a third of screens
+     * to a few per hundred, and it costs nothing on a screen that passes.
+     *
+     * The budget is scoped to that one pairing. Every other kind and every
+     * other finding keeps the single retry, so no photographic subject starts
+     * spending four image calls.
+     *
+     * @param list<string> $findings
+     */
+    public static function regenerationBudget(?string $raw, array $findings): int
+    {
+        if (self::explicit($raw) !== 'ui-mockup') {
+            return self::REGENERATION_BUDGET;
+        }
+        foreach ($findings as $finding) {
+            if (str_starts_with($finding, 'rendered text')) {
+                return self::SCREEN_TEXT_BUDGET;
+            }
+        }
+        return self::REGENERATION_BUDGET;
+    }
+
+    public static function screenTextCorrection(?string $raw): string
+    {
+        if (self::explicit($raw) !== 'ui-mockup') {
+            return '';
+        }
+        return self::SCREEN_NO_TEXT;
     }
 
     public static function qaTextRule(?string $raw): string

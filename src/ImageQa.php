@@ -98,19 +98,24 @@ final class ImageQa
      * sample of the same subject; there is no better instruction than the
      * subject itself.
      *
+     * A product screen takes its own text correction, because the
+     * photographic one does not describe an interface
+     * (ImageKind::screenTextCorrection).
+     *
      * @param array{ok:bool,findings:list<string>,note:string} $verdict
      */
-    public static function correctedSubject(string $subject, array $verdict): string
+    public static function correctedSubject(string $subject, array $verdict, string $imageKind = ''): string
     {
         $authored = trim($subject);
         $subject = rtrim($authored, '.');
+        $screenText = ImageKind::screenTextCorrection($imageKind);
         $clauses = [];
         foreach ($verdict['findings'] as $finding) {
             if (str_starts_with($finding, 'camera not upright')) {
                 $clauses[] = 'The camera is upright and level: the sky or ceiling is at the top of the canvas,'
                     . ' the ground at the bottom, and people and buildings stand vertically.';
             } elseif (str_starts_with($finding, 'rendered text')) {
-                $clauses[] = 'Every surface in the scene is plain and unmarked.';
+                $clauses[] = $screenText !== '' ? $screenText : 'Every surface in the scene is plain and unmarked.';
             }
         }
         if ($clauses === []) {

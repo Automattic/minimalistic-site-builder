@@ -871,40 +871,59 @@ final class GenerateImagesStep implements Step
                 }
                 continue;
             }
-            $finding = implode('; ', $verdict['findings']);
-            Narrator::write("    QA {$filename}: {$finding}; regenerating once\n");
-
+            $kind = ImageKind::effectiveKind($spec);
             $authored = (string) ($spec['subject'] ?? '');
-            $subject = ImageQa::correctedSubject($authored, $verdict);
-            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
-            $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
-            if ($error !== null) {
-                Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the first image\n");
-                $specs[$i]['qa'] = ['regenerated' => false, 'finding' => $finding];
-                $project->addWarnings($this->id(), [ImageQa::warningRow(
-                    $filename,
-                    $authored,
-                    $verdict['findings'],
-                    "regeneration failed: {$error}",
-                )]);
-                continue;
-            }
+            // A product screen earns more than one retry. A reworded prompt
+            // does not move a painted-pixel defect (BIGR-956 measured the same
+            // thing on painted photo borders): an A/B over nine screens left
+            // the first-pass leak rate flat at 6 of 9 clean under both the old
+            // and the reworded clause. Each sample is an independent draw, so
+            // the lever that does move the delivered rate is the number of
+            // draws, and ImageQa reads every one of them.
+            $budget = ImageKind::regenerationBudget($kind, $verdict['findings']);
+            $finding = implode('; ', $verdict['findings']);
+            $attempts = 0;
 
-            $second = $this->inspect($project, $spec, $rel);
-            if ($second === null || $second['ok']) {
-                Narrator::write("    QA {$filename}: regenerated image " . ($second === null ? 'unverified' : 'passes') . "\n");
-                $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                continue;
+            while ($attempts < $budget) {
+                $attempts++;
+                $left = $budget - $attempts;
+                Narrator::write("    QA {$filename}: {$finding}; regenerating (attempt {$attempts} of {$budget})\n");
+
+                $subject = ImageQa::correctedSubject($authored, $verdict, $kind);
+                $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
+                $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
+                if ($error !== null) {
+                    Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the last image\n");
+                    $specs[$i]['qa'] = ['regenerated' => $attempts > 1, 'finding' => $finding];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow(
+                        $filename,
+                        $authored,
+                        $verdict['findings'],
+                        "regeneration failed: {$error}",
+                    )]);
+                    continue 2;
+                }
+
+                $next = $this->inspect($project, $spec, $rel);
+                if ($next === null || $next['ok']) {
+                    Narrator::write("    QA {$filename}: regenerated image " . ($next === null ? 'unverified' : 'passes') . "\n");
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
+                    continue 2;
+                }
+                $verdict = $next;
+                $finding = implode('; ', $next['findings']);
+                if ($left === 0) {
+                    $plural = $budget === 1 ? 'one regeneration' : "{$budget} regenerations";
+                    Narrator::write("    QA {$filename}: still failing ({$finding}); delivered with a warning\n");
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow(
+                        $filename,
+                        $authored,
+                        $next['findings'],
+                        "still failing after {$plural}",
+                    )]);
+                }
             }
-            $secondFinding = implode('; ', $second['findings']);
-            Narrator::write("    QA {$filename}: still failing ({$secondFinding}); delivered with a warning\n");
-            $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $secondFinding];
-            $project->addWarnings($this->id(), [ImageQa::warningRow(
-                $filename,
-                $authored,
-                $second['findings'],
-                'still failing after one regeneration',
-            )]);
         }
     }
 
