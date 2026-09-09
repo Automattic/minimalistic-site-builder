@@ -1022,3 +1022,190 @@ test('HeaderNav leaves an unterminated raw nav unchanged and warns instead of ad
     assert_contains("block='nav'", $result['warnings'][0]);
     assert_contains('delivered=unchanged', $result['warnings'][0]);
 });
+
+test('HeaderNav restores the header-pill class on a floating-pill row the model left bare (frm W1a)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Visit</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withPillRow($markup);
+    assert_eq(1, count($result['notes']), 'the restoration is a recorded repair');
+    assert_eq([], $result['warnings']);
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('header-pill', ($document->attrs($row) ?? [])['className'] ?? null, 'the row comment carries the class');
+    assert_contains('<div class="wp-block-group header-pill">', $result['markup'], 'the saved HTML mirrors it');
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withPillRow($result['markup'])['markup'],
+        'a marked row is a fixed point',
+    );
+
+    // Already marked (with other classes): untouched.
+    $marked = str_replace(
+        '{"layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}}',
+        '{"className":"custom-motion header-pill","layout":{"type":"flex"}}',
+        $markup,
+    );
+    assert_eq($marked, HeaderNav::withPillRow($marked)['markup']);
+
+    // No navigation at all: nothing provable, one durable warning, bytes kept.
+    $bare = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--></div><!-- /wp:group -->';
+    $unproven = HeaderNav::withPillRow($bare);
+    assert_eq($bare, $unproven['markup']);
+    assert_eq(1, count($unproven['warnings']));
+    assert_contains('delivered=unchanged', $unproven['warnings'][0]);
+});
+
+test('fixHeader marks the floating-pill row after the single-row repair wraps bare root children', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Northlight',
+        ['Home', 'Menu'],
+        false,
+        'floating-pill',
+        'contrast',
+        'base',
+        null,
+        [],
+        header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    $row = $document->children($root)[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null, 'the row repair ran first');
+    assert_contains('header-pill', (string) (($document->attrs($row) ?? [])['className'] ?? ''), 'then the pill class landed on the wrapped row');
+    assert_contains('header-archetype--floating-pill', $result['markup'], 'the root carries the archetype marker');
+});
+
+test('HeaderNav restores the header-bar-center class on a bar-center-cta row the model left bare (frm W1b)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group alignwide">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Visit</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withBarCenterRow($markup);
+    assert_eq(['bar-center-cta: restored the header-bar-center class on the identity/navigation row'], $result['notes']);
+    assert_eq([], $result['warnings']);
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('header-bar-center', ($document->attrs($row) ?? [])['className'] ?? null);
+    assert_contains('class="wp-block-group header-bar-center alignwide"', $result['markup']);
+    assert_true(!str_contains($result['markup'], 'header-pill'), 'the bar never takes the pill class');
+    assert_eq($result['markup'], HeaderNav::withBarCenterRow($result['markup'])['markup'], 'a marked row is left alone');
+});
+
+test('fixHeader marks the bar-center-cta row after the single-row repair wraps bare root children (frm W1b)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Northlight',
+        ['Home', 'Menu'],
+        false,
+        'bar-center-cta',
+        'contrast',
+        'base',
+        null,
+        [],
+        header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null, 'the row repair ran first');
+    assert_contains('header-bar-center', (string) (($document->attrs($row) ?? [])['className'] ?? ''));
+    assert_contains('header-archetype--bar-center-cta', $result['markup'], 'the root carries the archetype marker');
+});
+
+test('a kit-painted chrome makes its navigation and title inherit the proven foreground (frm PR-1g)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"},"textColor":"contrast"} -->'
+        . '<div class="wp-block-group has-contrast-color has-text-color">'
+        . '<!-- wp:group {"className":"header-pill","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}} -->'
+        . '<div class="wp-block-group header-pill">'
+        . '<!-- wp:site-title {"textColor":"primary"} /-->'
+        . '<!-- wp:navigation {"textColor":"secondary","style":{"color":{"text":"#5A6472"},"elements":{"link":{"color":{"text":"#5A6472"}}}}} -->'
+        . '<!-- wp:navigation-link {"label":"Services","url":"#services","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button {"textColor":"base"} --><div class="wp-block-button"><a class="wp-block-button__link has-base-color" href="/start/">Start</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderNav::inheritProvenInk($markup, 'contrast');
+    assert_eq(2, count($result['notes']), 'the navigation and the title each record a repair');
+    assert_true(!str_contains($result['markup'], '"textColor":"secondary"'), 'the nav token colour is gone');
+    assert_true(!str_contains($result['markup'], '"textColor":"primary"'), 'the title token colour is gone');
+    assert_true(!str_contains($result['markup'], '#5A6472'), 'inline nav text colours are gone');
+    assert_contains('"textColor":"base"', $result['markup'], 'the button keeps its own proven pair');
+    assert_contains('"textColor":"contrast"', $result['markup'], 'the root foreground is untouched');
+
+    $clean = HeaderNav::inheritProvenInk('<!-- wp:navigation {"textColor":"contrast"} --><!-- wp:navigation-link {"label":"A","url":"#a","kind":"custom"} /--><!-- /wp:navigation -->', 'contrast');
+    assert_eq([], $clean['notes'], 'a nav already in the proven ink is left alone');
+    assert_eq([], HeaderNav::inheritProvenInk($markup, '')['notes'], 'no proven foreground, no change');
+});
+
+test('fixHeader applies the proven ink on the pill and the centered bar only (frm PR-1g)', function () {
+    $header = static fn (): string => '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation {"textColor":"secondary"} -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    foreach (['floating-pill' => false, 'bar-center-cta' => false, 'standard-row' => true] as $archetype => $keeps) {
+        $result = HeaderHeroStep::fixHeader($header(), AboveFoldContract::MODE_STACKED, 'Northlight', ['Home', 'Menu'], false, $archetype, 'contrast', 'base', null, [], header_nav_pages());
+        assert_eq($keeps, str_contains($result['markup'], '"textColor":"secondary"'), $archetype);
+    }
+});
+
+test('HeaderNav restores the header-spread class and fixHeader applies the proven ink on the spread bar (frm W1d)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"full","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group alignfull">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation {"textColor":"secondary"} -->'
+        . '<!-- wp:navigation-link {"label":"Work","url":"#work","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderNav::withSpreadRow($markup);
+    assert_eq(['spread-nav: restored the header-spread class on the identity/navigation row'], $result['notes']);
+    assert_contains('class="wp-block-group header-spread alignfull"', $result['markup']);
+    $fixed = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Northlight', ['Home', 'Work'], false, 'spread-nav', 'contrast', 'base', null, [], header_nav_pages());
+    assert_contains('header-archetype--spread-nav', $fixed['markup']);
+    assert_contains('header-spread', $fixed['markup']);
+    assert_true(!str_contains($fixed['markup'], '"textColor":"secondary"'), 'the spread bar inherits the proven ink');
+});

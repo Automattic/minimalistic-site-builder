@@ -28,7 +28,36 @@ final class AboveFoldContract
         'oversized-wordmark',
         'branded-lockup',
         'split-nav',
+        'floating-pill',
+        'bar-center-cta',
+        'spread-nav',
     ];
+
+    /**
+     * Design traditions whose sites read as product or portfolio landings,
+     * where the reference corpus (Cohesion, Zova) detaches the navigation
+     * into a centered pill. Other traditions keep the stacked bar catalog.
+     */
+    public const FLOATING_PILL_REGISTERS = ['modernist', 'pop', 'technical'];
+
+    /** Archetypes that may float over an image-led opening. */
+    public const OVERLAY_ARCHETYPES = ['minimal-overlay', 'floating-pill'];
+
+    /**
+     * Traditions whose stacked header on a full-bleed canvas is the centered
+     * bar (frm W1b): wordmark left, navigation centered, one pill CTA right,
+     * sticky. Dreammotion and Luzia read this way; the cohort briefs for
+     * both resolve `archival`, Spector's resolves `noir`.
+     */
+    public const BAR_CENTER_REGISTERS = ['archival', 'editorial'];
+
+    /**
+     * Traditions whose stacked header on a full-bleed canvas is the spread
+     * bar (frm W1d): wordmark at the start, the navigation items spread
+     * across the rest of the width with space between, no CTA. Spector's
+     * header; its cohort brief resolves `noir`.
+     */
+    public const SPREAD_NAV_REGISTERS = ['noir', 'brutalist', 'poster'];
 
     /**
      * Reject an operator override only when caller-owned facts already prove
@@ -181,10 +210,19 @@ final class AboveFoldContract
             );
         }
 
-        $pool = self::headerPool($mode);
+        $pool = self::headerPool(
+            $mode,
+            strtolower(trim((string) ($siteContext['register'] ?? ''))),
+            $canvas,
+        );
         if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
-            $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
+            // The pill floats in either relation (frm PR-1e): over an
+            // image-led opening it keeps the overlay contract, painting the
+            // proven scrim on the pill alone.
+            $mode = $forced === 'minimal-overlay' || ($forced === 'floating-pill' && $overlaySupported)
+                ? self::MODE_OVERLAY
+                : self::MODE_STACKED;
         } elseif ($forced !== '') {
             $archetype = 'standard-row';
             $mode = self::MODE_STACKED;
@@ -617,11 +655,34 @@ final class AboveFoldContract
         ];
     }
 
-    /** @return list<string> */
-    private static function headerPool(string $mode): array
+    /**
+     * The archetypes automatic assignment may pick. A stacked header on a
+     * full-bleed canvas in a product/portfolio tradition takes the floating
+     * pill alone: the pill is the register's signature chrome, and a coin
+     * flip against the plain bar would make the evidence build a lottery.
+     * Overlay mode never floats a pill — the pill is page-ground chrome.
+     *
+     * @return list<string>
+     */
+    private static function headerPool(string $mode, string $register = '', string $canvas = ''): array
     {
+        $pillRegister = $canvas === 'full-bleed' && in_array($register, self::FLOATING_PILL_REGISTERS, true);
         if ($mode === self::MODE_OVERLAY) {
-            return ['minimal-overlay'];
+            // frm PR-1e: an image-led opening in a product/portfolio
+            // tradition still gets the pill; it floats over the cover with
+            // the overlay contract's scrim painted on the pill alone.
+            return $pillRegister ? ['floating-pill'] : ['minimal-overlay'];
+        }
+        if ($pillRegister) {
+            return ['floating-pill'];
+        }
+        // frm W1b: the centered bar is the same kind of commitment for its
+        // traditions; a coin flip against the plain bar would be a lottery.
+        if ($canvas === 'full-bleed' && in_array($register, self::BAR_CENTER_REGISTERS, true)) {
+            return ['bar-center-cta'];
+        }
+        if ($canvas === 'full-bleed' && in_array($register, self::SPREAD_NAV_REGISTERS, true)) {
+            return ['spread-nav'];
         }
         // centered-masthead and split-nav are retired from auto-assignment
         // (BIGR-872). Forced HEADER_ARCHETYPE can still pick them through
@@ -631,6 +692,9 @@ final class AboveFoldContract
             'oversized-wordmark',
             'centered-masthead',
             'split-nav',
+            'floating-pill',
+            'bar-center-cta',
+            'spread-nav',
         ];
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
@@ -895,15 +959,18 @@ final class AboveFoldContract
         string $disposition,
     ): array {
         $stacked = is_array($contract['stacked_pair'] ?? null) ? $contract['stacked_pair'] : [];
+        // A pill that loses its overlay keeps its shape on the stacked rail
+        // (frm PR-1e); every other lost relation lands on the reviewed bar.
+        $archetype = ($contract['header']['archetype'] ?? null) === 'floating-pill' ? 'floating-pill' : 'standard-row';
         $contract['header'] = [
             'mode' => self::MODE_STACKED,
-            'archetype' => 'standard-row',
+            'archetype' => $archetype,
             'foreground_token' => (string) ($stacked['foreground'] ?? 'contrast'),
             'protection_token' => (string) ($stacked['protection'] ?? 'base'),
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
-        ] + self::headerTextFacts('standard-row', '');
+        ] + self::headerTextFacts($archetype, '');
         $contract['viewport']['stacked_cover_max_vh'] = 80;
         $contract['degradations'][] = self::degradation(
             $code,
@@ -1005,9 +1072,12 @@ final class AboveFoldContract
         // the design's own `header` rule, which no consumer of aboveFold.json
         // holds. What remains objective is that both slugs are ones the
         // header kit can actually paint, and that they are distinct.
+        // Two archetypes float (frm PR-1e): the quiet bar and the pill.
+        if ($overlay && !in_array($header['archetype'] ?? null, self::OVERLAY_ARCHETYPES, true)) {
+            throw new \RuntimeException('aboveFold.json has an incoherent header.archetype');
+        }
         $expectedHeader = $overlay
             ? [
-                'archetype' => 'minimal-overlay',
                 'foreground_token' => $overlayForeground,
                 'protection_token' => $overlayProtection,
                 'protect_top_edge' => true,

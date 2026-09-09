@@ -37,7 +37,16 @@ final class HeaderNav
     private const GROUP_CLOSE = '</div><!-- /wp:group -->';
 
     /** Header archetypes whose contract is one identity/navigation row. */
-    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay'];
+    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill', 'bar-center-cta', 'spread-nav'];
+
+    /** The class the trusted header kit styles as the detached pill. */
+    public const PILL_ROW_CLASS = 'header-pill';
+
+    /** The kit hook for the centered bar's identity/navigation/CTA row (frm W1b). */
+    public const BAR_CENTER_ROW_CLASS = 'header-bar-center';
+
+    /** The kit hook for the spread bar's identity/navigation row (frm W1d). */
+    public const SPREAD_ROW_CLASS = 'header-spread';
 
     /**
      * @param list<array<string,mixed>> $pages
@@ -302,6 +311,95 @@ final class HeaderNav
         return [
             'markup' => $markup,
             'notes' => [...$labelNotes, $note],
+            'warnings' => [],
+        ];
+    }
+
+    /**
+     * Mark the identity/navigation row of a floating-pill header with the
+     * kit's pill class. The generated markup is asked to carry it; when the
+     * model forgets, the row is still provable (the lowest group holding
+     * both the identity and the one navigation), so the class is restored
+     * deterministically instead of shipping a pill with no pill.
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withPillRow(string $markup): array
+    {
+        return self::withRowClass($markup, self::PILL_ROW_CLASS, 'floating-pill', 'pill');
+    }
+
+    /**
+     * The centered bar's counterpart (frm W1b): the kit turns the marked row
+     * into a three-column grid (identity, navigation, CTA).
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withBarCenterRow(string $markup): array
+    {
+        return self::withRowClass($markup, self::BAR_CENTER_ROW_CLASS, 'bar-center-cta', 'centered bar');
+    }
+
+    /**
+     * The spread bar's counterpart (frm W1d): the kit stretches the marked
+     * row so the navigation items spread across the width after the wordmark.
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withSpreadRow(string $markup): array
+    {
+        return self::withRowClass($markup, self::SPREAD_ROW_CLASS, 'spread-nav', 'spread bar');
+    }
+
+    /**
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    private static function withRowClass(string $markup, string $class, string $archetype, string $noun): array
+    {
+        if (preg_match('/(?:^|[\s"])' . $class . '(?:$|[\s"])/', $markup) === 1) {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
+        $document = BlockMarkup::parse($markup);
+        $cluster = self::identityCluster($document);
+        $navigations = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => self::canonicalName($document->name($index)) === 'navigation'
+                && $document->isStructurallySafe($index),
+        ));
+        if ($cluster === null || count($navigations) !== 1) {
+            return [
+                'markup' => $markup,
+                'notes' => [],
+                'warnings' => ["file='theme/parts/header.html'; block='{$archetype} row'; authored=no provable"
+                    . " identity/navigation row; delivered=unchanged; disposition=the {$noun} class was not restored"
+                    . ' because the row could not be proven, so the header renders as a plain bar'],
+            ];
+        }
+        $row = self::lowestCommonGroup($document, $cluster['units'][0], $navigations[0]);
+        if ($row === null || $document->parent($row) === null) {
+            // The root group is the shell's surface owner; the pill needs an
+            // inner row of its own. withSingleRowForArchetype wraps one when
+            // the identity and navigation are bare root children, so this
+            // only remains reachable for shapes that pass proved unwrapped.
+            return [
+                'markup' => $markup,
+                'notes' => [],
+                'warnings' => ["file='theme/parts/header.html'; block='{$archetype} row'; authored=identity"
+                    . " and navigation share only the root group; delivered=unchanged; disposition=the {$noun}"
+                    . " class was not restored because the root cannot be the {$noun}"],
+            ];
+        }
+        $attrs = $document->attrs($row) ?? [];
+        $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $tokens[] = $class;
+        $attrs['className'] = implode(' ', array_values(array_unique($tokens)));
+        $document->setAttrs($row, $attrs);
+        if (preg_match('/^\s*<div class="wp-block-group(?=[" ])/', $document->ownHtml($row)) === 1) {
+            $document->replaceInOwnHtml($row, 'class="wp-block-group', 'class="wp-block-group ' . $class);
+        }
+        return [
+            'markup' => $document->render(),
+            'notes' => [$archetype . ': restored the ' . $class . ' class on the identity/navigation row'],
             'warnings' => [],
         ];
     }
@@ -1580,5 +1678,68 @@ final class HeaderNav
             . Warnings::value($authored)
             . '; delivered=unchanged; disposition=left the row untouched because the identity and navigation byte '
             . 'boundaries could not be proven for deterministic source-order repair';
+    }
+
+    /**
+     * Make the navigation, its links and the site title inherit the proven
+     * header foreground on a chrome the kit paints (floating-pill and
+     * bar-center-cta, frm PR-1g). Those surfaces change between the start
+     * and scrolled states, and HeaderBehavior proved ONE foreground against
+     * both; an authored `textColor` on the navigation escapes that proof
+     * (cohesion-like10 set `secondary` on the nav, 1.81:1 on the scrolled
+     * accent pill). Token colours and inline text colours are removed; the
+     * proven token is inherited from the root.
+     *
+     * @return array{markup:string,notes:list<string>}
+     */
+    public static function inheritProvenInk(string $markup, string $foreground): array
+    {
+        if ($foreground === '') {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $document = BlockMarkup::parse($markup);
+        $notes = [];
+        foreach ($document->indices() as $index) {
+            $name = self::canonicalName($document->name($index));
+            if (!in_array($name, ['navigation', 'navigation-link', 'site-title'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $changed = [];
+            $token = trim((string) ($attrs['textColor'] ?? ''));
+            if ($token !== '' && $token !== $foreground) {
+                unset($attrs['textColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$token}-color");
+                $changed[] = "textColor '{$token}'";
+            }
+            if (is_array($attrs['style']['color'] ?? null) && isset($attrs['style']['color']['text'])) {
+                unset($attrs['style']['color']['text']);
+                if ($attrs['style']['color'] === []) {
+                    unset($attrs['style']['color']);
+                }
+                $changed[] = 'style.color.text';
+            }
+            if (isset($attrs['style']['elements']['link']['color']['text'])) {
+                unset($attrs['style']['elements']['link']['color']['text']);
+                $changed[] = 'style.elements.link.color.text';
+            }
+            if ($changed === []) {
+                continue;
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'has-text-color');
+            $own = $document->ownHtml($index);
+            $stripped = preg_replace('/(\sstyle="[^"]*?)(?:^|;)\s*color\s*:[^;"]*;?/i', '$1', $own) ?? $own;
+            $stripped = preg_replace('/\sstyle=""/', '', $stripped) ?? $stripped;
+            if ($stripped !== $own) {
+                $document->spliceOwnHtml($index, 0, strlen($own), $stripped);
+            }
+            $notes[] = "{$name}: dropped " . implode(', ', $changed)
+                . " so the kit-painted chrome inherits the proven '{$foreground}' foreground in both states";
+        }
+        return ['markup' => $notes === [] ? $markup : $document->render(), 'notes' => $notes];
     }
 }
