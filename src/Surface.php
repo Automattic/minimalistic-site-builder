@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  */
 final class Surface
 {
-    public const ALL = ['none', 'paper', 'concrete', 'film', 'fabric'];
+    public const ALL = ['none', 'paper', 'concrete', 'film', 'fabric', 'noise', 'dot-grid'];
 
     public const DEFAULT = 'none';
 
@@ -21,7 +21,7 @@ final class Surface
 
     /**
      * WCAG normal-text floor the contrast pipeline must clear before this
-     * overlay ships. 7:1 (AAA) leaves 4.5:1 after a 0.26–0.48 soft-light sheet.
+     * overlay ships. The 7:1 (AAA) floor reserves contrast for the overlay.
      */
     public static function contrastFloor(?string $surface): float
     {
@@ -35,7 +35,7 @@ final class Surface
     /**
      * Build-owned overlay for a committed surface.
      *
-     * The texture carries both a dark and a light ink, under `soft-light`.
+     * The texture uses multiply on light pages and screen on dark pages.
      * Inks are the delivered `base`/`contrast` pair so a cool or neon
      * direction is not hue-shifted by a hardcoded kraft recipe. Opacity is
      * still tuned from the page's base: a dark page carries grain that a
@@ -80,16 +80,29 @@ final class Surface
                 self::fabricLayers(self::rgba($darkRgb, 0.10), self::rgba($darkRgb, 0.07))
                     . ', ' . self::fabricLayers(self::rgba($lightRgb, 0.10), self::rgba($lightRgb, 0.07)),
             ],
+            // Fine grain uses both inks without lines.
+            'noise' => [
+                $dark ? '0.34' : '0.22',
+                self::noiseLayers(self::rgba($darkRgb, 0.14), self::rgba($darkRgb, 0.08))
+                    . ', ' . self::noiseLayers(self::rgba($lightRgb, 0.14), self::rgba($lightRgb, 0.08)),
+            ],
+            // Place one faint dot every 24px in the page ink.
+            'dot-grid' => [
+                $dark ? '0.30' : '0.22',
+                self::dotGridLayer(self::rgba($dark ? $lightRgb : $darkRgb, 0.55)),
+            ],
             default => [null, null],
         };
         if ($opacity === null || $background === null) {
             return null;
         }
-        $blend = 'soft-light';
+        // These blend modes keep the texture visible near white and black.
+        $blend = $dark ? 'screen' : 'multiply';
         $mode = $dark ? 'dark' : 'light';
+        $size = $surface === 'dot-grid' ? '24px 24px' : 'auto';
         return "/* Committed '{$surface}' page surface ({$mode}). "
             . "CSS-only grain — written by the build, never by a model. */\n"
-            . self::overlayCss($opacity, $blend, $background);
+            . self::overlayCss($opacity, $blend, $background, $size);
     }
 
     public static function isDark(?string $hex): bool
@@ -148,6 +161,18 @@ final class Surface
             . "repeating-radial-gradient(circle at 80% 70%, {$coarser} 0 0.5px, transparent 0.8px 5px)";
     }
 
+    private static function noiseLayers(string $fine, string $finer): string
+    {
+        return "repeating-radial-gradient(circle at 23% 31%, {$fine} 0 0.35px, transparent 0.6px 3px), "
+            . "repeating-radial-gradient(circle at 67% 79%, {$finer} 0 0.4px, transparent 0.65px 3.5px), "
+            . "repeating-radial-gradient(circle at 48% 12%, {$finer} 0 0.3px, transparent 0.55px 2.5px)";
+    }
+
+    private static function dotGridLayer(string $dot): string
+    {
+        return "radial-gradient(circle, {$dot} 1px, transparent 1.4px)";
+    }
+
     private static function fabricLayers(string $warp, string $weft): string
     {
         return "repeating-linear-gradient(0deg, {$warp} 0 1px, transparent 1px 4px), "
@@ -164,10 +189,10 @@ final class Surface
      * this is a fog, not grain — and it does not print or show to users who
      * asked for less transparency.
      */
-    private static function overlayCss(string $opacity, string $blend, string $background): string
+    private static function overlayCss(string $opacity, string $blend, string $background, string $size = 'auto'): string
     {
         return <<<CSS
-@supports (mix-blend-mode: soft-light) {
+@supports (mix-blend-mode: {$blend}) {
 html body::before {
     content: "";
     display: block;
@@ -193,6 +218,7 @@ html body::before {
     mix-blend-mode: {$blend};
     background-color: transparent;
     background-image: {$background};
+    background-size: {$size};
     background-repeat: repeat;
     background-attachment: scroll;
 }

@@ -1836,6 +1836,8 @@ final class DesignDirectionStep implements Step
                 'concrete' => 'a concrete grit overlay on the page',
                 'film'     => 'a film grain overlay on the page',
                 'fabric'   => 'a fabric weave overlay on the page',
+                'noise'    => 'a fine grain overlay without lines',
+                'dot-grid' => 'a faint dot every 24px in the page ink',
                 default    => 'the committed surface overlay',
             };
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
