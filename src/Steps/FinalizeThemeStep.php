@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -166,7 +167,12 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $bandGeometry = DesignDirectionStep::bandGeometryFor($project);
+        $bandShipped = self::writeOverlayKit($project, self::bandKit(), BandGeometry::kitCss($bandGeometry, $shape), $headerWarnings);
         $overlays = [];
+        if ($bandShipped) {
+            $overlays[] = self::bandKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -284,7 +290,12 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::bandKit()];
+    }
+
+    public static function bandKit(): OverlayKit
+    {
+        return new OverlayKit('band', '// Apply the band_geometry token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit

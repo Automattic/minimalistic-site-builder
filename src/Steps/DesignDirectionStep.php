@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
@@ -354,6 +355,8 @@ final class DesignDirectionStep implements Step
             $direction['canvas'] = $constraints['hero_canvas'];
         }
 
+        $direction = self::withStatedBandGeometry($direction, $meta, $repairs);
+
         if ($repairs !== []) {
             Narrator::write('  [design-direction] repaired ' . count($repairs)
                 . " generated direction field(s) (reported separately from durable warnings).\n");
@@ -459,6 +462,7 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
+            'band_geometry' => BandGeometry::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -1010,6 +1014,7 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $bandGeometry = self::normalizeBandGeometry($raw['band_geometry'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1109,6 +1114,7 @@ final class DesignDirectionStep implements Step
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
+            'band_geometry' => $bandGeometry,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -1357,6 +1363,18 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeBandGeometry(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            BandGeometry::ALL,
+            BandGeometry::DEFAULT,
+            'band_geometry',
+            $warnings,
+            'unsupported band geometry replaced by square',
+        );
+    }
+
     public static function normalizeSurface(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1841,6 +1859,11 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
         }
 
+        $bandGeometry = BandGeometry::explicit($direction['band_geometry'] ?? null);
+        if ($bandGeometry !== null && $bandGeometry !== BandGeometry::DEFAULT) {
+            $facts[] = "- **Band geometry**: {$bandGeometry} — " . BandGeometry::meaning($bandGeometry) . '.';
+        }
+
         $device = Device::explicit($direction['device'] ?? null);
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
@@ -2214,6 +2237,14 @@ final class DesignDirectionStep implements Step
         return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
+    public static function bandGeometryFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return BandGeometry::DEFAULT;
+        }
+        return self::normalizeBandGeometry($project->readJson(self::FILE)['band_geometry'] ?? null);
+    }
+
     /**
      * The committed page surface, or `none` when no direction was persisted
      * or the field is absent.
@@ -2253,5 +2284,43 @@ final class DesignDirectionStep implements Step
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+    private const STATED_ROUNDED_PHRASES = [
+        'rounded panels', 'rounded panel', 'rounded near-black panels', 'rounded dark panels', 'rounded dark panel',
+        'rounded bands', 'rounded band', 'rounded dark band', 'dark rounded band', 'dark rounded bands',
+        'rounded plates', 'rounded plate', 'rounded sections', 'rounded colour bands', 'rounded color bands',
+    ];
+    public static function statedBandGeometry(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_ROUNDED_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return 'rounded';
+            }
+        }
+        return null;
+    }
+
+    public static function statedBandGeometryFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedBandGeometry($text) !== null) {
+                return self::statedBandGeometry($text);
+            }
+        }
+        return null;
+    }
+
+    public static function withStatedBandGeometry(array $direction, array $meta, array &$repairs = []): array
+    {
+        $stated = self::statedBandGeometryFor($meta);
+        if ($stated !== null && ($direction['band_geometry'] ?? null) !== $stated) {
+            $repairs[] = 'designDirection.json: field band_geometry authored '
+                . self::describe($direction['band_geometry'] ?? null) . ' delivered "rounded"; disposition use the band geometry from the brief';
+            $direction['band_geometry'] = $stated;
+        }
+        return $direction;
     }
 }
