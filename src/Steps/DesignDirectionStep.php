@@ -17,6 +17,7 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\FontShortlist;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -462,6 +463,7 @@ final class DesignDirectionStep implements Step
             'surface_reason'   => '',
             'device'           => Device::DEFAULT,
             'heading_emphasis' => HeadingEmphasis::DEFAULT,
+            'header_chrome'    => HeaderChrome::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -1023,6 +1025,7 @@ final class DesignDirectionStep implements Step
             $warnings,
         );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
+        $headerChrome = HeaderChrome::normalize($raw['header_chrome'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1124,6 +1127,9 @@ final class DesignDirectionStep implements Step
             'surface_reason'   => $surfaceReason,
             'device'           => $device,
             'heading_emphasis' => $headingEmphasis,
+            // Whether the header survives the scroll. HeaderBehavior keeps
+            // the archetype, depth, and contrast vetoes on top of it.
+            'header_chrome'    => $headerChrome,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -2274,6 +2280,15 @@ final class DesignDirectionStep implements Step
             return Device::DEFAULT;
         }
         return self::normalizeDevice($project->readJson(self::FILE)['device'] ?? null);
+    }
+
+    /** The committed header-chrome persistence, or the transient default. */
+    public static function headerChromeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return HeaderChrome::DEFAULT;
+        }
+        return HeaderChrome::normalize($project->readJson(self::FILE)['header_chrome'] ?? null);
     }
 
     /** Parse only an explicit valid corner-language commitment. */

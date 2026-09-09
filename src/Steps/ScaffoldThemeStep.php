@@ -360,15 +360,6 @@ final class ScaffoldThemeStep implements Step
                 flex-basis: 82% !important;
             }
         }
-        /* At wide viewports the square thumb can out-measure a short text
-           stack; the row then takes the thumb's height and top-pinned copy
-           would ride the row's upper edge. Centering only spends the extra
-           space — a text-driven row height leaves none. */
-        .wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
         .list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {
             height: 100%;
             margin: 0;
@@ -379,6 +370,53 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: auto;
             height: 100%;
             border-radius: 0 !important;
+        }
+
+        /* List-thumb rows on a wide band (BIGR-999). The recipe gives a row an
+           18% media column and an 82% text column, and the archetype takes
+           align:wide, so on a 1560px band one paragraph line runs about 180
+           characters and the thumbnail grows to 275px. Percentages cannot hold
+           either one, so the row carries its own bounds. Every rule keys on
+           the documented card-media-thumb hook: the flush variant and the
+           plain row share one contract.
+
+           The row keeps its leading edge. The band's heading and lead copy are
+           alignwide too, so a centered row would step out of their column and
+           the leftover space belongs at the row's trailing edge instead. Core's
+           constrained layout writes both auto margins with !important, so the
+           start margin needs the same weight.
+
+           The row cap is the sum of its parts: the media cap, the reading
+           measure, and one column gap. The media column grows into what the
+           capped text column leaves, up to its own cap, so the row's box ends
+           where its content ends and a bordered flush row shows no dead strip.
+           A flush row zeroes that column gap and spends the same distance on
+           the text column's own padding, so one cap serves both variants.
+
+           9rem holds the thumbnail at 144px, close to the 18% it takes on a
+           960px band, and 52ch holds the longest line at about 68 characters
+           in the reviewed site, inside the 65-75 character measure. Both units
+           are font-relative, so larger body type gives a larger thumbnail and
+           the same character count. */
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {
+            max-inline-size: calc(9rem + 52ch + var(--wp--style--block-gap, 2rem));
+            margin-inline-start: 0 !important;
+            margin-inline-end: auto !important;
+        }
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) > .wp-block-column:has(figure.card-media-thumb) {
+            flex-grow: 1;
+            max-inline-size: 9rem;
+        }
+        /* The text column also owns the centering both variants need: when the
+           thumbnail out-measures a short text stack the row takes the
+           thumbnail's height, and top-pinned copy would ride the row's upper
+           edge. Centering only spends extra space — a text-driven row height
+           leaves none. */
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) > .wp-block-column:not(:has(figure.card-media-thumb)) {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            max-inline-size: 52ch;
         }
 
         /* Core gives pullquotes a font-relative 4em vertical pad and a trailing
@@ -902,25 +940,34 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* One axis: the hairline runs the full width of the group, so a
+           centered line above it reads as a second axis. The two-class
+           selector outranks core's `has-text-align-center`, so a centered
+           heading from the generator cannot split the section. */
+        .section-composition--statement-lines :is(.wp-block-heading, p) {
+            text-align: start;
+        }
+        /* Keep one size rule at all viewport widths. The 1.25rem minimum
+           keeps narrow statements readable without a jump at 600px. */
+        /* The statement ledger carries its own register. The line sits one
+           ramp step under the section title, so the title still leads, and
+           the size follows the group's own width, so a long statement holds
+           the one line the archetype promises. The case comes from the
+           type-treatment kit, which drops the site's caps here. */
         .section-composition--statement-lines .wp-block-group.statement-lines {
             gap: 0;
+            container-type: inline-size;
         }
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
             margin: 0;
             padding-block: var(--wp--preset--spacing--md, 1.5rem);
             border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-            font-size: var(--wp--preset--font-size--section-title);
-            line-height: 1.1;
+            font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));
+            line-height: 1.15;
             text-wrap: balance;
         }
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
             border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-        }
-        @media (max-width: 600px) {
-
-            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-                font-size: min(var(--wp--preset--font-size--section-title), 8vw);
-            }
         }
 
         .wp-block-group.cta-panel {
