@@ -389,3 +389,9 @@ test('header CSS keeps the phone pill on one row: nowrap caption CTA, shrinking 
     assert_contains('white-space: nowrap;', $block, 'the CTA never wraps');
     assert_contains('font-size: var(--wp--preset--font-size--caption, 0.875rem);', $block);
 });
+
+test('the floating pill places an open navigation above its other controls', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    assert_contains('.header-pill > .wp-block-navigation:has(.wp-block-navigation__responsive-container.is-menu-open)', $css);
+    assert_contains('z-index: 2;', $css);
+});

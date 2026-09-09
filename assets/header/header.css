@@ -812,3 +812,8 @@ html.header-state-js {
         content: none !important;
     }
 }
+
+/* Keep the open navigation above other controls in the pill. */
+.site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-navigation:has(.wp-block-navigation__responsive-container.is-menu-open) {
+    z-index: 2;
+}
