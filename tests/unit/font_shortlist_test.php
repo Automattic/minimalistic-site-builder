@@ -73,6 +73,31 @@ test('a product tradition in a sans letterform asks for medium display weight an
     assert_true(!str_contains(FontShortlist::promptParagraph('didone', 'zova', $catalog, 'modernist'), 'MEDIUM weight'), 'a serif tradition keeps its own weight');
     assert_true(!str_contains(FontShortlist::promptParagraph('grotesque', 'zova', $catalog), 'MEDIUM weight'), 'the default register adds nothing');
 
+    // A condensed grotesque is the same product voice at a narrower width. A
+    // generated modernist portfolio landed on Encode Sans Condensed, missed the
+    // sentence, and shipped uppercase display type at weight 700.
+    assert_contains('condensed', implode(' ', FontShortlist::PRODUCT_TYPE_REGISTERS));
+    $condensed = FontShortlist::promptParagraph('condensed', 'ovest', $catalog, 'modernist');
+    assert_contains('MEDIUM weight', $condensed);
+    assert_contains('do not reach for uppercase', $condensed, 'the caps reflex is named for a narrow face');
+    assert_contains('weight 700 or 800', $condensed, '700 was the delivered weight, so the rule must name it');
+    // The caps traditions keep their own voice: the register list still gates it.
+    foreach (['poster', 'brutalist', 'heritage', 'editorial', 'archival'] as $register) {
+        assert_true(
+            !str_contains(FontShortlist::promptParagraph('condensed', 'ovest', $catalog, $register), 'MEDIUM weight'),
+            "a {$register} concept keeps its own condensed weight",
+        );
+    }
+    // Serif and mono traditions stay outside the rule under every product register.
+    foreach (['didone', 'slab', 'humanist', 'transitional', 'mono', 'script', 'display-serif'] as $typeRegister) {
+        foreach (FontShortlist::PRODUCT_REGISTERS as $register) {
+            assert_true(
+                !str_contains(FontShortlist::promptParagraph($typeRegister, 'zova', $catalog, $register), 'MEDIUM weight'),
+                "{$register}/{$typeRegister} keeps its own weight",
+            );
+        }
+    }
+
     // The reference-corpus grotesks and geometrics that are not monoculture faces are shelved.
     $shelves = FontShortlist::shelves();
     foreach (['Inter Tight', 'Albert Sans', 'Be Vietnam Pro', 'Host Grotesk'] as $name) {
