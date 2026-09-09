@@ -21,7 +21,8 @@ final class Surface
 
     /**
      * WCAG normal-text floor the contrast pipeline must clear before this
-     * overlay ships. The 7:1 (AAA) floor reserves contrast for the overlay.
+     * overlay ships. A 7:1 floor reserves at least 4.5:1 after the
+     * soft-light sheet at opacity 0.22–0.48.
      */
     public static function contrastFloor(?string $surface): float
     {
@@ -35,7 +36,7 @@ final class Surface
     /**
      * Build-owned overlay for a committed surface.
      *
-     * The texture uses multiply on light pages and screen on dark pages.
+     * The texture uses soft-light on both page grounds.
      * Inks are the delivered `base`/`contrast` pair so a cool or neon
      * direction is not hue-shifted by a hardcoded kraft recipe. Opacity is
      * still tuned from the page's base: a dark page carries grain that a
@@ -96,8 +97,8 @@ final class Surface
         if ($opacity === null || $background === null) {
             return null;
         }
-        // These blend modes keep the texture visible near white and black.
-        $blend = $dark ? 'screen' : 'multiply';
+        // Both inks affect light and dark bands.
+        $blend = 'soft-light';
         $mode = $dark ? 'dark' : 'light';
         $size = $surface === 'dot-grid' ? '24px 24px' : 'auto';
         return "/* Committed '{$surface}' page surface ({$mode}). "

@@ -20,7 +20,7 @@ test('Surface kitCss ships a fixed overlay for each real surface and nothing for
     assert_contains('position: fixed', $paper);
     assert_contains('pointer-events: none', $paper);
     assert_contains('html body::before', $paper);
-    assert_contains('@supports (mix-blend-mode: multiply)', $paper);
+    assert_contains('@supports (mix-blend-mode: soft-light)', $paper);
     assert_contains('prefers-reduced-transparency: reduce', $paper);
     assert_contains('@media print', $paper);
     assert_contains('z-index: 1', $paper);
@@ -40,7 +40,9 @@ test('Surface kitCss carries both inks so no band loses the texture', function (
     foreach (['#16181A', '#EFE8DA'] as $base) {
         $css = Surface::kitCss('concrete', $base);
         assert_true(is_string($css));
-        assert_true(str_contains($css, 'mix-blend-mode: multiply') || str_contains($css, 'mix-blend-mode: screen'), "one visible blend serves both inks on {$base}");
+        assert_contains('mix-blend-mode: soft-light', $css);
+        assert_contains($base === '#16181A' ? 'rgba(22,24,26,' : 'rgba(48,36,22,', $css);
+        assert_contains('rgba(239,232,218,', $css);
         assert_contains('rgba(', $css, "inks present on {$base}");
     }
 });
