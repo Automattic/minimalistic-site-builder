@@ -461,7 +461,13 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
             ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Everything we bake, by category', 'children' => []],
         ],
     ]);
-    $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
+    // Keep every attack payload queued for its intended generation step.
+    $llm->queueJson(['seeds' => [
+        ['text' => 'Hearth & Grain', 'register' => 'warm and rustic'],
+        ['text' => 'Flour & Steel', 'register' => 'warm and rustic'],
+        ['text' => 'Sugar Bloom', 'register' => 'warm and rustic'],
+        ['text' => 'Midnight Levain', 'register' => 'warm and rustic'],
+    ]]);
     $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     $llm->queueJson(['direction' => [
         'title' => 'Hearth & Grain',
@@ -666,7 +672,12 @@ test('red team: the HTML-first graph delivers no executable or fetching model by
             'sections' => ['Hero', 'Story'],
             'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []]],
         ]);
-        $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
+        $llm->queueJson(['seeds' => [
+            ['text' => 'Flour Archive', 'register' => 'editorial'],
+            ['text' => 'Bread Ledger', 'register' => 'editorial'],
+            ['text' => 'Oven Journal', 'register' => 'editorial'],
+            ['text' => 'Grain Index', 'register' => 'editorial'],
+        ]]);
         $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
         $llm->queueJson(['direction' => [
             'title' => 'Flour Archive',
