@@ -26,7 +26,6 @@ use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\ReconcilePaletteStep;
-use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ResolveNavLinksStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
@@ -174,7 +173,6 @@ final class StepComposition
         return new self([
             new ScaffoldThemeStep(),
             new ScaffoldPluginStep(),
-            new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
             new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
             new ApplyIdentityStep(),
             new DesignDirectionStep(
@@ -300,11 +298,6 @@ final class StepComposition
             // front next to the theme; apply-identity fills its header and
             // per-site symbol prefixes later.
             new ScaffoldPluginStep(),
-            // Cheap, fast first pass on a small model: expand short/vague prompts and
-            // normalize the brief before any expensive step reads it. Rewrites the
-            // `prompt` in meta.json (original kept as `original_prompt`), so every
-            // step below benefits with no further wiring.
-            new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
             new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
             new ApplyIdentityStep(),
             // Commit to ONE creative concept BEFORE theme.json / the section plan, so
