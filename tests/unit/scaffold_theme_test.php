@@ -696,15 +696,33 @@ test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('scaffold-theme sets statement lines at section-title scale with hairlines between them (frm W3e)', function () {
+test('scaffold-theme sets statement lines one ramp step under the title, with hairlines between them (frm W3e, BIGR-1002)', function () {
     $tmp = sys_get_temp_dir() . '/builder_scaffold_statements_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Spector');
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
-    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
+    $rule = '.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {';
+    assert_contains($rule, $css);
     assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
     assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {', $css);
-    assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 8vw)', $css, 'phones scale the line with the viewport');
+    $body = substr($css, (int) strpos($css, $rule), 400);
+    assert_contains('text-wrap: balance;', $body, 'the line still balances when it does wrap');
+    // The tie with the section title is the defect: elements.h2 uses the
+    // section-title preset, so the ledger must not use it too.
+    assert_true(
+        !str_contains($body, 'var(--wp--preset--font-size--section-title)'),
+        'the statement line no longer ties with the section title',
+    );
+    assert_contains(
+        'font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));',
+        $body,
+        'the line sits one ramp step under the title and follows the group width',
+    );
+    assert_contains('container-type: inline-size;', $css, 'the group is the query container the cqi unit reads');
+    assert_eq(1, substr_count($css, $rule), 'one size rule prevents a viewport breakpoint jump');
+    // One axis: the two-class selector outranks core's has-text-align-center.
+    assert_contains('.section-composition--statement-lines :is(.wp-block-heading, p) {', $css);
+    assert_contains('text-align: start;', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
