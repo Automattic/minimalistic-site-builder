@@ -686,7 +686,7 @@ test('an overlay-planned site whose palette fails the scrim check is briefed as 
         'the unreadable overlay must not be assigned'
     );
     assert_true(
-        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid'),
+        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay'),
         'the behavior contract must not promise the overlay shell'
     );
     $hero = sections_request_text($reqs['page-home--hero']);
@@ -719,7 +719,9 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
     assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
-    assert_contains('DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid', $reqs['header']['prompt']);
+    // One page of two bands has too little depth for chrome that never
+    // leaves, so the overlay the fixture earns is the transient one.
+    assert_contains('DETERMINISTIC HEADER BEHAVIOR: overlay-transient', $reqs['header']['prompt']);
     assert_contains('NEVER add `style.position`', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

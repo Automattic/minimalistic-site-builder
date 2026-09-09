@@ -270,7 +270,7 @@ test('finalize-theme solidifies an overlay-prepared header when the behavior art
         ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
         ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
     ]]]]);
-    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+    $classes = 'header-behavior-overlay header-start-transparent '
         . 'header-scrolled-contrast header-foreground-base';
     $project->writeText(
         'theme/parts/header.html',
@@ -673,7 +673,7 @@ test('finalize-theme keeps a corrupt required theme artifact fatal', function ()
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
     $project->writeText('theme/theme.json', '{');
-    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+    $classes = 'header-behavior-overlay header-start-transparent '
         . 'header-scrolled-contrast header-foreground-base';
     $header = '<!-- wp:group {"className":"' . $classes . '","textColor":"base"} -->'
         . '<div class="wp-block-group ' . $classes . ' has-base-color has-text-color">'
