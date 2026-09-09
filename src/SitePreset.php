@@ -57,7 +57,7 @@ final class SitePreset
                 $spec = [];
             }
             $blogname = (string) ($spec['name'] ?? $blogname);
-            $blogdescription = self::blogDescription($spec);
+            $blogdescription = self::siteDescription($spec);
         }
 
         return [
@@ -94,6 +94,43 @@ final class SitePreset
     public static function blogDescription(array $spec): string
     {
         return trim((string) ($spec['tagline'] ?? ''));
+    }
+
+    /**
+     * The string WordPress stores in `blogdescription`.
+     *
+     * The stated tagline comes first, and it has to: when the header keeps a
+     * wp:site-tagline block, that block renders this exact option, so the two
+     * can never be allowed to disagree. A header only keeps the block when a
+     * tagline was stated (AboveFoldContract::headerTextFacts), so with no
+     * tagline nothing on the page renders this and the option is free to
+     * carry the spec's `description` — one factual sentence about the site,
+     * and a required field. BIGR-773 still holds: blogDescription() above —
+     * tagline or nothing — is what the header reads to decide, and it is
+     * untouched.
+     *
+     * `topic` is not a third rung. WordPress appends this option to the front
+     * page's <title> (wp_get_document_title), so a bare topic phrase would
+     * read as "Corner Bakery – sourdough" in the tab and in search results.
+     *
+     * Filling the option matters because a shared link has no other source.
+     * Jetpack builds the front page's og:description from
+     * get_bloginfo('description') and never from the page's own content, so
+     * an empty option ships a Slack or Facebook card with no description at
+     * all: the card falls back to the Twitter default, "Visit the post for
+     * more."
+     *
+     * @param array<string,mixed> $spec
+     */
+    public static function siteDescription(array $spec): string
+    {
+        foreach (['tagline', 'description'] as $key) {
+            $value = trim((string) ($spec[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return '';
     }
 
     /** Mu-plugin body that fails outbound HTTP fast in the local preview. */
