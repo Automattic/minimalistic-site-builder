@@ -739,6 +739,6 @@ TEXT;
         if (count($leading) !== 1 || $document->name($leading[0]) !== 'paragraph') {
             return false;
         }
-        return in_array(SectionLabel::SIDE_CLASS, self::classTokens($document, $leading[0]), true);
+        return SectionLabel::hasClass($document, $leading[0], SectionLabel::SIDE_CLASS);
     }
 }

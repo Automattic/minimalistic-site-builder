@@ -24,7 +24,7 @@ test('the section-badge kit paints the marked paragraph as a pill with a dot (fr
     assert_eq(null, SectionLabel::kitCss(null));
     $css = (string) SectionLabel::kitCss(' Section-Badge ');
     assert_contains('p.section-badge {', $css);
-    assert_contains('var(--shape-radius-pill, 9999px)', $css, 'the pill reads the committed radius scale');
+    assert_contains('border-radius: 9999px', $css, 'The badge uses the selected shape radius.');
     assert_contains('p.section-badge::before', $css);
     assert_contains('var(--wp--preset--color--accent, currentColor)', $css, 'only the dot takes the accent');
     assert_contains('text-transform: none', $css, 'the badge is never tracked uppercase');
@@ -208,9 +208,9 @@ test('the delivery boundary keeps one committed side label in the leading column
 });
 
 test('section badges use the committed pill radius without another token kit', function () {
-    assert_contains('var(--shape-radius-pill, 0)', SectionLabel::kitCss('section-badge', 'sharp'));
-    foreach (['soft', 'round'] as $shape) {
-        assert_contains('var(--shape-radius-pill, 9999px)', SectionLabel::kitCss('section-badge', $shape));
+    assert_contains('border-radius: 0', SectionLabel::kitCss('section-badge', 'sharp'));
+    foreach (['soft' => '0.5rem', 'round' => '9999px'] as $shape => $radius) {
+        assert_contains('border-radius: ' . $radius, SectionLabel::kitCss('section-badge', $shape));
     }
 });
 
@@ -219,4 +219,25 @@ test('a badge uses a block flex box so auto margins can center it', function () 
     assert_contains('display: flex;', $css);
     assert_contains('inline-size: fit-content;', $css);
     assert_contains('margin-inline: auto !important;', $css);
+});
+
+test('a removed side label leaves full-width content and preserves sibling bytes', function () {
+    foreach (['none', 'section-badge', 'side-label'] as $label) {
+        $result = SectionLabel::normalize(side_label_split(), $label, 'opening', true);
+        assert_true(!str_contains($result['markup'], 'wp:column'));
+        assert_contains('<p>Three moves, one room.</p>', $result['markup']);
+        assert_eq(1, count($result['warnings']));
+        assert_eq($result['markup'], SectionLabel::normalize($result['markup'], $label, 'opening', true)['markup']);
+    }
+    $unrelated = '<!-- wp:paragraph --><p class="section-badge-note">Keep this.</p><!-- /wp:paragraph -->';
+    assert_eq($unrelated, SectionLabel::normalize($unrelated, 'none', 'body')['markup']);
+});
+
+test('label removal preserves an unrelated empty split and raw sibling text', function () {
+    $unrelated = '<!-- wp:columns --><div class="wp-block-columns"><!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column --><!-- wp:column --><div class="wp-block-column"><!-- wp:paragraph --><p>Sibling</p><!-- /wp:paragraph --></div><!-- /wp:column --></div><!-- /wp:columns -->';
+    $split = side_label_split();
+    $raw = $unrelated . $split;
+    $result = SectionLabel::normalize($raw, 'none', 'body');
+    assert_true(str_starts_with($result['markup'], $unrelated));
+    assert_contains('<!-- wp:paragraph --><p>Three moves, one room.</p><!-- /wp:paragraph -->', $result['markup']);
 });

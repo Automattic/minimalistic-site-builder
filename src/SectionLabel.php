@@ -42,7 +42,7 @@ final class SectionLabel
                 . ' ONE wp:columns ("align":"wide") with a leading wp:column ("width":"25%") holding ONE'
                 . ' wp:paragraph with "className":"' . self::SIDE_CLASS . '" and "fontSize":"caption" (one or two'
                 . ' words naming the topic), and a trailing wp:column ("width":"75%") holding the whole heading'
-                . ' stack and body. The build paints the label and keeps it in view while the column scrolls;'
+                . ' stack and body. The build keeps the label in view on desktop. On phones, the label uses sentence case above the content;'
                 . ' author no colour, letter-spacing or uppercase on it, and never place it above a heading',
             default         => 'no section labels; a heading is the first text line of every section',
         };
@@ -51,7 +51,7 @@ final class SectionLabel
     /** Build-owned execution of the badge. `none` ships no kit. */
     public static function kitCss(?string $raw, ?string $shape = 'round'): ?string
     {
-        $radius = $shape === 'sharp' ? '0' : '9999px';
+        $radius = match ($shape) { 'sharp' => '0', 'soft' => '0.5rem', default => '9999px' };
         $label = self::explicit($raw);
         if ($label === null || $label === 'none') {
             return null;
@@ -84,12 +84,16 @@ final class SectionLabel
                     border-radius: 50%;
                     background-color: var(--wp--preset--color--accent, currentColor);
                 }
+                @media (max-width: 781px) {
+                    p.{$hook} {
+                        text-transform: none;
+                        letter-spacing: 0;
+                    }
+                }
                 @media (min-width: 782px) {
                     .wp-block-column:has(> p.{$hook}) {
                         position: sticky;
-                        /* No kit publishes the header height yet; 5rem clears
-                           every sticky bar in the catalog with room to spare. */
-                        top: calc(var(--header-safe-top, 5rem) + 1rem);
+                        top: calc(var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px) + 1rem);
                         align-self: start;
                     }
                 }
@@ -110,7 +114,7 @@ final class SectionLabel
                 margin-block: 0 0.75rem;
                 margin-inline: 0 auto !important;
                 padding: 0.3em 0.85em;
-                border-radius: var(--shape-radius-pill, {$radius});
+                border-radius: {$radius};
                 box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
                 font-size: var(--wp--preset--font-size--caption, 0.8rem);
                 font-weight: 500;
@@ -165,7 +169,7 @@ final class SectionLabel
             $device = null;
             foreach ([self::BADGE_CLASS => 'section-badge', self::SIDE_CLASS => 'side-label'] as $class => $name) {
                 if (in_array($class, $tokens, true)
-                    || preg_match('/\bclass="[^"]*\b' . $class . '\b[^"]*"/', $own) === 1) {
+                    || self::hasClass($document, $index, $class)) {
                     $device = $name;
                     break;
                 }
@@ -215,6 +219,16 @@ final class SectionLabel
         if ($remove === []) {
             return ['markup' => $markup, 'warnings' => []];
         }
+        $rows = array_values(array_filter($document->indices(), static fn (int $i): bool => $document->name($i) === 'columns'));
+        $affectedRows = [];
+        foreach ($remove as $badge) {
+            $column = $document->parent($badge['index']);
+            $row = $column !== null && $document->name($column) === 'column' ? $document->parent($column) : null;
+            $ordinal = array_search($row, $rows, true);
+            if ($ordinal !== false) {
+                $affectedRows[] = $ordinal;
+            }
+        }
         $warnings = [];
         $out = $markup;
         foreach (array_reverse($remove) as $badge) {
@@ -229,7 +243,64 @@ final class SectionLabel
             $warnings[] = "file='theme/parts/{$part}.html'; block='paragraph." . $class . "'; authored="
                 . Warnings::value($authored) . '; delivered=removed; disposition=' . $badge['why'];
         }
+        $out = self::collapseEmptyLabelColumns($out, $affectedRows);
         return ['markup' => $out, 'warnings' => array_reverse($warnings)];
+    }
+
+    public static function hasClass(BlockMarkup $document, int $index, string $class): bool
+    {
+        $attrs = $document->attrs($index) ?? [];
+        $classes = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+        if (in_array($class, preg_split('/\s+/', $classes) ?: [], true)) {
+            return true;
+        }
+        preg_match('/\bclass=["\']([^"\']*)["\']/', $document->ownHtml($index), $match);
+        return in_array($class, preg_split('/\s+/', $match[1] ?? '') ?: [], true);
+    }
+
+    /** Remove an empty label column and preserve the content blocks. */
+    private static function collapseEmptyLabelColumns(string $markup, array $affectedRows): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $rows = array_values(array_filter($document->indices(), static fn (int $i): bool => $document->name($i) === 'columns'));
+        foreach (array_reverse($rows, true) as $ordinal => $index) {
+            if (!in_array($ordinal, $affectedRows, true)) {
+                continue;
+            }
+            if ($document->name($index) !== 'columns' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $children = $document->children($index);
+            $empty = array_values(array_filter($children, static fn (int $child): bool =>
+                $document->name($child) === 'column' && $document->children($child) === []
+                && trim(strip_tags($document->ownHtml($child))) === ''
+            ));
+            $kept = array_values(array_diff($children, $empty));
+            if ($empty === []) {
+                continue;
+            }
+            if (count($kept) !== 1 || $document->name($kept[0]) !== 'column') {
+                foreach (array_reverse($empty) as $column) {
+                    $start = $document->openingOffset($column);
+                    $end = $document->endOffset($column);
+                    if ($end !== null) {
+                        $markup = substr_replace($markup, '', $start, $end - $start);
+                    }
+                }
+                continue;
+            }
+            $content = $document->children($kept[0]);
+            if ($content === []) {
+                continue;
+            }
+            $inner = $document->innerHtml($kept[0]);
+            $rowStart = $document->openingOffset($index);
+            $rowEnd = $document->endOffset($index);
+            if ($rowEnd !== null && preg_match('/^\s*<div\b[^>]*>(.*)<\/div>\s*$/s', $inner, $shell) === 1) {
+                $markup = substr_replace($markup, $shell[1], $rowStart, $rowEnd - $rowStart);
+            }
+        }
+        return $markup;
     }
 
     /**
