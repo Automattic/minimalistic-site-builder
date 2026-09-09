@@ -5,7 +5,9 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
+
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -176,6 +178,12 @@ final class SectionUnit extends AbstractPageSectionUnit
         if (!self::ownsRuledSeparators($itemPattern, $archetype)) {
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
+        }
+
+        foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+            $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
         }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];

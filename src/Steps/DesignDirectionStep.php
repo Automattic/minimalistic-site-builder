@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
@@ -459,6 +460,7 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
+            'heading_emphasis' => HeadingEmphasis::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -1010,6 +1012,7 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1109,6 +1112,7 @@ final class DesignDirectionStep implements Step
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
+            'heading_emphasis' => $headingEmphasis,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -1357,6 +1361,18 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeHeadingEmphasis(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            HeadingEmphasis::ALL,
+            HeadingEmphasis::DEFAULT,
+            'heading_emphasis',
+            $warnings,
+            'unsupported heading emphasis replaced by none',
+        );
+    }
+
     public static function normalizeSurface(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1841,6 +1857,13 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
         }
 
+        $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
+        if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
+            $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
+                . '. Mark at most ONE clause per heading, only in the hero H1 and in section headings, never in'
+                . ' paragraphs, navigation or buttons; never author a colour, face or background on the span.';
+        }
+
         $device = Device::explicit($direction['device'] ?? null);
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
@@ -2212,6 +2235,14 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
+    }
+
+    public static function headingEmphasisFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return HeadingEmphasis::DEFAULT;
+        }
+        return self::normalizeHeadingEmphasis($project->readJson(self::FILE)['heading_emphasis'] ?? null);
     }
 
     /**
