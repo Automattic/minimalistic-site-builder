@@ -341,6 +341,11 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill.head
     --header-pill-surface: var(--header-scrolled-surface, var(--header-scrolled-solid));
 }
 
+html.header-state-js .site-header-shell
+    .header-archetype--floating-pill.header-behavior-sticky-soft.header-top-transparent {
+    --header-start-surface: var(--header-start-solid);
+}
+
 /* A static root has no behavior variables; read the token off its core class. */
 .site-header-shell .header-archetype--floating-pill.has-base-background-color { --header-pill-solid: var(--wp--preset--color--base, #ffffff); }
 .site-header-shell .header-archetype--floating-pill.has-contrast-background-color { --header-pill-solid: var(--wp--preset--color--contrast, #111111); }
@@ -631,7 +636,7 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
 @media (prefers-reduced-transparency: reduce) {
     html.header-state-js
         .site-header-shell
-        .header-archetype--floating-pill
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
         .header-pill::before {
         content: none;
         -webkit-backdrop-filter: none;
@@ -816,4 +821,15 @@ html.header-state-js {
 /* Keep the open navigation above other controls in the pill. */
 .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-navigation:has(.wp-block-navigation__responsive-container.is-menu-open) {
     z-index: 2;
+}
+
+@media (max-width: 782px) {
+    .site-header-shell :is(.header-archetype--bar-center-cta, .header-archetype--spread-nav)
+        .wp-block-navigation__responsive-container:not(.is-menu-open) {
+        display: none;
+    }
+    .site-header-shell :is(.header-archetype--bar-center-cta, .header-archetype--spread-nav)
+        .wp-block-navigation__responsive-container-open {
+        display: flex;
+    }
 }

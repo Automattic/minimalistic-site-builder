@@ -350,7 +350,7 @@ test('header driver marks the in-view section on pill and centered-bar navigatio
     $js = (string) file_get_contents(repo_path('assets/header/header.js'));
     assert_contains("'is-current-section'", $js);
     assert_contains('function watchSectionNavigation()', $js);
-    assert_contains(".header-archetype--floating-pill, .header-archetype--bar-center-cta", $js, 'only the two single-page chromes mark sections');
+    assert_contains(".header-archetype--floating-pill, .header-archetype--bar-center-cta", $js, 'the three section-aware header variants mark sections');
     assert_contains("a[href^=\"#\"]", $js, 'only in-page links take part');
     assert_contains("'location'", $js, 'the link says aria-current=location, never page');
     assert_true(strpos($js, 'watchSectionNavigation();') > strpos($js, 'function setup()'), 'the observer starts in setup');

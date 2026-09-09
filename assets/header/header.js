@@ -112,7 +112,7 @@
         }
     }
 
-    // Active-item pill (frm W1c): on a floating-pill or centered-bar header
+    // Active-item pill (frm W1c): on a floating-pill, centered-bar, or spread-nav header
     // whose navigation links point at sections of this page (#id), the item
     // whose section crosses the upper part of the viewport is marked
     // is-current-section (and aria-current="location" on its link) so the

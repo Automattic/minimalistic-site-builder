@@ -660,7 +660,7 @@ final class AboveFoldContract
      * full-bleed canvas in a product/portfolio tradition takes the floating
      * pill alone: the pill is the register's signature chrome, and a coin
      * flip against the plain bar would make the evidence build a lottery.
-     * Overlay mode never floats a pill — the pill is page-ground chrome.
+     * Overlay mode permits a pill with the proven protective surface.
      *
      * @return list<string>
      */

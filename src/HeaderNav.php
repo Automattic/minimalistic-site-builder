@@ -356,9 +356,6 @@ final class HeaderNav
      */
     private static function withRowClass(string $markup, string $class, string $archetype, string $noun): array
     {
-        if (preg_match('/(?:^|[\s"])' . $class . '(?:$|[\s"])/', $markup) === 1) {
-            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
-        }
         $document = BlockMarkup::parse($markup);
         $cluster = self::identityCluster($document);
         $navigations = array_values(array_filter(
@@ -391,11 +388,27 @@ final class HeaderNav
         }
         $attrs = $document->attrs($row) ?? [];
         $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (in_array($class, $tokens, true)
+            && preg_match('/\bclass="[^"]*(?<![\w-])' . preg_quote($class, '/') . '(?![\w-])[^"]*"/', $document->ownHtml($row)) === 1) {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
         $tokens[] = $class;
         $attrs['className'] = implode(' ', array_values(array_unique($tokens)));
         $document->setAttrs($row, $attrs);
-        if (preg_match('/^\s*<div class="wp-block-group(?=[" ])/', $document->ownHtml($row)) === 1) {
-            $document->replaceInOwnHtml($row, 'class="wp-block-group', 'class="wp-block-group ' . $class);
+        $own = $document->ownHtml($row);
+        $html = preg_replace_callback('/<div\b[^>]*>/', static function (array $match) use ($class): string {
+            if (preg_match('/\bclass="([^"]*)"/', $match[0], $classes) === 1) {
+                $tokens = preg_split('/\s+/', trim($classes[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (!in_array($class, $tokens, true)) {
+                    $position = array_search('wp-block-group', $tokens, true);
+                    array_splice($tokens, $position === false ? 0 : $position + 1, 0, [$class]);
+                }
+                return str_replace($classes[0], 'class="' . implode(' ', array_unique($tokens)) . '"', $match[0]);
+            }
+            return substr($match[0], 0, -1) . ' class="' . $class . '">';
+        }, $own, 1) ?? $own;
+        if ($html !== $own) {
+            $document->spliceOwnHtml($row, 0, strlen($own), $html);
         }
         return [
             'markup' => $document->render(),
@@ -1709,7 +1722,6 @@ final class HeaderNav
             $token = trim((string) ($attrs['textColor'] ?? ''));
             if ($token !== '' && $token !== $foreground) {
                 unset($attrs['textColor']);
-                $document->removeClassTokenInOwnHtml($index, "has-{$token}-color");
                 $changed[] = "textColor '{$token}'";
             }
             if (is_array($attrs['style']['color'] ?? null) && isset($attrs['style']['color']['text'])) {
@@ -1730,13 +1742,6 @@ final class HeaderNav
                 unset($attrs['style']);
             }
             $document->setAttrs($index, $attrs);
-            $document->removeClassTokenInOwnHtml($index, 'has-text-color');
-            $own = $document->ownHtml($index);
-            $stripped = preg_replace('/(\sstyle="[^"]*?)(?:^|;)\s*color\s*:[^;"]*;?/i', '$1', $own) ?? $own;
-            $stripped = preg_replace('/\sstyle=""/', '', $stripped) ?? $stripped;
-            if ($stripped !== $own) {
-                $document->spliceOwnHtml($index, 0, strlen($own), $stripped);
-            }
             $notes[] = "{$name}: dropped " . implode(', ', $changed)
                 . " so the kit-painted chrome inherits the proven '{$foreground}' foreground in both states";
         }

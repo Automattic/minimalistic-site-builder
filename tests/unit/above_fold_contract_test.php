@@ -1242,7 +1242,7 @@ test('floating-pill is the stacked pool for a full-bleed product/portfolio tradi
         assert_true($bar['header']['archetype'] !== 'floating-pill', "'{$register}' does not float");
     }
 
-    // Overlay mode never floats: the pill is page-ground chrome.
+    // This register uses the minimal overlay header.
     $overlay = above_fold_resolve(above_fold_pages(), recipe: 'cinematic-safe-zone');
     assert_eq('minimal-overlay', $overlay['header']['archetype']);
 

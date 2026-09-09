@@ -1057,7 +1057,11 @@ test('HeaderNav restores the header-pill class on a floating-pill row the model 
         '{"className":"custom-motion header-pill","layout":{"type":"flex"}}',
         $markup,
     );
-    assert_eq($marked, HeaderNav::withPillRow($marked)['markup']);
+    $mirrored = HeaderNav::withPillRow($marked)['markup'];
+    assert_contains('<div class="wp-block-group header-pill">', $mirrored);
+    assert_eq($mirrored, HeaderNav::withPillRow($mirrored)['markup']);
+    $wrongRoot = str_replace('{"layout":{"type":"constrained"}}', '{"className":"header-pill","layout":{"type":"constrained"}}', $markup);
+    assert_contains('<div class="wp-block-group header-pill">', HeaderNav::withPillRow($wrongRoot)['markup']);
 
     // No navigation at all: nothing provable, one durable warning, bytes kept.
     $bare = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
