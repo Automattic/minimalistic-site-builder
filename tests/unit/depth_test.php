@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\Depth;
 
 test('Depth exposes one canonical preset for every bounded commitment', function () {
@@ -76,6 +77,29 @@ test('Depth glass frosts band-coloured card shells on a blurred page and keeps i
     assert_true(!str_contains($css, 'has-contrast-background-color'), 'an inverted highlight card stays solid');
     assert_true(!str_contains(Depth::kitCss('glow'), 'backdrop-filter'), 'only glass blurs');
     assert_eq('ring', Depth::GLASS_LIGHT_FALLBACK);
+});
+
+test('glass frosts a band-coloured card under every construction, borderless included', function () {
+    $css = Depth::kitCss('glass');
+    // Depth is independent of card_style, so the band panel is the whole test.
+    // A generated page delivered borderless pricing cards painted `band`, and
+    // a construction-gated selector left them solid while the direction
+    // promised frosted panels.
+    assert_eq(3, substr_count($css, Depth::GLASS_CARD_SELECTOR), 'fill, blur and reduced-transparency');
+    foreach (CardStyle::ALL as $style) {
+        assert_contains(".card-style--{$style}", Depth::GLASS_CARD_SELECTOR, "glass reaches {$style} cards");
+    }
+    assert_contains('.card-style--borderless).has-band-background-color', Depth::GLASS_CARD_SELECTOR);
+    // The elevation rules stay construction-gated: a borderless card takes no
+    // shadow, and gaining the frosted fill must not give it one.
+    foreach (['box-shadow: var(--wp--preset--shadow--depth', 'box-shadow: none !important'] as $rule) {
+        $body = substr($css, 0, (int) strpos($css, $rule));
+        $selector = substr($body, (int) strrpos($body, '}'));
+        assert_true(
+            !str_contains($selector, 'card-style--borderless'),
+            'the borderless card keeps no elevation: ' . $rule,
+        );
+    }
 });
 
 test('every bounded depth renders a direction fact, glass included', function () {

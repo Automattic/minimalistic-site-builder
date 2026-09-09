@@ -11,6 +11,15 @@ final class Depth
     /** Use a ring when the page has a light ground. */
     public const GLASS_LIGHT_FALLBACK = 'ring';
 
+    /**
+     * Every card shell that paints a band panel, under any construction, plus
+     * the overlap card's own raised body. Glass frosts the painted panel, so
+     * the band background is the test; `card_style` never gates it.
+     */
+    public const GLASS_CARD_SELECTOR =
+        '.wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless).has-band-background-color,'
+        . ' .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color';
+
     public const DEFAULT = 'flat';
 
     /** @var array<string,array{name:string,shadow:string}> */
@@ -107,23 +116,25 @@ final class Depth
             : '';
 
         // Only band cards use transparency. Inverted cards keep their solid fill.
+        // The band background is the whole test, not the card construction:
+        // depth is independent of card_style, so a borderless card that still
+        // paints a band panel frosts like every other one. A card with no band
+        // background has no panel to frost and matches nothing here.
+        $glassCards = self::GLASS_CARD_SELECTOR;
         $glass = $depth === 'glass'
             ? <<<CSS
 
-                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
-                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
+                {$glassCards} {
                     background-color: color-mix(in srgb, var(--wp--preset--color--band) 72%, transparent) !important;
                 }
                 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
-                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
+                    {$glassCards} {
                         -webkit-backdrop-filter: blur(14px) saturate(1.2);
                         backdrop-filter: blur(14px) saturate(1.2);
                     }
                 }
                 @media (prefers-reduced-transparency: reduce) {
-                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
-                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
+                    {$glassCards} {
                         background-color: var(--wp--preset--color--band) !important;
                         -webkit-backdrop-filter: none;
                         backdrop-filter: none;
