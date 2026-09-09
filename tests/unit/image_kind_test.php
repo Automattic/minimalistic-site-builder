@@ -22,9 +22,13 @@ test('image kind is a closed vocabulary with one style keyword and one render cl
     assert_eq('3d-render', ImageKind::styleKeyword('3d-object'));
     assert_eq('ui-screenshot', ImageKind::styleKeyword('ui-mockup'), 'flat-design was itself a retro cue');
     $screen = ImageKind::promptClause('ui-mockup');
-    foreach (['edge-to-edge screenshot', 'no window frame', 'no title bar', 'no traffic-light dots', 'no browser tabs', 'no drop shadow', 'no backdrop', 'screen content only'] as $needle) {
+    foreach (['edge-to-edge screenshot', 'contemporary', 'filling the canvas to all four edges', 'never written on the screen', 'layered', 'soft elevation', 'no outer margin', 'no soft focus', 'no depth-of-field blur', 'no window frame', 'no title bar', 'no traffic-light dots', 'no browser tabs', 'no drop shadow', 'no backdrop', 'screen content only'] as $needle) {
         assert_contains($needle, $screen);
     }
+    assert_true(!str_contains($screen, 'blurred'), 'the placeholder bars are soft, not blurred');
+    assert_eq($screen, ImageKind::promptClause('ui-mockup', false, ''), 'an empty theme adds nothing');
+    assert_true(str_ends_with(ImageKind::promptClause('ui-mockup', false, 'The interface uses a dark theme.'), 'no grain. The interface uses a dark theme.'), 'the theme sentence follows the clause');
+    assert_eq(ImageKind::promptClause('3d-object'), ImageKind::promptClause('3d-object', false, 'The interface uses a dark theme.'), 'other kinds ignore the theme');
     assert_true(!str_contains($screen, 'framed'), 'the theme frames the screen, the picture does not');
     assert_true(ImageKind::skipsGrade('ui-mockup') && !ImageKind::skipsGrade('photo') && !ImageKind::skipsGrade('3d-object'));
     assert_eq('illustration', ImageKind::styleKeyword('line-illustration'));
@@ -80,8 +84,12 @@ test('the framed-screen kit ships for ui-mockup only, keys on the image role hoo
     assert_contains(':not([class*="avatar"])', $css, 'an avatar is not a screen');
     assert_contains(':has(> img:not([src$=".png"]))', $css, 'a transparent asset is not a screen');
     assert_contains('border-radius: var(--shape-radius-panel, 1rem)', $css, 'the frame accepts a panel radius and uses 1rem when it is absent');
-    assert_contains('inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent)', $css, 'the ring is drawn in the surface ink');
-    assert_contains('inset-inline-start: 0.875rem', $css, 'the window dots follow the writing direction');
+    assert_contains('inset 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent)', $css, 'the ring is drawn in the surface ink');
+    assert_contains('::after {', $css, 'the ring overlays the picture edge');
+    assert_contains('inset 0 1px 0 rgb(255 255 255 / 0.35)', $css, 'a light top edge reads as glass on a dark page');
+    foreach (['::before', 'padding-block-start', 'radial-gradient', 'inset-inline-start'] as $chrome) {
+        assert_true(!str_contains($css, $chrome), "no window chrome: {$chrome}");
+    }
     assert_contains('.screen-frame--tilt', $css);
     assert_contains('rotate: x 6deg', $css, 'the tilt is the individual rotate property, never transform');
     assert_contains('rotate: none', $css, 'phones lie the screen flat');
@@ -129,7 +137,8 @@ test('a mockup or a rendered object keeps its tilt through the QA upright questi
 
 test('the direction fact tells a ui-mockup author about the frame and the one tilt class', function () {
     $rendered = DesignDirectionStep::format(['description' => 'x', 'image_kind' => 'ui-mockup']);
-    assert_contains('frames every contained picture as a product window', $rendered);
+    assert_contains('frames every contained picture as a product screen', $rendered);
+    assert_contains('no window chrome', $rendered);
     assert_contains('`screen-frame--tilt` to at most ONE screen per page', $rendered);
     assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x', 'image_kind' => '3d-object']), 'screen-frame--tilt'));
 });
@@ -205,10 +214,55 @@ test('a person on a ui-mockup site takes the portrait clause instead of the inte
     assert_true(!ImageKind::namesPerson('A dashboard with a rising area chart'));
     $portrait = ImagePromptComposer::compose('A stylized abstract user avatar tile on a pale panel', 'testimonial card beside a quote', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
     assert_contains('a photographic portrait of one real person', $portrait);
-    assert_true(!str_contains($portrait, 'an edge-to-edge screenshot of a current web application interface'), 'the interface clause yields');
+    assert_true(!str_contains($portrait, 'an edge-to-edge screenshot of a contemporary, design-led web application'), 'the interface clause yields');
     assert_true(!str_contains($portrait, 'Art direction for all site imagery: Cool, evenly lit interface renders'), 'the interface grade yields too');
     $screen = ImagePromptComposer::compose('A dashboard with a rising area chart', 'product tour', 'photorealistic', '', 'Cool, evenly lit interface renders', false, null, 'card-landscape', 'ui-mockup');
-    assert_contains('an edge-to-edge screenshot of a current web application interface', $screen, 'a screen keeps the interface clause');
+    assert_contains('an edge-to-edge screenshot of a contemporary, design-led web application', $screen, 'a screen keeps the interface clause');
     $clay = ImagePromptComposer::compose('portrait of the founder', 'testimonial', 'photorealistic', '', '', false, null, 'card-landscape', '3d-object');
     assert_true(!str_contains($clay, 'photographic portrait'), 'only the ui-mockup kind yields; a 3D-object site keeps its objects');
+});
+
+test('the interface theme follows the page ground and names the accent', function () {
+    $dark = ImageKind::screenTheme('#101214', '#e8552f');
+    assert_contains('dark theme', $dark);
+    assert_contains('The single accent colour is red.', $dark);
+    assert_true(preg_match('/#|\\d/', $dark) !== 1, 'no hex code and no numeral reaches the picture as a label');
+    $light = ImageKind::screenTheme('#F7F4EE', null);
+    assert_contains('light theme', $light);
+    assert_true(!str_contains($light, 'accent colour'), 'no accent, no accent sentence');
+    assert_eq('', ImageKind::screenTheme(null, '#E8552F'), 'no base, no theme');
+    assert_eq('', ImageKind::screenTheme('white', '#E8552F'), 'an unusable base gives no theme');
+    assert_contains('dark theme', ImageKind::screenTheme('#101214', 'red'));
+    assert_true(!str_contains(ImageKind::screenTheme('#101214', 'red'), 'accent colour'), 'an unusable accent adds no accent sentence');
+    foreach (['#7C5CFF' => 'violet', '#E8552F' => 'red', '#F28C28' => 'orange', '#1F6FEB' => 'blue', '#0F9D8A' => 'teal', '#C0392B' => 'red', '#F5C518' => 'amber', '#2E7D32' => 'green', '#D81B60' => 'pink', '#888888' => 'a neutral grey', '#101214' => 'a neutral grey'] as $hex => $name) {
+        assert_eq($name, ImageKind::hueName($hex), $hex);
+    }
+    assert_eq(null, ImageKind::hueName('red'));
+
+    $tmp = sys_get_temp_dir() . '/builder_screen_theme_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    assert_eq('', DesignDirectionStep::screenThemeFor($project), 'no direction, no theme');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'ui-mockup', 'palette' => ['base' => '#0B0D10', 'accent' => '#7C5CFF']]);
+    assert_contains('dark theme', DesignDirectionStep::screenThemeFor($project));
+    assert_contains('The single accent colour is violet.', DesignDirectionStep::screenThemeFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'ui-mockup', 'palette' => 'none']);
+    assert_eq('', DesignDirectionStep::screenThemeFor($project), 'a malformed palette gives no theme');
+
+    $screen = ImagePromptComposer::compose('A dashboard', 'product tour', 'ui-screenshot', '', 'Cool light.', false, null, '', 'ui-mockup', 'The interface uses a dark theme.');
+    assert_contains('no grain. The interface uses a dark theme.', $screen, 'the composer carries the theme into the clause');
+    $person = ImagePromptComposer::compose('A portrait of the founder', 'testimonial', 'ui-screenshot', '', 'Cool light.', false, null, '', 'ui-mockup', 'The interface uses a dark theme.');
+    assert_true(!str_contains($person, 'dark theme'), 'a portrait on the same site takes no interface theme');
+});
+
+test('a screenshot prompt keeps its subject and swaps the scenery guidance for interface guidance', function () {
+    $screen = ImagePromptComposer::compose('A revenue analytics overview', 'product tour', 'ui-screenshot', 'Zova, a finance tool.', 'Cool light.', false, null, '', 'ui-mockup');
+    assert_true(str_starts_with($screen, 'A revenue analytics overview. Style: ui-screenshot'), 'a prefix on the subject made the model paint a margin and more labels');
+    assert_contains('Purely pictorial interface: the screen itself fills every part of the canvas', $screen);
+    assert_contains('none of their words is written on the screen: Composition:', $screen);
+    assert_true(!str_contains($screen, 'continuous unbroken scenery'), 'no photo scenery guidance on a screen');
+    $person = ImagePromptComposer::compose('A portrait of the founder', 'testimonial', 'ui-screenshot', 'Zova, a finance tool.', 'Cool light.', false, null, '', 'ui-mockup');
+    assert_true(str_starts_with($person, 'A portrait of the founder.'), 'a portrait keeps its subject');
+    assert_contains('continuous unbroken scenery', $person);
+    $photo = ImagePromptComposer::compose('A loaf on a board', 'menu card', 'photorealistic', 'A bakery.', 'Warm film.', false, null, '', 'photo');
+    assert_true(str_starts_with($photo, 'A loaf on a board.'));
 });

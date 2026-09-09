@@ -107,6 +107,9 @@ final class ImagePromptComposer
      * @param string             $imageCrop the bounded site-wide proportion
      *        commitment; mixed/absent adds no textual steering because each
      *        image role keeps its own authored ratio
+     * @param string             $imageKind the bounded imagery kind from the direction
+     * @param string             $screenTheme the ui-mockup interface theme sentence
+     *        (ImageKind::screenTheme); other kinds ignore it
      */
     public static function compose(
         string $subject,
@@ -118,6 +121,7 @@ final class ImagePromptComposer
         ?PromptRenderer $renderer = null,
         string $imageCrop = '',
         string $imageKind = '',
+        string $screenTheme = '',
     ): string {
         $renderer ??= new PromptRenderer(Package::promptsDir());
 
@@ -142,7 +146,7 @@ final class ImagePromptComposer
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
         // Apply the image kind to opaque images and transparent assets.
-        $kindClause = ImageKind::promptClause($imageKind, $transparent);
+        $kindClause = ImageKind::promptClause($imageKind, $transparent, $screenTheme);
         // Use a portrait for a person on a ui-mockup site.
         if (!$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
             && ImageKind::namesPerson($subject . ' ' . $pageContext)) {
@@ -226,6 +230,13 @@ final class ImagePromptComposer
         // flat-white isolation that ImageTransparency depends on.
         if ($where === '') {
             $guidance = '';
+        } elseif ($screenshot) {
+            // An interface has no scenery: the screen itself reaches every edge,
+            // and the brief words are layout guidance, never screen copy.
+            $guidance = 'Purely pictorial interface: the screen itself fills every part of'
+                . ' the canvas and reaches all four edges. The notes below steer the layout'
+                . ' and composition only; none of their words is written on the screen: '
+                . $where;
         } elseif ($transparent) {
             $guidance = 'Purely pictorial isolated asset: only the subject occupies'
                 . ' the frame, and the surrounding field remains flat, even, empty'

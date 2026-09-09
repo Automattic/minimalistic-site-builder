@@ -1782,12 +1782,14 @@ test('generate-images skips the hero check on a text-only Llm', function () {
 
 test('generate-images carries the image kind into the prompt, manifest, and request log', function () {
     [$project, $tmp] = generate_fixture();
-    $project->writeJson('designDirection.json', ['image_kind' => 'ui-mockup', 'image_grade' => 'Warm film grain.']);
+    $project->writeJson('designDirection.json', ['image_kind' => 'ui-mockup', 'image_grade' => 'Warm film grain.', 'palette' => ['base' => '#0B0D10', 'accent' => '#7C5CFF']]);
     $client = new FakeImageClient();
     (new GenerateImagesStep($client))->run($project);
     $rows = $project->readJson('images.json');
     assert_eq('ui-mockup', $rows[0]['image_kind']);
     assert_contains('edge-to-edge screenshot', $client->calls[0]['prompt']);
+    assert_contains('The interface uses a dark theme', $client->calls[0]['prompt'], 'the screenshot follows the page ground');
+    assert_contains('The single accent colour is violet.', $client->calls[0]['prompt']);
     assert_true(!str_contains($client->calls[0]['prompt'], 'Art direction for all site imagery'));
     assert_contains('ui-mockup', grade_image_log($project));
     exec('rm -rf ' . escapeshellarg($tmp));

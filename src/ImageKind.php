@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
-/** Define the image kinds, image prompts, QA rules, and screen frame CSS. */
+/** Define the image kinds, image prompts, QA rules, and screen frame CSS. The frame has no window chrome. */
 final class ImageKind
 {
     public const ALL = ['photo', '3d-object', 'ui-mockup', 'line-illustration', 'abstract-gradient'];
@@ -34,14 +34,18 @@ final class ImageKind
     {
         return match ($kind) {
             '3d-object'         => 'smooth matte clay-like 3D objects and simple geometric forms, rendered in soft studio light on plain seamless backdrops; no people, no scenes',
-            'ui-mockup'         => 'edge-to-edge screenshots of a current web application: dashboards, lists, boards and panels as real interface components with text as blurred bars, the screen content only with no window chrome, never a readable word',
+            'ui-mockup'         => 'edge-to-edge screenshots of a contemporary, design-led web application: layered panels, a large chart, tiles and lists as real interface components with text as soft placeholder bars, the screen content only with no window chrome, never a readable word',
             'line-illustration' => 'single-weight line illustrations with two or three flat colours and generous white space, one subject per image',
             'abstract-gradient' => 'soft abstract gradient fields with fine grain and slow colour drift; no objects, no scenes, no text',
             default             => 'photographs, one graded series',
         };
     }
 
-    public static function promptClause(?string $raw, bool $transparent = false): string
+    /**
+     * @param string $screenTheme the ui-mockup interface theme sentence from
+     *        screenTheme(); other kinds ignore it
+     */
+    public static function promptClause(?string $raw, bool $transparent = false, string $screenTheme = ''): string
     {
         $kind = self::explicit($raw) ?? self::DEFAULT;
 
@@ -54,19 +58,84 @@ final class ImageKind
             '3d-object'         => 'Imagery kind for all site imagery: smooth matte clay-like 3D objects and simple geometric'
                 . ' forms in soft studio light on a plain seamless backdrop, no people and no environment.',
 
-            'ui-mockup'         => 'Imagery kind for all site imagery: an edge-to-edge screenshot of a current web'
-                . ' application interface, the screen content only: real components such as a slim sidebar,'
-                . ' navigation rows, tiles, a data table, a chart, toggles and round avatars on a flat ground,'
-                . ' thin one-pixel hairline borders, gently rounded corners, generous whitespace, one accent'
-                . ' colour, and every text run rendered as a blurred grey bar; crisp, flat, straight-on and'
-                . ' evenly lit; no window frame, no title bar, no traffic-light dots, no browser tabs, no'
-                . ' address bar, no bezel, no device, no drop shadow, no desk, no backdrop, no perspective,'
-                . ' no reflections, no grain; no readable words, letters or numerals anywhere.',
+            'ui-mockup'         => 'Imagery kind for all site imagery: an edge-to-edge screenshot of a contemporary,'
+                . ' design-led web application, the screen content only, filling the canvas to all four edges'
+                . ' with no outer margin and no outer rounded corners. Compose it as a bento-style arrangement'
+                . ' of layered panels and cards with soft elevation over a calm ground: one large chart with a'
+                . ' smooth gradient fill, a row of summary tiles, a slim icon sidebar, toggle switches, an'
+                . ' avatar stack of plain coloured discs, thin hairline dividers, generously rounded corners,'
+                . ' ample breathing room and a restrained palette with one vivid accent. Every text run,'
+                . ' heading, figure and axis value is rendered as a soft rounded placeholder bar, so the screen'
+                . ' carries no readable words, letters or numerals anywhere; the words of this request describe'
+                . ' the layout and are never written on the screen. Pin-sharp, flat, straight-on and evenly lit'
+                . ' at full resolution; no soft focus, no depth-of-field blur, no window frame, no title bar,'
+                . ' no traffic-light dots, no browser tabs, no address bar, no bezel, no device, no drop shadow'
+                . ' around the screen, no desk, no backdrop, no perspective, no reflections, no grain.'
+                . ($screenTheme !== '' ? ' ' . $screenTheme : ''),
             'line-illustration' => 'Imagery kind for all site imagery: a single-weight line illustration with two or three flat'
                 . ' colours, generous white space and one subject; no photographic texture, no text.',
             'abstract-gradient' => 'Imagery kind for all site imagery: a soft abstract gradient field with fine grain and'
                 . ' slow colour drift, edge to edge; no objects, no scene, no text.',
             default             => '',
+        };
+    }
+
+    /**
+     * Describe the interface theme from the page palette so the screenshots
+     * follow the page: a dark page receives a dark interface, a light page a
+     * light one, and the site's accent names its hue. The sentence carries no
+     * hex code because the image model paints a hex code as a label. An
+     * unusable base returns ''.
+     */
+    public static function screenTheme(?string $baseHex, ?string $accentHex): string
+    {
+        $ground = GroundKey::classify(trim((string) $baseHex));
+        if ($ground === null) {
+            return '';
+        }
+        $hue = self::hueName(trim((string) $accentHex));
+        $accentClause = $hue !== null ? ' The single accent colour is ' . $hue . '.' : '';
+        return $ground === 'dark'
+            ? 'The interface uses a dark theme: a near-black ground, panels one shade lighter than the'
+                . ' ground, and light placeholder bars.' . $accentClause
+            : 'The interface uses a light theme: an off-white ground, white panels, and dark grey'
+                . ' placeholder bars.' . $accentClause;
+    }
+
+    /** Name the hue family of a hex colour in plain words, or null for an unusable value. */
+    public static function hueName(string $hex): ?string
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return null;
+        }
+        [$r, $g, $b] = array_map(static fn (int $c): float => $c / 255, $rgb);
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $delta = $max - $min;
+        $lightness = ($max + $min) / 2;
+        $saturation = $delta === 0.0 ? 0.0 : $delta / (1 - abs(2 * $lightness - 1));
+        if ($saturation < 0.12 || $lightness < 0.06 || $lightness > 0.94) {
+            return 'a neutral grey';
+        }
+        $h = match (true) {
+            $max === $r => fmod(($g - $b) / $delta, 6),
+            $max === $g => ($b - $r) / $delta + 2,
+            default     => ($r - $g) / $delta + 4,
+        } * 60;
+        $h = $h < 0 ? $h + 360 : $h;
+        return match (true) {
+            $h < 15 || $h >= 345 => 'red',
+            $h < 45  => 'orange',
+            $h < 70  => 'amber',
+            $h < 90  => 'lime',
+            $h < 165 => 'green',
+            $h < 195 => 'teal',
+            $h < 215 => 'cyan',
+            $h < 250 => 'blue',
+            $h < 290 => 'violet',
+            $h < 330 => 'magenta',
+            default  => 'pink',
         };
     }
 
@@ -180,23 +249,21 @@ final class ImageKind
         return <<<CSS
             :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
                 position: relative;
-                padding-block-start: 1.75rem;
                 border-radius: var(--shape-radius-panel, 1rem);
                 overflow: hidden;
-                background: color-mix(in srgb, currentColor 7%, transparent);
+                background: color-mix(in srgb, currentColor 6%, transparent);
                 box-shadow:
-                    inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent),
-                    0 1.5rem 2.5rem -1.75rem rgb(0 0 0 / 0.45);
+                    0 1px 2px rgb(0 0 0 / 0.08),
+                    0 2.5rem 5rem -2rem rgb(0 0 0 / 0.4);
             }
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::before {
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::after {
                 content: "";
                 position: absolute;
-                inset-block-start: 0.6875rem;
-                inset-inline-start: 0.875rem;
-                width: 2.25rem;
-                height: 0.375rem;
-                background: radial-gradient(circle, currentColor 0.1875rem, transparent 0.2rem) 0 50% / 0.75rem 0.375rem repeat-x;
-                opacity: 0.35;
+                inset: 0;
+                border-radius: inherit;
+                box-shadow:
+                    inset 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent),
+                    inset 0 1px 0 rgb(255 255 255 / 0.35);
                 pointer-events: none;
             }
             :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {

@@ -1858,8 +1858,8 @@ final class DesignDirectionStep implements Step
                 . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
                 . '`; the build appends the kind\'s render instruction to every image request.'
                 . ($imageKind === 'ui-mockup'
-                    ? ' The build frames every contained picture as a product window (radius, hairline ring, window'
-                        . ' bar), so author no frame, border or shadow around an image. Add the class `'
+                    ? ' The build frames every contained picture as a product screen (panel radius, hairline ring,'
+                        . ' soft shadow, no window chrome), so author no frame, border or shadow around an image. Add the class `'
                         . ImageKind::TILT_CLASS . '` to at most ONE screen per page (the hero stage or the first'
                         . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
                     : '');
@@ -2245,6 +2245,22 @@ final class DesignDirectionStep implements Step
             return ImageKind::DEFAULT;
         }
         return ImageKind::explicit($project->readJson(self::FILE)['image_kind'] ?? null) ?? ImageKind::DEFAULT;
+    }
+
+    /** Return the ui-mockup interface theme sentence from the palette, or '' without a usable base. */
+    public static function screenThemeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        $palette = $project->readJson(self::FILE)['palette'] ?? null;
+        if (!is_array($palette)) {
+            return '';
+        }
+        return ImageKind::screenTheme(
+            is_string($palette['base'] ?? null) ? $palette['base'] : null,
+            is_string($palette['accent'] ?? null) ? $palette['accent'] : null,
+        );
     }
 
     /**

@@ -358,7 +358,7 @@ final class FinalizeThemeStep implements Step
         return new OverlayKit(
             'screen',
             "// Committed ui-mockup imagery: every contained picture is framed as a\n"
-                . '// product window. Loads after generated style.css.',
+                . '// product screen with no window chrome. Loads after generated style.css.',
         );
     }
 

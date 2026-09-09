@@ -213,9 +213,14 @@ final class GenerateImagesStep implements Step
         $specs = $project->readJson('images.json');
         // Keep the image kind on each row for generation, repair, and request logs.
         $imageKind = DesignDirectionStep::imageKindFor($project);
+        // A ui-mockup interface follows the page ground and accent.
+        $screenTheme = $imageKind === 'ui-mockup' ? DesignDirectionStep::screenThemeFor($project) : '';
         foreach ($specs as &$row) {
             if (is_array($row)) {
                 $row['image_kind'] = $imageKind;
+                if ($screenTheme !== '') {
+                    $row['screen_theme'] = $screenTheme;
+                }
             }
         }
         unset($row);
@@ -568,6 +573,7 @@ final class GenerateImagesStep implements Step
                 $mime === 'image/png',
                 imageCrop: $imageCrop,
                 imageKind: (string) ($spec['image_kind'] ?? ''),
+                screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
