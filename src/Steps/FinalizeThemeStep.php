@@ -415,7 +415,7 @@ final class FinalizeThemeStep implements Step
      * build. readText() remains outside the JSON catch: an actual filesystem
      * read failure is infrastructure, not an imperfect generated value.
      *
-     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid',1:list<string>}
+     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid'|'overlay-transient',1:list<string>}
      */
     private static function headerBehaviorFor(Project $project): array
     {
