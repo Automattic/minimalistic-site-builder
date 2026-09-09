@@ -52,7 +52,7 @@ final class SiteSpecStep implements Step
     use LlmOptions;
 
     /** Factual properties the spec must always carry. */
-    private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe', 'persona_name'];
+    private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'persona_name'];
 
     /** Identity keys the model may invent (and must then flag in `invented`). */
     private const IDENTITY_KEYS = ['name', 'persona_name'];
@@ -455,6 +455,17 @@ final class SiteSpecStep implements Step
             }
         }
 
+        // A mood is not a fact. The design-direction step proposes three
+        // moods in its seed round and its judge commits one; a mood phrase
+        // in the spec pre-empted that round, because the seeds prompt reads
+        // a stated mood as a user wish to honor in every seed. The spec
+        // prompt no longer asks for the field, and a host that still sends
+        // it has it dropped here so it never reaches a design prompt.
+        if (array_key_exists('visual_vibe', $spec)) {
+            unset($spec['visual_vibe']);
+            $warnings[] = 'site spec carried "visual_vibe"; dropped — the design-direction step decides the mood';
+        }
+
         // Sections must be a list so the page-plan step can build on it.
         if (!isset($spec['sections']) || !is_array($spec['sections'])) {
             $spec['sections'] = [];
@@ -566,7 +577,6 @@ final class SiteSpecStep implements Step
             'persona_name' => true,
             'email_domain' => true,
             'invented' => true,
-            'visual_vibe' => true,
             'subject_is_visual_work' => true,
             'animation_request' => true,
             'sections' => true,

@@ -49,7 +49,6 @@ function dp3_integration_site_spec(): array
         'topic' => 'design practice',
         'area' => 'design',
         'audience' => 'prospective clients',
-        'visual_vibe' => 'crisp editorial',
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'northstar.example',

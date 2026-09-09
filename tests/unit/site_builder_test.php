@@ -236,7 +236,7 @@ test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
         'name' => 'Test Cafe', 'slug' => 'test-cafe',
         'title' => 'Test Cafe', 'description' => 'A test cafe',
         'site_type' => 'cafe', 'topic' => 'coffee', 'area' => 'cafe',
-        'audience' => 'locals', 'visual_vibe' => 'warm',
+        'audience' => 'locals',
         'language' => 'en', 'persona_name' => '',
         'email_domain' => 'testcafe.example', 'invented' => ['name'],
         'sections' => ['Hero', 'About'],

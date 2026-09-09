@@ -18,7 +18,6 @@
         "persona_name",
         "email_domain",
         "invented",
-        "visual_vibe",
         "subject_is_visual_work",
         "animation_request",
         "sections",
@@ -98,10 +97,6 @@
                 ]
             },
             "uniqueItems": true
-        },
-        "visual_vibe": {
-            "type": "string",
-            "description": "Brief overall mood phrase, without concrete colors, fonts, spacing, or layout choices."
         },
         "subject_is_visual_work": {
             "type": "boolean",

@@ -25,7 +25,7 @@ function make_designdir_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_designdir_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
-    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'visual_vibe' => 'warm and rustic']);
+    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'topic' => 'artisan bread']);
     return [$project, new FakeLlm(), $tmp];
 }
 

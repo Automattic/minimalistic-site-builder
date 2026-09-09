@@ -845,7 +845,6 @@ test('collect-images appends a site-logo spec for a business site', function () 
         'site_type'    => 'business storefront',
         'area'         => 'bakery',
         'topic'        => 'artisan bread',
-        'visual_vibe'  => 'warm and rustic',
         'persona_name' => '',
     ]);
     $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery in Portland']);
@@ -870,7 +869,7 @@ test('collect-images appends a site-logo spec for a business site', function () 
     assert_contains('bakery', $logo['subject']);
     assert_contains('no letters', $logo['subject']);
     assert_true(!str_contains($logo['subject'], 'Hearth'), 'site name stays out of the subject');
-    assert_contains('warm and rustic', $logo['subject']);
+    assert_true(!str_contains($logo['subject'], 'mood'), 'the spec carries no mood, so the subject has no mood suffix');
     assert_eq('site logo and site icon, small square mark in the header', $logo['pageContext']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -928,7 +927,6 @@ test('collect-images logo subject drops identity-bearing area, topic, and vibe',
         'site_type'   => 'business storefront',
         'area'        => "Hearth & Crumb's sourdough programme",
         'topic'       => "Hearth & Crumb bakery",
-        'visual_vibe' => 'Hearth & Crumb rustic',
         'persona_name'=> '',
     ]);
     $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);

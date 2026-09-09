@@ -34,6 +34,37 @@ test('site-spec normalizes a host-supplied spec without an LLM call', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec drops a host-supplied visual_vibe so a host mood never reaches a design prompt', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
+        'name' => 'Tbilisi Tavern',
+        'language' => 'en',
+        'visual_vibe' => 'sophisticated',
+        'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors']],
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_true(!array_key_exists('visual_vibe', $spec), 'the retired mood field is dropped, not blanked');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('visual_vibe', $joined, 'the drop is recorded as a durable warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec drops a generated visual_vibe and never asks the model for one', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson(['name' => 'Solo', 'language' => 'en', 'visual_vibe' => 'warm and rustic']);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'visual_vibe'), 'the spec prompt no longer names the field');
+    assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('host-supplied spec with no pages of its own does not steal the description as Home purpose', function () {
     // wpcom pins titles on meta.json `pages` and a spec without a tree.
     // The empty-tree floor (homepage purpose = description) must not graft
@@ -152,7 +183,6 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
         'persona_name' => '',
         'email_domain' => 'HearthAndCrumb.com',          // must be lowercased
         'invented' => ['name', 'colors'],                // unknown key must be dropped
-        'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Menu', 'About', 'Visit'],
         // An extra factual field the user stated — must pass through.
         'hours' => 'Tue–Sun 7am–3pm',
@@ -165,7 +195,6 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('Hearth & Crumb', $spec['name']);
     assert_eq('hearth-crumb', $spec['slug']);            // derived + slugified
     assert_eq('Hearth & Crumb', $spec['title']);         // title falls back to name
-    assert_eq('warm and rustic', $spec['visual_vibe']);
     assert_eq('en', $spec['language']);
     assert_eq('ltr', $spec['writing_direction']);
     assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased stated domain
@@ -175,6 +204,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('Tue–Sun 7am–3pm', $spec['hours']);        // arbitrary fact preserved
 
     // No design fields should be invented/filled.
+    assert_true(!isset($spec['visual_vibe']), 'no mood in factual spec');
     assert_true(!isset($spec['colors']), 'no colors in factual spec');
     assert_true(!isset($spec['typography']), 'no typography in factual spec');
     assert_true(!isset($spec['layout']), 'no layout in factual spec');
@@ -194,7 +224,7 @@ test('site-spec fills missing fixed properties with empty strings', function () 
 
     $spec = $project->readJson('siteSpec.json');
     assert_eq('Solo', $spec['name']);
-    foreach (['title', 'site_type', 'topic', 'area', 'audience', 'visual_vibe', 'persona_name'] as $key) {
+    foreach (['title', 'site_type', 'topic', 'area', 'audience', 'persona_name'] as $key) {
         assert_true(array_key_exists($key, $spec), "{$key} key present");
     }
     assert_eq([], $spec['sections']);
