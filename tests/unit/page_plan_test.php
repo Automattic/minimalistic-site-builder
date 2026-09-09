@@ -1209,7 +1209,7 @@ test('page-plan removes a generated footer before recomputing variety and roles'
     assert_eq(['welcome', 'overview', 'reserve'], array_column($sections, 'slug'));
     assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
     assert_eq(
-        ['full-bleed-cover', 'centered-stack', 'asymmetric-split'],
+        ['full-bleed-cover', 'equal-card-grid', 'asymmetric-split'],
         array_column($sections, 'layout_archetype'),
         'variety is validated against the surviving adjacency'
     );
@@ -2335,7 +2335,6 @@ test('a contact page already at or under 4 sections is left alone', function () 
     assert_eq([], $warnings);
 });
 
-
 test('the contact trim never introduces a full-bleed cover band', function () {
     // The adjacency repair returns ARCHETYPES' first clearing candidate, and
     // 'full-bleed-cover' leads that list — so the trim used to hand a brief
@@ -2442,4 +2441,184 @@ test('rewritten seam prose names each neighbor assignment, not just its title', 
             assert_contains($next['background'] . ' ' . $next['layout_archetype'], $sections[$i]['handoff']);
         }
     }
+});
+
+test('page-plan mechanical repairs never guess centered-stack for content of unknown complexity (BIGR-988)', function () {
+    $cases = [
+        'field' => ['asymmetric-split', 'unknown', 'full-bleed-cover'],
+        'adjacency' => ['asymmetric-split', 'asymmetric-split', 'full-bleed-cover'],
+        'dominance' => ['asymmetric-split', 'equal-card-grid', 'asymmetric-split', 'list-with-thumbnails', 'asymmetric-split', 'equal-card-grid'],
+    ];
+    foreach ($cases as $case => $archetypes) {
+        $sections = [];
+        foreach ($archetypes as $i => $archetype) {
+            $sections[] = plan_section([
+                'slug' => "section-{$i}",
+                'type' => 'process',
+                'layout_archetype' => $archetype,
+                'background' => $archetype === 'full-bleed-cover' ? 'image' : 'base',
+                'content_notes' => "Keep the complete authored process for section {$i}.",
+                'item_pattern' => 'card',
+            ]);
+        }
+        $warnings = [];
+        $out = $case === 'field'
+            ? PagePlanStep::repairFields($sections, $warnings, 'home', false)
+            : PagePlanStep::repairVariety($sections, warnings: $warnings, pageSlug: 'home', allowOffsetGrid: false);
+        assert_true(!in_array('centered-stack', array_column($out, 'layout_archetype'), true), $case);
+        assert_true($warnings !== [], 'a changed assignment remains actionable');
+        $joined = implode("\n", $warnings);
+        foreach (["file='pages.json'", "pages[slug='home'].sections[", 'authored=', 'delivered=', 'disposition='] as $context) {
+            assert_contains($context, $joined);
+        }
+        foreach ($out as $i => $section) {
+            assert_eq($sections[$i]['content_notes'], $section['content_notes'], 'no copy is discarded');
+            assert_eq($sections[$i]['item_pattern'], $section['item_pattern']);
+            if ($sections[$i]['layout_archetype'] === $section['layout_archetype']
+                && $sections[$i]['background'] === $section['background']) {
+                assert_eq($sections[$i], $section, 'unaffected siblings stay intact');
+            }
+        }
+        $againWarnings = [];
+        $again = $case === 'field'
+            ? PagePlanStep::repairFields($out, $againWarnings, 'home', false)
+            : PagePlanStep::repairVariety($out, warnings: $againWarnings, pageSlug: 'home', allowOffsetGrid: false);
+        assert_eq($out, $again, 'repair reaches a fixed point');
+        assert_eq([], $againWarnings);
+    }
+});
+
+test('page-plan preserves an explicitly planned simple centered invitation (BIGR-988)', function () {
+    $sections = [
+        plan_section(),
+        plan_section(['slug' => 'story', 'type' => 'story', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'invitation', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'content_notes' => 'One heading and one short invitation to visit.']),
+    ];
+    $warnings = [];
+    $out = PagePlanStep::repairFields($sections, $warnings);
+    $out = PagePlanStep::repairVariety($out, warnings: $warnings);
+    assert_eq($sections, $out);
+    assert_eq([], $warnings);
+});
+
+test('page-plan padding reserves centered-stack for the known short closing brief (BIGR-988)', function () {
+    $hero = plan_section();
+    $pages = [['slug' => 'home', 'front' => true, 'sections' => [$hero]]];
+    $warnings = [];
+    $out = PagePlanStep::padThinFrontPlan($pages, null, [], $warnings);
+    $sections = array_column($out[0]['sections'], null, 'slug');
+    assert_true($sections['overview']['layout_archetype'] !== 'centered-stack');
+    assert_eq('centered-stack', $sections['closing']['layout_archetype']);
+    assert_contains('One heading, one short supporting line', $sections['closing']['content_notes']);
+    assert_contains('compact list', $sections['overview']['content_notes'], 'the overview retains its broader content budget');
+    assert_eq($hero['layout_archetype'], $sections['hero']['layout_archetype']);
+    $againWarnings = [];
+    assert_eq($out, PagePlanStep::padThinFrontPlan($out, null, [], $againWarnings));
+    assert_eq([], $againWarnings);
+    assert_contains("file='pages.json'", implode("\n", $warnings));
+});
+
+test('PagePlanStep::normalize lets a type that names an archetype set the layout (frm PR-3ah)', function () {
+    $repairs = [];
+    $warnings = [];
+    $out = PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'clients', 'title' => 'Trusted by', 'type' => 'logo-strip', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
+        plan_section(['slug' => 'faq', 'title' => 'FAQ', 'type' => 'faq', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
+    ], true, null, [], $warnings, 'home', $repairs);
+    assert_eq('logo-strip', $out[1]['layout_archetype'], 'the type names the archetype');
+    assert_eq('centered-stack', $out[2]['layout_archetype'], 'a plain type is not an archetype name');
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_contains("path=\"pages[slug='home'].sections[1].layout_archetype\"; authored=\"centered-stack\"; delivered=\"logo-strip\"", implode("\n", $repairs));
+
+    $repairs = [];
+    $out = PagePlanStep::normalize([plan_section(['type' => 'centered-stack'])], true, null, [], $warnings, 'home', $repairs);
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_true(!str_contains(implode("\n", $repairs), 'names an archetype'));
+});
+
+test('a section the stated highlight applies to takes a card archetype when the plan drew no cards (frm PR-3ak)', function () {
+    $clause = \Automattic\SiteBuild\SectionComposition::statedHighlight('Light page, featured work as large image cards, three service cards with one highlighted in violet, a dark rounded band.');
+    assert_eq('three service cards with one highlighted in violet', $clause);
+    $pages = [[
+        'slug' => 'home', 'front' => true,
+        'sections' => [
+            plan_section(),
+            plan_section(['slug' => 'featured-work', 'title' => 'Featured work', 'type' => 'work', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+            plan_section(['slug' => 'services', 'title' => 'What I offer', 'type' => 'services', 'layout_archetype' => 'feature-row-hairlines', 'background' => 'base', 'handoff' => 'A clean, text-led triple column.']),
+            plan_section(['slug' => 'clients', 'title' => 'Clients', 'type' => 'services', 'layout_archetype' => 'logo-strip', 'background' => 'base']),
+            plan_section(['slug' => 'metrics', 'title' => 'Numbers', 'type' => 'stats', 'layout_archetype' => 'stat-ledger', 'background' => 'base']),
+        ],
+    ]];
+    $repairs = [];
+    $out = PagePlanStep::withStatedHighlightCards($pages, $clause, $repairs);
+    $archetypes = array_column($out[0]['sections'], 'layout_archetype', 'slug');
+    assert_eq('equal-card-grid', $archetypes['services'], 'the hairline row becomes a card grid');
+    assert_eq('equal-card-grid', $archetypes['featured-work'], 'a card grid stays');
+    assert_eq('logo-strip', $archetypes['clients'], 'a name strip is not a card row even when the clause reaches it');
+    assert_eq('stat-ledger', $archetypes['metrics'], 'the clause does not reach the ledger');
+    assert_eq(1, count($repairs));
+    assert_contains("path=\"pages[slug='home'].sections[2].layout_archetype\"; authored=\"feature-row-hairlines\"; delivered=\"equal-card-grid\"", $repairs[0]);
+    assert_contains('draws no card to highlight', $repairs[0]);
+    assert_contains('Build correction: this section is now an equal-card-grid', $out[0]['sections'][2]['handoff']);
+
+    $repairs = [];
+    assert_eq($pages, PagePlanStep::withStatedHighlightCards($pages, null, $repairs), 'no stated highlight, no change');
+    assert_eq($pages, PagePlanStep::withStatedHighlightCards($pages, 'three pricing tiers with the middle one highlighted', $repairs), 'a clause about another section changes nothing');
+    assert_eq([], $repairs);
+});
+
+test('a repeated list planned as an asymmetric split takes the card grid or the thumbnail list (frm PR-3aq)', function () {
+    $page = static fn (array $rows): array => ['slug' => 'home', 'front' => true, 'sections' => array_map(
+        static fn (array $r): array => plan_section(['slug' => $r[0], 'title' => ucfirst($r[0]), 'type' => $r[1], 'layout_archetype' => $r[2], 'background' => 'base', 'handoff' => 'A split.']),
+        $rows,
+    )];
+
+    $repairs = [];
+    $out = PagePlanStep::withListsOffTheSplit([$page([
+        ['hero', 'hero', 'asymmetric-split'],
+        ['about', 'about', 'asymmetric-split'],
+        ['services', 'services', 'asymmetric-split'],
+        ['process', 'process', 'zigzag-steps'],
+        ['awards', 'awards', 'asymmetric-split'],
+        ['testimonials', 'testimonials', 'asymmetric-split'],
+        ['team', 'team', 'asymmetric-split'],
+        ['closing', 'cta', 'cta-panel'],
+    ])], $repairs);
+    $a = array_column($out[0]['sections'], 'layout_archetype', 'slug');
+    assert_eq('asymmetric-split', $a['hero'], 'the front opening keeps its projection');
+    assert_eq('asymmetric-split', $a['about'], 'prose beside a portrait keeps the split');
+    assert_eq('equal-card-grid', $a['services']);
+    assert_eq('equal-card-grid', $a['awards']);
+    assert_eq('asymmetric-split', $a['testimonials'], 'a quote-led split (one photo beside quotes) keeps the split');
+    assert_eq('list-with-thumbnails', $a['team'], 'the page already holds its two grids');
+    assert_eq(3, count($repairs));
+    assert_contains("path=\"pages[slug='home'].sections[2].layout_archetype\"; authored=\"asymmetric-split\"; delivered=\"equal-card-grid\"", $repairs[0]);
+    assert_contains("a repeated 'services' list under the split", $repairs[0]);
+    assert_contains('Build correction: this section is now an equal-card-grid', $out[0]['sections'][2]['handoff']);
+
+    $repairs = [];
+    $out = PagePlanStep::withListsOffTheSplit([$page([
+        ['hero', 'hero', 'centered-stack'],
+        ['services', 'services', 'asymmetric-split'],
+        ['testimonials', 'testimonials', 'equal-card-grid'],
+        ['pricing', 'pricing', 'pricing-tiers'],
+    ])], $repairs);
+    assert_eq('list-with-thumbnails', array_column($out[0]['sections'], 'layout_archetype', 'slug')['services']);
+    assert_eq(1, count($repairs));
+
+    $repairs = [];
+    $typed = $page([['hero', 'hero', 'full-bleed-cover'], ['accolades', 'accolades', 'asymmetric-split'], ['stats', 'stats', 'stat-ledger'], ['voices', 'testimonials', 'asymmetric-split']]);
+    $typed['sections'][1]['type'] = 'accolades';
+    $typed['sections'][1]['item_pattern'] = 'card';
+    $typed['sections'][3]['item_pattern'] = 'card';
+    $out = PagePlanStep::withListsOffTheSplit([$typed], $repairs);
+    assert_eq('equal-card-grid', $out[0]['sections'][1]['layout_archetype'], 'an unknown type with an item pattern repeats');
+    assert_eq('asymmetric-split', $out[0]['sections'][3]['layout_archetype'], 'a quote-led section keeps the split even with the card pattern');
+    assert_eq(1, count($repairs));
+
+    $repairs = [];
+    $plain = [$page([['hero', 'hero', 'centered-stack'], ['about', 'about', 'asymmetric-split'], ['work', 'projects', 'project-grid-2x2']])];
+    assert_eq($plain, PagePlanStep::withListsOffTheSplit($plain, $repairs));
+    assert_eq([], $repairs);
 });

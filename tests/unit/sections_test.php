@@ -1547,3 +1547,38 @@ test('sections records section-label removals and preserves sibling content', fu
     assert_eq([], $again['warnings']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('sections records a recipe media removal and preserves the other section', function () {
+    [$project, $tmp] = sections_fixture();
+    try {
+        $pages = $project->readJson('pages.json');
+        $pages['pages'][0]['sections'][1]['layout_archetype'] = 'statement-lines';
+        $pages['pages'][0]['sections'][] = array_merge($pages['pages'][0]['sections'][1], [
+            'slug' => 'contact', 'layout_archetype' => 'centered-stack', 'type' => 'contact',
+        ]);
+        $project->writeJson('pages.json', $pages);
+        $text = '<!-- wp:paragraph --><p>Keep the complete service description.</p><!-- /wp:paragraph -->';
+        $image = '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/unplanned.jpg" alt="Unplanned image"/></figure><!-- /wp:image -->';
+        $sibling = '<!-- wp:group {"className":"section-composition--centered-stack","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--centered-stack"><!-- wp:paragraph --><p>Contact the team.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+        $llm = new FakeLlm();
+        foreach (['OK', '<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->',
+            '<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->',
+            '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->',
+            '<!-- wp:group --><div class="wp-block-group">' . $text . $image . '</div><!-- /wp:group -->',
+            $sibling,
+        ] as $response) {
+            $llm->queueText($response);
+        }
+        (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        $part = $project->readText('theme/parts/page-home--about.html');
+        assert_contains($text, $part);
+        assert_true(!str_contains($part, 'unplanned.jpg'));
+        assert_eq($sibling . "\n", $project->readText('theme/parts/page-home--contact.html'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+        foreach (["file='theme/parts/page-home--about.html'", 'wp:image[0]', 'unplanned.jpg', 'delivered=removed', 'disposition='] as $fact) {
+            assert_contains($fact, $warnings);
+        }
+    } finally {
+        remove_tree($tmp);
+    }
+});
