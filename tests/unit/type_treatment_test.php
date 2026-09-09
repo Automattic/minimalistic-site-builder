@@ -59,11 +59,11 @@ test('the display-lines kit ships for the uppercase treatments only and finalize
     $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'caps-tracked']);
     finalize_static_header($project);
     quietly(fn () => (new \Automattic\SiteBuild\Steps\FinalizeThemeStep())->run($project));
-    assert_contains('line-height: 0.92', $project->readText('theme/assets/treatment/*'));
+    assert_contains('line-height: 0.92', $project->readText('theme/assets/treatment/treatment.css'));
     assert_contains("wp_enqueue_style('forno-vero-treatment', get_theme_file_uri('assets/treatment/treatment.css'), array('forno-vero-style'), \$ver);", $project->readText('theme/functions.php'));
     $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'sentence']);
     quietly(fn () => (new \Automattic\SiteBuild\Steps\FinalizeThemeStep())->run($project));
-    assert_true(!$project->exists('theme/assets/treatment/*'), 'stale treatment kit pruned');
+    assert_true(!$project->exists('theme/assets/treatment/treatment.css'), 'stale treatment kit pruned');
     exec('rm -rf ' . escapeshellarg($tmp));
     $scaffold = (string) file_get_contents(repo_path('src/Steps/ScaffoldThemeStep.php'));
     assert_contains('text-wrap: balance;', $scaffold, 'every hero heading balances its lines');
