@@ -74,3 +74,24 @@ test('the sanity step drops a model-authored count-up on a year or on prose (frm
     assert_contains('never counts a year', $joined);
     assert_contains('figure-only block', $joined);
 });
+
+
+test('count-up keeps step numerals static in comment and HTML markers', function () {
+    foreach ([['step-numeral', 'step-numeral'], ['step-numeral', ''], ['', 'step-numeral']] as [$commentClass, $htmlClass]) {
+        $markup = '<!-- wp:paragraph {"className":"' . $commentClass . '"} -->'
+            . '<p class="' . $htmlClass . '">2</p><!-- /wp:paragraph -->';
+        $repairs = [];
+        assert_eq($markup, \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'steps', 'calm', $repairs));
+        assert_eq([], $repairs);
+        $authored = str_replace('className":"', 'className":"count-up ', $markup);
+        $authored = str_replace('<p class="', '<p class="count-up ', $authored);
+        $budget = MotionSanityStep::newBudget();
+        $out = MotionSanityStep::sanitize($authored, 'calm', $budget);
+        assert_true(!str_contains($out['markup'], 'count-up'));
+        assert_contains('step-numeral', $out['markup']);
+        assert_contains('>2</p>', $out['markup']);
+        assert_contains('a step numeral is a label, not a count', implode(' ', $out['notes']));
+        $budget = MotionSanityStep::newBudget();
+        assert_eq($out['markup'], MotionSanityStep::sanitize($out['markup'], 'calm', $budget)['markup']);
+    }
+});

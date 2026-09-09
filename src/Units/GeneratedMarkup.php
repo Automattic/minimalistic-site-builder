@@ -4197,6 +4197,10 @@ final class GeneratedMarkup
             }
             $attrs = $document->attrs($index) ?? [];
             $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array('step-numeral', $tokens, true)
+                || preg_match('/\bclass="[^"]*(?<![\w-])step-numeral(?![\w-])[^"]*"/', $shell[1]) === 1) {
+                continue;
+            }
             $hasKitMotion = false;
             foreach ($tokens as $token) {
                 if (in_array($token, Motion::kitClasses(), true) && !in_array($token, Motion::HOVER_CLASSES, true)) {
