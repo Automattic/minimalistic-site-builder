@@ -66,3 +66,5 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - No HTML comments. No CSS comments.
 
 Return only finished HTML document.
+
+The hero and fold remain free of texture classes. Never use a `surface--` class or write texture CSS here. An optional texture belongs on one suitable later section, as the design direction permits.
