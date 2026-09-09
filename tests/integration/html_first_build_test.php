@@ -168,7 +168,6 @@ function html_first_queue_success(
     ?array $themePayload = null,
 ): void
 {
-    $llm->queueText('A warm neighborhood bakery site with a clear visit path.');
     $llm->queueText($previewDocument ?? html_first_preview_document());
     $llm->queueText($homeBody);
 

@@ -214,7 +214,6 @@ final class StepDefaults
     public static function temperatures(): array
     {
         return [
-            'refine-prompt'            => self::temperature('REFINE_PROMPT', null),
             'site-spec'                => self::temperature('SITE_SPEC', null),
             'design-direction'         => self::temperature('DESIGN_DIRECTION', 1.0),
             // Cold on purpose: a global LLM_TEMPERATURE must not heat the

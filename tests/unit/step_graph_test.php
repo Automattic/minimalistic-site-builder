@@ -77,7 +77,7 @@ function graph_fake_concurrent_step(string $id): ConcurrentStep
 
 test('StepGraph validates a legal chain with default meta.json seed', function () {
     StepGraph::validate([
-        graph_fake_step('refine-prompt', ['meta.json'], ['meta.json']),
+        graph_fake_step('touch-meta', ['meta.json'], ['meta.json']),
         graph_fake_step('site-spec', ['meta.json'], ['siteSpec.json']),
     ]);
     assert_true(true);
@@ -91,10 +91,10 @@ test('StepGraph rejects a step whose read was never written', function () {
     });
 });
 
-test('StepGraph empty seeds fails refine-prompt without meta.json', function () {
+test('StepGraph empty seeds fails a meta.json reader without meta.json', function () {
     assert_throws(function () {
         StepGraph::validate(
-            [graph_fake_step('refine-prompt', ['meta.json'], ['meta.json'])],
+            [graph_fake_step('touch-meta', ['meta.json'], ['meta.json'])],
             seeds: [],
         );
     });

@@ -167,35 +167,23 @@ final class SiteSpecStep implements Step
             }
         }
 
-        // Contact facts are grounded in what the USER wrote. refine-prompt runs
-        // immediately before this step and replaces meta's `prompt` with its own
-        // rewrite, so grounding against that would let a contact detail refine
-        // invented vouch for itself. `original_prompt` is absent only when no
-        // refinement happened, and `prompt` is then the raw input.
-        $stated = $meta['original_prompt'] ?? null;
-        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
-
         $spec = self::normalize(
             $spec,
             $multiPage,
             $requested,
             $warnings,
             self::nameFromPrompt($prompt),
-            $statedPrompt,
+            $prompt,
             array_key_exists('site_spec', $meta),
         );
-        // The refine step rewrites the brief on a small model, and a small
-        // model sometimes respells a brand it was told to preserve. The spec
-        // then reads the rewrite. site-spec.md tells the model to treat a
-        // name sitting in that rewrite as stated, so `invented` often does
-        // not contain `name` — the misspelling still has to be restored.
-        // The user's own words outrank both: a generated name within two
-        // edits of a brand-shaped proper noun the user actually typed is
-        // that noun. Rung 1 — restored in the spec and in the brief every
-        // later step reads, reported, never a warning. A host-supplied spec
-        // is trusted as-is: no refine step touched its name.
+        // A small model sometimes respells a brand the user stated, and then
+        // lists the respelling as its own. The user's own words outrank the
+        // spec: a generated name within two edits of a brand-shaped proper
+        // noun the user actually typed is that noun. Rung 1 — restored in the
+        // spec, reported, never a warning. A host-supplied spec is trusted
+        // as-is.
         if (!array_key_exists('site_spec', $meta)) {
-            $restored = self::statedNameNear($statedPrompt, (string) $spec['name']);
+            $restored = self::statedNameNear($prompt, (string) $spec['name']);
             if ($restored !== null) {
                 $from = (string) $spec['name'];
                 if ($spec['slug'] === ProjectStore::slugify($from)) {
@@ -203,11 +191,9 @@ final class SiteSpecStep implements Step
                 }
                 $spec = self::replaceIdentityToken($spec, $from, $restored);
                 $spec['invented'] = array_values(array_diff($spec['invented'], ['name']));
-                $meta['prompt'] = self::replaceIdentityToken($meta['prompt'], $from, $restored);
-                $project->writeJson('meta.json', $meta);
-                $report = 'Identity: the refined brief and the generated spec spelled the name "' . $from
+                $report = 'Identity: the generated spec spelled the name "' . $from
                     . '"; the user wrote "' . $restored . '", so the stated spelling was restored across the spec '
-                    . 'and the brief, and the invented claim on "name" withdrawn (disposition repaired)';
+                    . 'and the invented claim on "name" withdrawn (disposition repaired)';
                 $project->writeText('logs/site-spec.txt', $report . "\n");
                 Narrator::write("  [site-spec] restored the stated name \"{$restored}\" over \"{$from}\"\n");
             }

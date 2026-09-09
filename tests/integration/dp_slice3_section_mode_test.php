@@ -155,7 +155,6 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'assemble-pages source stays frozen after site-logo union and content-row preserve',
         );
         $llm = new FakeLlm();
-        $llm->queueText('Northstar Studio presents a measured editorial portfolio.');
         $llm->queueText(dp3_integration_preview());
         $llm->queueText(
             '<main><section id="studio-story"><h2>HOME-STORY</h2></section></main>'
