@@ -81,11 +81,10 @@ final class ApplyIdentityStep implements Step
             $project->writeText($file, $filled);
         }
 
-        // The seeder applies the site description at activation, and it reads
-        // it from here rather than from a filled placeholder: this string is
-        // model-authored, and a JSON artifact beside the pages.json and
-        // images.json the seeder already reads needs no escaping to stay inert
-        // inside PHP. Written only with the plugin, since nothing else reads it.
+        // The seeder applies this at activation. JSON, beside the pages.json
+        // and images.json it already reads, rather than a placeholder in the
+        // plugin PHP: the string is model-authored and needs no escaping to
+        // stay inert here.
         if ($project->exists(ScaffoldPluginStep::MAIN_FILE)) {
             $project->writeJson(self::SITE_FILE, [
                 'description' => SitePreset::siteDescription($spec),

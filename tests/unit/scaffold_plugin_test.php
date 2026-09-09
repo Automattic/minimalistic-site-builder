@@ -1269,8 +1269,7 @@ test('every seeded page carries its own first image as the card thumbnail', func
         'plugin/pages/lessons.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="/wp-content/themes/build-9f2c/assets/second.jpg" alt="Loaves"/></figure><!-- /wp:image -->',
     );
-    // A page whose only image is a flourish still gets it: one is better than
-    // the blank placeholder a card falls back to.
+    // A page with nothing but a flourish has no photograph to show.
     $project->writeText(
         'plugin/pages/contact.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/wheat-sprig.png" alt=""/></figure><!-- /wp:image -->',
@@ -1311,7 +1310,7 @@ test('every seeded page carries its own first image as the card thumbnail', func
 
     assert_eq($attachments['Hero'], $thumbnails['home'], "the home page's card image is its first photo, not the mark or the ornament");
     assert_eq($attachments['Second'], $thumbnails['lessons'], 'a page whose images were already rewritten to served URLs still gets one');
-    assert_eq($attachments['Sprig'], $thumbnails['contact'], 'a page with nothing but a flourish still gets a card image');
+    assert_eq(0, $thumbnails['contact'], 'a page with no photograph gets no thumbnail');
     assert_eq(['home' => '1', 'lessons' => '1', 'contact' => '1'], $markers, 'the seeded marker still travels with every page');
 
     exec('rm -rf ' . escapeshellarg($tmp));

@@ -268,13 +268,10 @@ final class ScaffoldPluginStep implements Step
                 // against the ACTIVE theme's assets. Both rewrites insert
                 // only URLs this site owns.
                 $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
-                // Read the image references while the markup still carries the
-                // ones the build wrote.
+                // While the markup still carries the references the build wrote.
                 $featured_id = {{FN_PREFIX}}_content_featured_image($content, $image_map);
                 // The marker tells analytics this publish is seeded, not the
-                // site owner's. The thumbnail is the page's card image only:
-                // assemble-pages writes page.html as header + post-content +
-                // footer, so no template ever renders a featured image.
+                // site owner's.
                 $meta_input = array('_wpcom_ai_generated_post' => '1');
                 if ($featured_id > 0) {
                     $meta_input['_thumbnail_id'] = $featured_id;
@@ -327,28 +324,22 @@ final class ScaffoldPluginStep implements Step
                 $state['changed_front'] = true;
             }
 
-            // A shared link's description has one source and no other: Jetpack
-            // builds the front page's og:description from
+            // Jetpack builds the front page's og:description from
             // get_bloginfo('description') and never from the page's own
-            // content, so an unset tagline ships a card whose text is the
-            // Twitter fallback, "Visit the post for more." The build's own
-            // sentence is in site.json — the same string the header's
-            // site-tagline block renders when the header kept one, so the two
-            // cannot disagree.
+            // content, so an empty option is a shared link whose text is the
+            // Twitter fallback, "Visit the post for more."
             //
-            // Last, so that a page that fatals mid-seed leaves the site's own
-            // tagline alone: the state option is written on the next line, and
-            // an unrecorded overwrite could never be handed back.
+            // Written last, next to the state that records it: a page that
+            // fatals mid-seed must not leave the site's own tagline replaced
+            // and unrecorded.
             $description = {{FN_PREFIX}}_content_site_description();
             if ($description !== '') {
                 $previous = (string) get_option('blogdescription');
                 update_option('blogdescription', $description);
-                // Read the option back instead of assuming it stored what it
-                // was handed: update_option() runs sanitize_option(), which
-                // esc_html()s this one. Recording the stored forms is what
-                // lets deactivation tell "still ours" from "the owner has
-                // since written their own", and it holds whatever WordPress
-                // does to the value on the way in.
+                // Read back rather than assume: update_option() runs
+                // sanitize_option(), which esc_html()s this one, so the stored
+                // form is not the string handed in. Deactivation compares
+                // stored against stored.
                 $applied = (string) get_option('blogdescription');
                 if ($applied !== $previous) {
                     $state['blogdescription'] = $previous;
@@ -456,9 +447,9 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * The build's one-line description of the site, or '' when the build
-         * shipped none. It travels as JSON rather than as a filled placeholder
-         * so that nothing model-authored is ever spliced into this file's PHP.
+         * The build's one-line description of the site, or '' when it shipped
+         * none. JSON rather than a filled placeholder, so nothing
+         * model-authored is spliced into this file's PHP.
          */
         function {{FN_PREFIX}}_content_site_description() {
             if (!is_file(__DIR__ . '/site.json')) {
@@ -468,70 +459,51 @@ final class ScaffoldPluginStep implements Step
             if (!is_array($site) || !isset($site['description']) || !is_string($site['description'])) {
                 return '';
             }
-            // The value is echoed into meta tags and, when the header kept a
-            // tagline block, onto the page, so it goes through the same
-            // one-line sanitizer any WordPress setting would.
-            return trim(sanitize_text_field($site['description']));
+            return sanitize_text_field($site['description']);
         }
 
         /**
-         * The attachment a page's social card should use: the first content
-         * image the page's own markup references, or 0 for a page with none.
+         * The attachment a page's social card should use: the first
+         * photograph its markup references, or 0.
          *
          * Jetpack reads the featured image before every other source when it
          * picks og:image, and the seeded markup gives it nothing else to find:
          * its HTML scan needs width/height attributes or a wp-image-<id> class
-         * on the tag to accept an image, and a page whose pictures resolve to
-         * theme files carries neither. The generated page template is header
-         * + post-content + footer, so this changes the card, not the page.
+         * on the tag, and a page whose pictures resolve to theme files carries
+         * neither. The generated page template is header + post-content +
+         * footer, so this changes the card, not the page.
          *
-         * Both spellings of a reference count, because which one arrives
-         * depends on how the build ran: pages keep "theme:./assets/<file>"
-         * until generate-images rewrites them to
-         * "/wp-content/themes/<slug>/assets/<file>", and that step rewrites
-         * the assembled plugin pages too. The file name is what identifies the
-         * import either way, so the theme slug in the URL does not matter.
-         * Must run before the markup is pointed at the imported media.
+         * Photographs only, which is what .jpg means here — content images are
+         * always .jpg and prompts/image-generation.md forbids a decorative or
+         * transparent one, so .png is the site mark or an ornament an older
+         * project still carries, and a wheat sprig makes a terrible card.
          *
-         * A photograph is preferred over a flourish, which is what the two
-         * extensions mean here: content images are opaque and always .jpg
-         * (prompts/image-generation.md), while .png is the transparent
-         * pipeline — the site mark, and the drawn ornaments older projects
-         * still carry. A wheat-sprig motif at the top of a page is the first
-         * image on it and the worst possible card. The brand mark is skipped
-         * outright: a logo is not a picture of the page.
+         * Matches both spellings of a reference: pages keep
+         * "theme:./assets/<file>" until generate-images rewrites them to
+         * "/wp-content/themes/<slug>/assets/<file>", assembled plugin pages
+         * included. Must run before the markup is pointed at the media.
          */
         function {{FN_PREFIX}}_content_featured_image($content, $map) {
-            $reference = '#(?:theme:\./|/wp-content/themes/[^/"\']+/)assets/([A-Za-z0-9-]+\.(?:jpe?g|png))#i';
-            if ($map === array() || !preg_match_all($reference, (string) $content, $matches)) {
+            if (!preg_match_all(
+                '#(?:theme:\./|/wp-content/themes/[^/"\']+/)assets/([A-Za-z0-9-]+\.jpe?g)#i',
+                (string) $content,
+                $matches
+            )) {
                 return 0;
             }
-            $fallback = 0;
             foreach ($matches[1] as $filename) {
-                $imported = isset($map['theme:./assets/' . $filename])
-                    ? $map['theme:./assets/' . $filename]
-                    : null;
-                if (!is_array($imported)) {
+                $imported = $map['theme:./assets/' . $filename] ?? null;
+                // A row with a role is the site's mark, not a picture of this
+                // page.
+                if (!is_array($imported) || ($imported['role'] ?? '') !== '') {
                     continue;
                 }
-                $role = isset($imported['role']) ? (string) $imported['role'] : '';
-                if ($role === 'site-logo' || $role === 'site-icon') {
-                    continue;
-                }
-                $id = isset($imported['id']) ? (int) $imported['id'] : 0;
-                if ($id < 1) {
-                    continue;
-                }
-                if (preg_match('/\.jpe?g$/i', $filename)) {
+                $id = (int) ($imported['id'] ?? 0);
+                if ($id > 0) {
                     return $id;
                 }
-                // Nothing but flourishes on this page: one is still better
-                // than the blank placeholder a card falls back to.
-                if ($fallback === 0) {
-                    $fallback = $id;
-                }
             }
-            return $fallback;
+            return 0;
         }
 
         /**
@@ -1124,9 +1096,8 @@ final class ScaffoldPluginStep implements Step
 
             // Only while the option still reads what activation stored: an
             // owner who has since described their own site keeps their words.
-            // Both sides of the comparison are the stored form, and the value
-            // handed back is the stored form too — esc_html() leaves the
-            // entities it already wrote alone, so the round trip is exact.
+            // esc_html() leaves entities it already wrote alone, so handing
+            // back the stored form is exact.
             if (isset($state['blogdescription'], $state['blogdescription_applied'])
                 && get_option('blogdescription') === $state['blogdescription_applied']) {
                 update_option('blogdescription', (string) $state['blogdescription']);

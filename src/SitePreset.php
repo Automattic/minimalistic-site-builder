@@ -97,40 +97,25 @@ final class SitePreset
     }
 
     /**
-     * The string WordPress stores in `blogdescription`.
+     * The string WordPress stores in `blogdescription` — the front page's
+     * og:description, which Jetpack builds from this option and no other.
      *
-     * The stated tagline comes first, and it has to: when the header keeps a
-     * wp:site-tagline block, that block renders this exact option, so the two
-     * can never be allowed to disagree. A header only keeps the block when a
-     * tagline was stated (AboveFoldContract::headerTextFacts), so with no
-     * tagline nothing on the page renders this and the option is free to
-     * carry the spec's `description` — one factual sentence about the site,
-     * and a required field. BIGR-773 still holds: blogDescription() above —
-     * tagline or nothing — is what the header reads to decide, and it is
-     * untouched.
+     * The stated tagline has to come first: a header that keeps a
+     * wp:site-tagline block renders this exact option, and it keeps one only
+     * when a tagline was stated (AboveFoldContract::headerTextFacts). With no
+     * tagline nothing on the page renders this, so it carries the spec's
+     * `description` instead.
      *
      * `topic` is not a third rung. WordPress appends this option to the front
-     * page's <title> (wp_get_document_title), so a bare topic phrase would
-     * read as "Corner Bakery – sourdough" in the tab and in search results.
-     *
-     * Filling the option matters because a shared link has no other source.
-     * Jetpack builds the front page's og:description from
-     * get_bloginfo('description') and never from the page's own content, so
-     * an empty option ships a Slack or Facebook card with no description at
-     * all: the card falls back to the Twitter default, "Visit the post for
-     * more."
+     * page's <title>, where a bare phrase reads as "Corner Bakery – sourdough".
      *
      * @param array<string,mixed> $spec
      */
     public static function siteDescription(array $spec): string
     {
-        foreach (['tagline', 'description'] as $key) {
-            $value = trim((string) ($spec[$key] ?? ''));
-            if ($value !== '') {
-                return $value;
-            }
-        }
-        return '';
+        $tagline = self::blogDescription($spec);
+
+        return $tagline !== '' ? $tagline : trim((string) ($spec['description'] ?? ''));
     }
 
     /** Mu-plugin body that fails outbound HTTP fast in the local preview. */
