@@ -1,0 +1,158 @@
+{
+  "before": {
+    "header": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 19105
+    },
+    "footer": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 15817
+    },
+    "page-home--hero": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 32076
+    },
+    "page-home--bakery-introduction": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 8302
+    },
+    "page-home--daily-bread-feature": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 11598
+    },
+    "page-home--featured-breads": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 9429
+    },
+    "page-home--menu-preview": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 9593
+    },
+    "page-home--baking-process": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 11685
+    },
+    "page-home--contact-enquiry": {
+      "cached_bytes": 71199,
+      "fresh_bytes": 8673
+    },
+    "page-bread-menu--hero": {
+      "cached_bytes": 70856,
+      "fresh_bytes": 12239
+    },
+    "page-bread-menu--daily-breads": {
+      "cached_bytes": 70856,
+      "fresh_bytes": 9791
+    },
+    "page-bread-menu--bread-cards": {
+      "cached_bytes": 70856,
+      "fresh_bytes": 9568
+    },
+    "page-bread-menu--menu-note": {
+      "cached_bytes": 70856,
+      "fresh_bytes": 8254
+    },
+    "page-bread-menu--enquiry-next-step": {
+      "cached_bytes": 70856,
+      "fresh_bytes": 9994
+    },
+    "page-about--hero": {
+      "cached_bytes": 70872,
+      "fresh_bytes": 10443
+    },
+    "page-about--approach": {
+      "cached_bytes": 70872,
+      "fresh_bytes": 9513
+    },
+    "page-about--bench-to-oven": {
+      "cached_bytes": 70872,
+      "fresh_bytes": 9320
+    },
+    "page-about--what-guides-the-bake": {
+      "cached_bytes": 70872,
+      "fresh_bytes": 8349
+    },
+    "page-about--enquiry": {
+      "cached_bytes": 70872,
+      "fresh_bytes": 10045
+    }
+  },
+  "after": {
+    "header": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 19105
+    },
+    "footer": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 15817
+    },
+    "page-home--hero": {
+      "cached_bytes": 19583,
+      "fresh_bytes": 32076
+    },
+    "page-home--bakery-introduction": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 8302
+    },
+    "page-home--daily-bread-feature": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 11598
+    },
+    "page-home--featured-breads": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 9391
+    },
+    "page-home--menu-preview": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 10206
+    },
+    "page-home--baking-process": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 11685
+    },
+    "page-home--contact-enquiry": {
+      "cached_bytes": 58868,
+      "fresh_bytes": 8673
+    },
+    "page-bread-menu--hero": {
+      "cached_bytes": 58525,
+      "fresh_bytes": 12239
+    },
+    "page-bread-menu--daily-breads": {
+      "cached_bytes": 58525,
+      "fresh_bytes": 10404
+    },
+    "page-bread-menu--bread-cards": {
+      "cached_bytes": 58525,
+      "fresh_bytes": 9530
+    },
+    "page-bread-menu--menu-note": {
+      "cached_bytes": 58525,
+      "fresh_bytes": 8254
+    },
+    "page-bread-menu--enquiry-next-step": {
+      "cached_bytes": 58525,
+      "fresh_bytes": 9994
+    },
+    "page-about--hero": {
+      "cached_bytes": 58541,
+      "fresh_bytes": 10443
+    },
+    "page-about--approach": {
+      "cached_bytes": 58541,
+      "fresh_bytes": 9513
+    },
+    "page-about--bench-to-oven": {
+      "cached_bytes": 58541,
+      "fresh_bytes": 9933
+    },
+    "page-about--what-guides-the-bake": {
+      "cached_bytes": 58541,
+      "fresh_bytes": 8311
+    },
+    "page-about--enquiry": {
+      "cached_bytes": 58541,
+      "fresh_bytes": 10045
+    }
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "before": {
+    "header": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 19359
+    },
+    "footer": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 15550
+    },
+    "page-home--hero": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 31619
+    },
+    "page-home--threshold-introduction": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 9680
+    },
+    "page-home--selected-glimpses": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 8328
+    },
+    "page-home--studio-statement": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 8299
+    },
+    "page-home--approach-preview": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 9586
+    },
+    "page-home--featured-landscape-band": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 11657
+    },
+    "page-home--selected-work-next": {
+      "cached_bytes": 71643,
+      "fresh_bytes": 9974
+    },
+    "page-selected-work--hero": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 10493
+    },
+    "page-selected-work--landscape-gallery": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 8422
+    },
+    "page-selected-work--viewing-statement": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 8302
+    },
+    "page-selected-work--featured-pairing": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 9600
+    },
+    "page-selected-work--quiet-sequence": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 9687
+    },
+    "page-selected-work--next-step": {
+      "cached_bytes": 71491,
+      "fresh_bytes": 10138
+    },
+    "page-approach--hero": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 10401
+    },
+    "page-approach--field-observation": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 8334
+    },
+    "page-approach--working-method": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 9524
+    },
+    "page-approach--seeing-in-series": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 8385
+    },
+    "page-approach--studio-perspective": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 9559
+    },
+    "page-approach--selected-work-next": {
+      "cached_bytes": 71421,
+      "fresh_bytes": 10080
+    }
+  },
+  "after": {
+    "header": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 19359
+    },
+    "footer": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 15550
+    },
+    "page-home--hero": {
+      "cached_bytes": 19998,
+      "fresh_bytes": 31619
+    },
+    "page-home--threshold-introduction": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 9680
+    },
+    "page-home--selected-glimpses": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 8412
+    },
+    "page-home--studio-statement": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 8299
+    },
+    "page-home--approach-preview": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 10199
+    },
+    "page-home--featured-landscape-band": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 11657
+    },
+    "page-home--selected-work-next": {
+      "cached_bytes": 63519,
+      "fresh_bytes": 9974
+    },
+    "page-selected-work--hero": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 10493
+    },
+    "page-selected-work--landscape-gallery": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 8506
+    },
+    "page-selected-work--viewing-statement": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 8302
+    },
+    "page-selected-work--featured-pairing": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 9600
+    },
+    "page-selected-work--quiet-sequence": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 10300
+    },
+    "page-selected-work--next-step": {
+      "cached_bytes": 63367,
+      "fresh_bytes": 10100
+    },
+    "page-approach--hero": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 10401
+    },
+    "page-approach--field-observation": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 8334
+    },
+    "page-approach--working-method": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 10137
+    },
+    "page-approach--seeing-in-series": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 8469
+    },
+    "page-approach--studio-perspective": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 9559
+    },
+    "page-approach--selected-work-next": {
+      "cached_bytes": 63297,
+      "fresh_bytes": 10080
+    }
+  }
+}

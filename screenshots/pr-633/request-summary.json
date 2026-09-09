@@ -1,0 +1,222 @@
+{
+  "static": {
+    "section_count": 16,
+    "before_bytes": 1292630,
+    "after_bytes": 1097059,
+    "aggregate_reduction_percent": 15.13,
+    "sections": [
+      {
+        "section": "page-home--bakery-introduction",
+        "before_bytes": 79501,
+        "after_bytes": 67170,
+        "reduction_percent": 15.51
+      },
+      {
+        "section": "page-home--daily-bread-feature",
+        "before_bytes": 82797,
+        "after_bytes": 70466,
+        "reduction_percent": 14.89
+      },
+      {
+        "section": "page-home--featured-breads",
+        "before_bytes": 80628,
+        "after_bytes": 68259,
+        "reduction_percent": 15.34
+      },
+      {
+        "section": "page-home--menu-preview",
+        "before_bytes": 80792,
+        "after_bytes": 69074,
+        "reduction_percent": 14.5
+      },
+      {
+        "section": "page-home--baking-process",
+        "before_bytes": 82884,
+        "after_bytes": 70553,
+        "reduction_percent": 14.88
+      },
+      {
+        "section": "page-home--contact-enquiry",
+        "before_bytes": 79872,
+        "after_bytes": 67541,
+        "reduction_percent": 15.44
+      },
+      {
+        "section": "page-bread-menu--hero",
+        "before_bytes": 83095,
+        "after_bytes": 70764,
+        "reduction_percent": 14.84
+      },
+      {
+        "section": "page-bread-menu--daily-breads",
+        "before_bytes": 80647,
+        "after_bytes": 68929,
+        "reduction_percent": 14.53
+      },
+      {
+        "section": "page-bread-menu--bread-cards",
+        "before_bytes": 80424,
+        "after_bytes": 68055,
+        "reduction_percent": 15.38
+      },
+      {
+        "section": "page-bread-menu--menu-note",
+        "before_bytes": 79110,
+        "after_bytes": 66779,
+        "reduction_percent": 15.59
+      },
+      {
+        "section": "page-bread-menu--enquiry-next-step",
+        "before_bytes": 80850,
+        "after_bytes": 68519,
+        "reduction_percent": 15.25
+      },
+      {
+        "section": "page-about--hero",
+        "before_bytes": 81315,
+        "after_bytes": 68984,
+        "reduction_percent": 15.16
+      },
+      {
+        "section": "page-about--approach",
+        "before_bytes": 80385,
+        "after_bytes": 68054,
+        "reduction_percent": 15.34
+      },
+      {
+        "section": "page-about--bench-to-oven",
+        "before_bytes": 80192,
+        "after_bytes": 68474,
+        "reduction_percent": 14.61
+      },
+      {
+        "section": "page-about--what-guides-the-bake",
+        "before_bytes": 79221,
+        "after_bytes": 66852,
+        "reduction_percent": 15.61
+      },
+      {
+        "section": "page-about--enquiry",
+        "before_bytes": 80917,
+        "after_bytes": 68586,
+        "reduction_percent": 15.24
+      }
+    ]
+  },
+  "motion": {
+    "section_count": 18,
+    "before_bytes": 1457779,
+    "after_bytes": 1313600,
+    "aggregate_reduction_percent": 9.89,
+    "sections": [
+      {
+        "section": "page-home--threshold-introduction",
+        "before_bytes": 81323,
+        "after_bytes": 73199,
+        "reduction_percent": 9.99
+      },
+      {
+        "section": "page-home--selected-glimpses",
+        "before_bytes": 79971,
+        "after_bytes": 71931,
+        "reduction_percent": 10.05
+      },
+      {
+        "section": "page-home--studio-statement",
+        "before_bytes": 79942,
+        "after_bytes": 71818,
+        "reduction_percent": 10.16
+      },
+      {
+        "section": "page-home--approach-preview",
+        "before_bytes": 81229,
+        "after_bytes": 73718,
+        "reduction_percent": 9.25
+      },
+      {
+        "section": "page-home--featured-landscape-band",
+        "before_bytes": 83300,
+        "after_bytes": 75176,
+        "reduction_percent": 9.75
+      },
+      {
+        "section": "page-home--selected-work-next",
+        "before_bytes": 81617,
+        "after_bytes": 73493,
+        "reduction_percent": 9.95
+      },
+      {
+        "section": "page-selected-work--hero",
+        "before_bytes": 81984,
+        "after_bytes": 73860,
+        "reduction_percent": 9.91
+      },
+      {
+        "section": "page-selected-work--landscape-gallery",
+        "before_bytes": 79913,
+        "after_bytes": 71873,
+        "reduction_percent": 10.06
+      },
+      {
+        "section": "page-selected-work--viewing-statement",
+        "before_bytes": 79793,
+        "after_bytes": 71669,
+        "reduction_percent": 10.18
+      },
+      {
+        "section": "page-selected-work--featured-pairing",
+        "before_bytes": 81091,
+        "after_bytes": 72967,
+        "reduction_percent": 10.02
+      },
+      {
+        "section": "page-selected-work--quiet-sequence",
+        "before_bytes": 81178,
+        "after_bytes": 73667,
+        "reduction_percent": 9.25
+      },
+      {
+        "section": "page-selected-work--next-step",
+        "before_bytes": 81629,
+        "after_bytes": 73467,
+        "reduction_percent": 10.0
+      },
+      {
+        "section": "page-approach--hero",
+        "before_bytes": 81822,
+        "after_bytes": 73698,
+        "reduction_percent": 9.93
+      },
+      {
+        "section": "page-approach--field-observation",
+        "before_bytes": 79755,
+        "after_bytes": 71631,
+        "reduction_percent": 10.19
+      },
+      {
+        "section": "page-approach--working-method",
+        "before_bytes": 80945,
+        "after_bytes": 73434,
+        "reduction_percent": 9.28
+      },
+      {
+        "section": "page-approach--seeing-in-series",
+        "before_bytes": 79806,
+        "after_bytes": 71766,
+        "reduction_percent": 10.07
+      },
+      {
+        "section": "page-approach--studio-perspective",
+        "before_bytes": 80980,
+        "after_bytes": 72856,
+        "reduction_percent": 10.03
+      },
+      {
+        "section": "page-approach--selected-work-next",
+        "before_bytes": 81501,
+        "after_bytes": 73377,
+        "reduction_percent": 9.97
+      }
+    ]
+  }
+}
