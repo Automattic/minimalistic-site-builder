@@ -54,6 +54,9 @@ final class ImageKind
                 . ' shadowless light, no ground plane, no contact shadow, no cast shadow, no reflection,'
                 . ' no people and no environment.';
         }
+        if ($transparent) {
+            return '';
+        }
         return match ($kind) {
             '3d-object'         => 'Imagery kind for all site imagery: smooth matte clay-like 3D objects and simple geometric'
                 . ' forms in soft studio light on a plain seamless backdrop, no people and no environment.',
@@ -179,11 +182,30 @@ final class ImageKind
             . ' chart shapes are NOT text. Answer true only for legible letters, words or numerals.';
     }
 
-    private const PERSON_PATTERN = '/\b(?:portrait|headshot|head-and-shoulders|person|people|woman|women|man|men|face|faces|founder|founders|team photo|avatar|smiling)\b/iu';
+    private const PERSON_PATTERN = '/(?<![\p{L}-])(?:portrait|headshot|head-and-shoulders|person|people|woman|women|man|men|face|faces|founder|founders|team photo|avatar|smiling|customer|user|CEO|hands)(?![\p{L}-])/iu';
 
     public static function namesPerson(string $text): bool
     {
+        if (preg_match('/\b(?:portrait|headshot|head-and-shoulders|team photo)\b/iu', $text) === 1) {
+            return true;
+        }
+        if (preg_match('/\b(?:dashboard|interface|screenshot|board|app|screen|status pills|avatar stack)\b/iu', $text) === 1) {
+            return false;
+        }
         return preg_match(self::PERSON_PATTERN, $text) === 1;
+    }
+
+    /** Select the asset kind for the prompt and QA. */
+    public static function effectiveKind(array $spec): string
+    {
+        $kind = self::explicit($spec['image_kind'] ?? null) ?? self::DEFAULT;
+        if (($spec['role'] ?? '') === 'site-logo') {
+            return 'photo';
+        }
+        if ($kind === 'ui-mockup' && self::namesPerson((string) ($spec['subject'] ?? '') . ' ' . (string) ($spec['pageContext'] ?? ''))) {
+            return 'photo';
+        }
+        return $kind;
     }
 
     public static function skipsGrade(?string $raw): bool
@@ -208,7 +230,7 @@ final class ImageKind
             return false;
         }
         $text = (string) ($spec['subject'] ?? '') . ' ' . (string) ($spec['pageContext'] ?? '');
-        return preg_match(self::PERSON_PATTERN, $text) !== 1;
+        return !self::namesPerson($text);
     }
 
     /**
@@ -247,7 +269,7 @@ final class ImageKind
             }
         }
         return <<<CSS
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
                 position: relative;
                 border-radius: var(--shape-radius-panel, 1rem);
                 overflow: hidden;
@@ -256,7 +278,7 @@ final class ImageKind
                     0 1px 2px rgb(0 0 0 / 0.08),
                     0 2.5rem 5rem -2rem rgb(0 0 0 / 0.4);
             }
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::after {
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::after {
                 content: "";
                 position: absolute;
                 inset: 0;
@@ -266,7 +288,7 @@ final class ImageKind
                     inset 0 1px 0 rgb(255 255 255 / 0.35);
                 pointer-events: none;
             }
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {
                 display: block;
                 width: 100%;
                 height: auto;

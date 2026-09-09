@@ -244,7 +244,7 @@ final class GenerateImagesStep implements Step
 
         // The design direction's photographic grade, injected into EVERY prompt
         // so the independently generated images read as one photographic series.
-        $imageGrade = DesignDirectionStep::imageGradeFor($project);
+        $imageGrade = ImageKind::skipsGrade($imageKind) ? '' : DesignDirectionStep::imageGradeFor($project);
         $imageCrop = DesignDirectionStep::imageCropFor($project) ?? '';
 
         $assetDir = $project->themePath('assets');
@@ -567,12 +567,12 @@ final class GenerateImagesStep implements Step
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
                 (string) ($spec['pageContext'] ?? ''),
-                (string) ($spec['style'] ?? ''),
+                ($spec['role'] ?? '') === 'site-logo' ? 'flat-design' : (string) ($spec['style'] ?? ''),
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
                 imageCrop: $imageCrop,
-                imageKind: (string) ($spec['image_kind'] ?? ''),
+                imageKind: ($spec['role'] ?? '') === 'site-logo' ? 'photo' : (string) ($spec['image_kind'] ?? ''),
                 screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
@@ -598,6 +598,9 @@ final class GenerateImagesStep implements Step
     {
         $rows = [];
         foreach ($pending as $spec) {
+            if (ImageKind::skipsGrade((string) ($spec['image_kind'] ?? ''))) {
+                continue;
+            }
             $rows = array_merge($rows, self::gradeSubjectWarningsFor(
                 (string) ($spec['filename'] ?? ''),
                 (string) ($spec['subject'] ?? ''),
@@ -690,7 +693,7 @@ final class GenerateImagesStep implements Step
     {
         $authored = $subject ?? (string) ($spec['subject'] ?? '');
         $filename = (string) ($spec['filename'] ?? '');
-        if (trim($imageGrade) === '' || trim($authored) === '') {
+        if (trim($imageGrade) === '' || trim($authored) === '' || ImageKind::skipsGrade((string) ($spec['image_kind'] ?? ''))) {
             return [];
         }
         if (GeminiImage::mimeForFilename($filename) === 'image/png') {
@@ -921,8 +924,8 @@ final class GenerateImagesStep implements Step
         try {
             $prompt = $this->renderer->render('image-qa.md', [
                 'subject'      => (string) ($spec['subject'] ?? ''),
-                'upright_rule' => ImageKind::qaUprightRule((string) ($spec['image_kind'] ?? '')),
-                'text_rule'    => ImageKind::qaTextRule((string) ($spec['image_kind'] ?? '')),
+                'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
+                'text_rule'    => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
             ]);
             $answer = $this->llm->completeWithImage(
                 $prompt,
@@ -935,7 +938,7 @@ final class GenerateImagesStep implements Step
             Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
             return null;
         }
-        $verdict = ImageQa::verdict($answer, ImageKind::keepsTilt((string) ($spec['image_kind'] ?? '')));
+        $verdict = ImageQa::verdict($answer, ImageKind::keepsTilt(ImageKind::effectiveKind($spec)));
         if ($verdict === null) {
             Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
         }

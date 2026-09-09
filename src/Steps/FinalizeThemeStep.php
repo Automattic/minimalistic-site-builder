@@ -348,8 +348,7 @@ final class FinalizeThemeStep implements Step
             return [];
         }
         $data = $project->readJson('images.json');
-        $rows = is_array($data['images'] ?? null) ? $data['images'] : $data;
-        return ImageKind::offKindFiles(is_array($rows) ? array_values($rows) : []);
+        return ImageKind::offKindFiles(array_values($data));
     }
 
     /** Define the screen frame kit for ui-mockup images. */

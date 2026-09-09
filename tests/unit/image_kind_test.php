@@ -79,7 +79,7 @@ test('the framed-screen kit ships for ui-mockup only, keys on the image role hoo
     assert_eq(null, ImageKind::kitCss('3d-object'));
     assert_eq(null, ImageKind::kitCss(null));
     $css = (string) ImageKind::kitCss(' UI-Mockup ');
-    assert_contains('.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage', $css);
+    assert_contains('.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media', $css);
     assert_contains(':not(.wp-block-cover *)', $css, 'a cover keeps its own treatment');
     assert_contains(':not([class*="avatar"])', $css, 'an avatar is not a screen');
     assert_contains(':has(> img:not([src$=".png"]))', $css, 'a transparent asset is not a screen');
@@ -139,7 +139,7 @@ test('the direction fact tells a ui-mockup author about the frame and the one ti
     $rendered = DesignDirectionStep::format(['description' => 'x', 'image_kind' => 'ui-mockup']);
     assert_contains('frames every contained picture as a product screen', $rendered);
     assert_contains('no window chrome', $rendered);
-    assert_contains('`screen-frame--tilt` to at most ONE screen per page', $rendered);
+    assert_contains('`screen-frame--tilt` to the figure or hero media wrapper of at most ONE screen per page', $rendered);
     assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x', 'image_kind' => '3d-object']), 'screen-frame--tilt'));
 });
 
@@ -149,7 +149,7 @@ test('finalize-theme ships the screen kit for ui-mockup and prunes it for photo'
     $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'ui-mockup']);
     finalize_static_header($project);
     quietly(fn () => (new FinalizeThemeStep())->run($project));
-    assert_contains('.hero-composition__stage', $project->readText('theme/assets/screen/screen.css'));
+    assert_contains('.hero-composition__media', $project->readText('theme/assets/screen/screen.css'));
     $php = $project->readText('theme/functions.php');
     assert_contains("wp_enqueue_style('zova-screen', get_theme_file_uri('assets/screen/screen.css'), array('zova-style'), \$ver);", $php);
 
@@ -205,7 +205,7 @@ test('a transparent 3d-object request asks for a floating, shadowless object', f
     assert_contains('no contact shadow', ImageKind::promptClause('3d-object', true));
     assert_contains('floating', ImageKind::promptClause('3d-object', true));
     assert_contains('plain seamless backdrop', ImageKind::promptClause('3d-object'));
-    assert_eq(ImageKind::promptClause('ui-mockup'), ImageKind::promptClause('ui-mockup', true), 'other kinds ignore the flag');
+    assert_eq('', ImageKind::promptClause('ui-mockup', true));
 });
 
 test('a person on a ui-mockup site takes the portrait clause instead of the interface clause', function () {
@@ -265,4 +265,21 @@ test('a screenshot prompt keeps its subject and swaps the scenery guidance for i
     assert_contains('continuous unbroken scenery', $person);
     $photo = ImagePromptComposer::compose('A loaf on a board', 'menu card', 'photorealistic', 'A bakery.', 'Warm film.', false, null, '', 'photo');
     assert_true(str_starts_with($photo, 'A loaf on a board.'));
+});
+
+test('image kinds preserve screen subjects and isolate portraits and transparent assets', function () {
+    foreach (['ui-mockup', 'line-illustration', 'abstract-gradient'] as $kind) {
+        assert_eq('', ImageKind::promptClause($kind, true));
+    }
+    assert_true(!ImageKind::namesPerson('a team board with round avatars and status pills'));
+    assert_true(!ImageKind::namesPerson('a man-made sculpture'));
+    foreach (['customer portrait', 'CEO', 'hands'] as $subject) {
+        assert_true(ImageKind::namesPerson($subject));
+    }
+    $prompt = \Automattic\SiteBuild\ImagePromptComposer::compose('a founder portrait', 'team', 'ui-screenshot', imageKind: 'ui-mockup');
+    assert_contains('Style: photorealistic', $prompt);
+    assert_true(!str_contains($prompt, 'Style: ui-screenshot'));
+    assert_eq('photo', ImageKind::effectiveKind(['image_kind' => 'ui-mockup', 'subject' => 'founder portrait']));
+    $prompt = \Automattic\SiteBuild\ImagePromptComposer::compose('billing dashboard with one teal accent bar', 'product', 'ui-screenshot', imageGrade: 'cool interface renders with one teal accent', imageKind: 'ui-mockup');
+    assert_contains('billing dashboard with one teal accent bar', $prompt);
 });

@@ -1860,7 +1860,7 @@ final class DesignDirectionStep implements Step
                 . ($imageKind === 'ui-mockup'
                     ? ' The build frames every contained picture as a product screen (panel radius, hairline ring,'
                         . ' soft shadow, no window chrome), so author no frame, border or shadow around an image. Add the class `'
-                        . ImageKind::TILT_CLASS . '` to at most ONE screen per page (the hero stage or the first'
+                        . ImageKind::TILT_CLASS . '` to the figure or hero media wrapper of at most ONE screen per page (the hero media or the first'
                         . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
                     : '');
         }

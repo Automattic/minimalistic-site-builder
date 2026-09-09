@@ -130,6 +130,16 @@ final class ImagePromptComposer
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
         $imageGrade  = trim($imageGrade);
+        $portrait = !$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
+            && ImageKind::namesPerson($subject . ' ' . $pageContext);
+        if (ImageKind::skipsGrade($imageKind)) {
+            $imageGrade = '';
+        }
+        if ($portrait) {
+            $style = 'photorealistic';
+        } elseif ($transparent && in_array($style, ['ui-screenshot', 'abstract'], true)) {
+            $style = 'flat-design';
+        }
         if ($imageGrade !== '' && !$transparent) {
             $subject = self::stripCompetingGradeTokens($subject, $imageGrade)['subject'];
         }
@@ -148,8 +158,7 @@ final class ImagePromptComposer
         // Apply the image kind to opaque images and transparent assets.
         $kindClause = ImageKind::promptClause($imageKind, $transparent, $screenTheme);
         // Use a portrait for a person on a ui-mockup site.
-        if (!$transparent && ImageKind::explicit($imageKind) === 'ui-mockup'
-            && ImageKind::namesPerson($subject . ' ' . $pageContext)) {
+        if ($portrait) {
             $kindClause = ImageKind::portraitClause();
             // The portrait clause replaces the interface grade.
             $gradeClause = '';
