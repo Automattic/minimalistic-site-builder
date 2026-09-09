@@ -95,7 +95,14 @@ final class ConceptSeeds
     /** The letterform tradition a brief names in so many words, or null. */
     public static function statedTypeRegister(string $brief): ?string
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        $text = preg_replace('/\bsans serif\b/u', 'sans-serif', $text) ?? $text;
+        if (preg_match('/\b(?:(?:classic|editorial|bookish|bold|tight|clean) )?(sans-serif|sans|serif|grotesque|grotesk|geometric|mono) (?:headings?|headlines?|titles?|wordmark|name)\b/u', $text, $heading) === 1) {
+            return match ($heading[1]) {
+                'serif' => 'transitional', 'geometric' => 'geometric', 'mono' => 'mono', default => 'grotesque',
+            };
+        }
         foreach (self::STATED_TYPE_PHRASES as $register => $phrases) {
             foreach ($phrases as $phrase) {
                 if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {

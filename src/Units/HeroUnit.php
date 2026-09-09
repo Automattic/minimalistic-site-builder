@@ -96,6 +96,7 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
+        $markup = GeneratedMarkup::withHeroWordmarkCase($markup, $input['stated_wordmark_case'] ?? null, $key, $repairs);
         // Remove non-copy children first so an eyebrow-only decorated shell
         // is visible as empty to the fresh parse in stripHeroEyebrow().
         $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs, $warnings);

@@ -66,7 +66,11 @@ final class ColorEconomy
     /** The hue budget a brief names in so many words, or null. */
     public static function statedInBrief(string $brief): ?string
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        if (preg_match('/\b(?:one|single) (?:(?:colour|color)|(?:[\p{L}-]+ )?(?:' . self::COLOUR_WORDS . ')) accents?\b/u', $text) === 1) {
+            return 'single-accent';
+        }
         foreach (self::STATED_PHRASES as $economy => $phrases) {
             foreach ($phrases as $phrase) {
                 if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
@@ -79,7 +83,7 @@ final class ColorEconomy
         if (preg_match('/(?<![\p{L}-])one (?:[\p{L}-]+ )?(?:' . self::COLOUR_WORDS . ') accent(?![\p{L}-])/u', $text) === 1) {
             return 'single-accent';
         }
-        if (preg_match('/(?<![\p{L}-])(?:in|of|with) one (?:[\p{L}-]+ )?(?:' . self::COLOUR_WORDS . ')(?![\p{L}-])/u', $text) === 1) {
+        if (preg_match('/(?<![\p{L}-])(?:in|of) one (?:[\p{L}-]+ )?(?:' . self::COLOUR_WORDS . ')(?![\p{L}-])/u', $text) === 1) {
             return 'monochrome';
         }
         return null;

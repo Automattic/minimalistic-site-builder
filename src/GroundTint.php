@@ -52,6 +52,10 @@ final class GroundTint
     /** The page tint a brief names in so many words, or null. */
     public static function statedInBrief(string $brief): ?string
     {
+        if (preg_match('/\b(?:page|ground|background)\b/iu', $brief) === 1) {
+            $brief = preg_replace('/\b(cream|ivory|beige|sand|lavender|lilac|sage|mint|blush|pink|white) one\b/iu', '$1 page', $brief) ?? $brief;
+        }
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_PHRASES as $tint => $phrases) {
             foreach ($phrases as $phrase) {

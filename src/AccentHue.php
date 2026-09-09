@@ -58,6 +58,7 @@ final class AccentHue
      */
     public static function statedInBrief(string $brief): ?array
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         $words = implode('|', array_map(
             static fn (string $word): string => preg_quote($word, '/'),

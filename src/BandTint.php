@@ -29,7 +29,7 @@ final class BandTint
     ];
 
     /** The surface nouns that make a colour word a band colour, not an accent or a page. */
-    private const SURFACES = 'panels?|bands?|plates?|hero panel|gradient panels?|gradient';
+    private const SURFACES = 'panels?|bands?|plates?|hero panel|gradient panels?';
 
     /** The optional lightness words a brief puts before the colour. */
     private const SHADES = 'pale|soft|light|faint|muted|powder|pastel|dusty|misty|washed|tinted|gentle';
@@ -44,6 +44,7 @@ final class BandTint
      */
     public static function statedInBrief(string $brief): ?array
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         $words = implode('|', array_map(
             static fn (string $word): string => preg_quote($word, '/'),

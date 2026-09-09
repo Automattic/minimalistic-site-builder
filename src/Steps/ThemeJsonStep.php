@@ -21,7 +21,6 @@ use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
-use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -641,12 +640,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
         // An accent hue the brief states is never rotated away; the primary
         // takes the hue separation instead (frm PR-4y).
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $statedAccent = AccentHue::statedFor($statedMeta);
+        $accentHex = self::deliveredSlugHex($theme['settings']['color']['palette'] ?? [], [], 'accent');
         [$theme, $floorWarnings] = self::applyPaletteFloor(
             $theme,
             Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
             DesignDirectionStep::colorEconomyFor($project),
-            AccentHue::statedFor(is_array($meta) ? $meta : []) !== null,
+            $statedAccent !== null && $accentHex !== null && AccentHue::inFamily($accentHex, $statedAccent),
         );
         $warnings = array_merge($warnings, $floorWarnings);
 

@@ -370,6 +370,7 @@ final class DesignDirectionStep implements Step
             $seedColorEconomy,
             $seedRegister,
             $seedTypeRegister,
+            BandTint::statedFor($meta)['tint'] ?? null,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -915,6 +916,7 @@ final class DesignDirectionStep implements Step
         string $conceptColorEconomy = '',
         string $conceptRegister = '',
         string $conceptTypeRegister = '',
+        ?string $statedBandTint = null,
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -983,13 +985,15 @@ final class DesignDirectionStep implements Step
 
         if (isset($palette['base'])) {
             $authoredBand = $palette['band'] ?? null;
-            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand)) {
-                $band = BandColor::fromBase($palette['base']);
+            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand, $statedBandTint)) {
+                $band = $statedBandTint !== null ? BandTint::apply($palette['base'], $statedBandTint) : BandColor::fromBase($palette['base']);
                 if ($band !== null) {
                     $palette['band'] = $band;
                     $repairs[] = 'designDirection.json: field palette.band authored '
                         . self::describe($authoredBand) . ' delivered ' . self::describe($band)
-                        . '; disposition derived a same-family surface 10 lightness points from base '
+                        . ($statedBandTint !== null
+                            ? '; disposition derived a band in the stated tint 10 lightness points from base '
+                            : '; disposition derived a same-family surface 10 lightness points from base ')
                         . 'without crossing the page light/dark key';
                 }
             }

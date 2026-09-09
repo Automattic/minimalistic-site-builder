@@ -568,9 +568,11 @@ final class ScaffoldThemeStep implements Step
         }
 
         /* The footer wordmark keeps its own case. */
+        .wp-block-heading.hero-wordmark--upper,
         .wp-block-heading.has-fit-text.footer-wordmark--upper {
             text-transform: uppercase;
         }
+        .wp-block-heading.hero-wordmark--lower,
         .wp-block-heading.has-fit-text.footer-wordmark--lower {
             text-transform: lowercase;
         }
