@@ -171,21 +171,9 @@ final class FontShortlist
             . self::productWeightSentence($typeRegister, $register);
     }
 
-    /** These traditions use medium display weights for sans product type. */
+    /** These traditions use medium display weights for grotesque and geometric type. */
     public const PRODUCT_REGISTERS = ['modernist', 'technical', 'playful', 'utilitarian'];
-
-    /**
-     * The sans traditions a contemporary product or portfolio page is set in.
-     *
-     * `condensed` belongs here with `grotesque` and `geometric`. A generated
-     * portfolio proved the gap: a modernist studio brief landed on Encode Sans
-     * Condensed, the sentence never reached it, and the page shipped uppercase
-     * display type at weight 700 — the heavy poster reflex this rule exists to
-     * break. A condensed grotesque is the same product voice at a narrower
-     * width, and the register list still holds the caps back for the poster,
-     * brutalist, heritage and editorial seeds that want them.
-     */
-    public const PRODUCT_TYPE_REGISTERS = ['grotesque', 'geometric', 'condensed'];
+    public const PRODUCT_TYPE_REGISTERS = ['grotesque', 'geometric'];
 
     public static function productWeightSentence(string $typeRegister, string $register): string
     {
@@ -195,8 +183,7 @@ final class FontShortlist
         }
         return ' Use a MEDIUM weight for the display heading for this product or portfolio tradition. '
             . 'Commit 500 and 600 in `weights`. Use `type_treatment: "tight"` and body weight 400. '
-            . 'Do not use weight 700 or 800 for the display heading, and do not reach for uppercase '
-            . 'display type; a narrow or condensed face carries this voice at a medium weight too.';
+            . 'Do not use weight 800 for the display heading.';
     }
 
     /**
