@@ -20,6 +20,27 @@ test('type treatment maps every bounded commitment to exact case and tracking le
     }
 });
 
+test('the statement-lines register drops the caps of an uppercase site treatment (BIGR-1002)', function () {
+    // A statement line carries a whole statement, not a label. Under caps it
+    // loses the word shapes a reader recognizes and sets wide enough to wrap,
+    // which breaks the archetype's one-line premise.
+    foreach (['caps-tight' => '-0.02em', 'caps-tracked' => '0.01em'] as $treatment => $tracking) {
+        $css = (string) TypeTreatment::kitCss($treatment);
+        assert_contains(
+            '.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {',
+            $css,
+        );
+        assert_contains('text-transform: none;', $css);
+        assert_contains("letter-spacing: {$tracking};", $css);
+    }
+
+    // Every other treatment ships no kit: lowercase is a deliberate craft
+    // voice on long lines, and the rest never set caps.
+    foreach (['sentence', 'tight', 'title', 'lowercase', 'small-caps', '', null, 7] as $treatment) {
+        assert_eq(null, TypeTreatment::kitCss($treatment));
+    }
+});
+
 test('type treatment rejects absent and unsupported commitments without guessing', function () {
     foreach ([null, '', 'small-caps', ['title'], 7] as $value) {
         assert_eq(null, TypeTreatment::typography($value));
