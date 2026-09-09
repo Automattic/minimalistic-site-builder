@@ -579,8 +579,8 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('position: fixed', $css);
-    assert_contains('mix-blend-mode: soft-light', $css);
+    assert_contains('position: absolute', $css);
+    assert_contains('mix-blend-mode: normal', $css);
     $php = $project->readText('theme/functions.php');
     assert_contains('assets/surface/surface.css', $php);
 
@@ -591,7 +591,7 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme warns when generated CSS already claimed body::before', function () {
+test('finalize-theme warns when generated CSS claims the section texture pseudo-element', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
@@ -599,16 +599,16 @@ test('finalize-theme warns when generated CSS already claimed body::before', fun
         ['slug' => 'base', 'color' => '#0B1B33'],
         ['slug' => 'contrast', 'color' => '#7EC8E3'],
     ]]]]);
-    $project->writeText('theme/style.css', 'body:where(.page)::before { content: "deco"; }');
+    $project->writeText('theme/style.css', '.surface--paper::before { content: "deco"; }');
     finalize_static_header($project);
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('rgba(11,27,51,', $css);
-    assert_contains('rgba(126,200,227,', $css);
+    assert_contains('%230b1b33', $css);
+    assert_contains('%237ec8e3', $css);
     $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
-    assert_contains('html body::before', $warning);
+    assert_contains('surface--paper::before', $warning);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -713,7 +713,7 @@ test('finalize-theme omits a stale surface overlay from the loader when it canno
     }
 });
 
-test('finalize-theme tunes the overlay to a dark page base', function () {
+test('finalize-theme confines a dark palette texture below section content', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'concrete']);
@@ -725,11 +725,11 @@ test('finalize-theme tunes the overlay to a dark page base', function () {
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('mix-blend-mode: soft-light', $css);
-    assert_contains('opacity: 0.48', $css, 'a dark base carries the heavier grain');
+    assert_contains('mix-blend-mode: normal', $css);
+    assert_contains('opacity: 0.12', $css);
     assert_true(!str_contains($css, 'feTurbulence'));
-    assert_contains('z-index: 1', $css);
-    assert_contains('@supports (mix-blend-mode: soft-light)', $css);
+    assert_contains('z-index: -1', $css);
+    assert_contains('> .surface--concrete', $css);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
