@@ -78,6 +78,7 @@ test('the kit owns the marquee scale and the boundary drops an authored size or 
     assert_true(!str_contains($out, 'has-caption-font-size'), 'size class dropped');
     assert_true(!str_contains($out, 'has-body-font-family'), 'face class dropped');
     assert_contains('marquee', $out);
+    assert_true(!str_contains($out, 'letter-spacing:0.1em'));
     assert_eq(1, count($repairs));
     $plain = '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">Plain</p><!-- /wp:paragraph -->';
     assert_eq($plain, \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($plain, 'x', $repairs), 'nothing authored, nothing changed');

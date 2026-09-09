@@ -30,7 +30,7 @@ test('the driver counts a figure up from zero after it enters and the kit never 
     assert_contains('function startCountUp(target)', $js);
     assert_true(strpos($js, 'startCountUp(target);') > strpos($js, "target.classList.add('is-visible');\n            startCountUp"), 'the count starts when the target is shown');
     assert_contains('--motion-count-duration', $js);
-    assert_contains("target.textContent = progress >= 1 ? original : format(finalValue * eased)", $js, 'the authored text is restored at the end');
+    assert_contains("originalNodes.forEach(function (node) { target.appendChild(node); })", $js, 'The count restores the original nodes.');
     $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
     assert_contains('.count-up {', $css);
     assert_contains('font-variant-numeric: tabular-nums', $css);
@@ -46,11 +46,12 @@ test('the section boundary marks figure-only blocks with count-up when the profi
         . '<h3 class="wp-block-heading' . ($class !== '' ? ' ' . $class : '') . '">' . $text . '</h3><!-- /wp:heading -->';
     $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
         . $heading('120+') . $heading('$4.2M') . $heading('1,200') . $heading('98 %')
-        . $heading('120 projects delivered') . $heading('2024') . $heading('7', 'reveal-fade')
+        . $heading('120+', 'custom-motion') . $heading('120 projects delivered') . $heading('2024') . $heading('7', 'reveal-fade')
         . '<!-- wp:paragraph --><p>Nothing to count here.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
     $repairs = [];
     $out = \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'page-home--metrics', 'dramatic', $repairs);
+    assert_contains('<h3 class="wp-block-heading custom-motion">120+</h3>', $out);
     assert_eq(4, substr_count($out, 'class="count-up wp-block-heading"'), 'the four figures count');
     assert_contains('{"level":3,"className":"count-up"}', $out, 'the block attributes carry the class too');
     assert_true(!str_contains($out, 'count-up wp-block-heading">120 projects'), 'a sentence is not a figure');

@@ -4197,7 +4197,9 @@ final class GeneratedMarkup
             }
             $attrs = $document->attrs($index) ?? [];
             $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-            if (in_array('step-numeral', $tokens, true)
+            if (in_array('custom-motion', $tokens, true)
+                || preg_match('/\bclass="[^"]*(?<![\w-])custom-motion(?![\w-])[^"]*"/', $shell[1]) === 1
+                || in_array('step-numeral', $tokens, true)
                 || preg_match('/\bclass="[^"]*(?<![\w-])step-numeral(?![\w-])[^"]*"/', $shell[1]) === 1) {
                 continue;
             }
@@ -4252,6 +4254,7 @@ final class GeneratedMarkup
                 continue;
             }
             $dropped = [];
+            $classDrops = [];
             foreach (['fontSize', 'fontFamily'] as $key) {
                 $value = trim((string) ($attrs[$key] ?? ''));
                 if ($value === '') {
@@ -4259,7 +4262,7 @@ final class GeneratedMarkup
                 }
                 unset($attrs[$key]);
                 $suffix = $key === 'fontSize' ? 'font-size' : 'font-family';
-                $document->removeClassTokenInOwnHtml($index, "has-{$value}-{$suffix}");
+                $classDrops[] = "has-{$value}-{$suffix}";
                 $dropped[] = "{$key} '{$value}'";
             }
             if (isset($attrs['style']['typography'])) {
@@ -4268,6 +4271,25 @@ final class GeneratedMarkup
                     unset($attrs['style']);
                 }
                 $dropped[] = 'style.typography';
+            }
+            $own = $document->ownHtml($index);
+            $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $match) use ($classDrops): string {
+                return ' class="' . implode(' ', array_diff(preg_split('/\s+/', trim($match[1])) ?: [], $classDrops)) . '"';
+            }, $own) ?? $own;
+            $clean = preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $match): string {
+                [$css] = \Automattic\SiteBuild\CssChecks::dropDeclarations(
+                    html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                    static fn (array $declaration): bool => in_array(strtolower($declaration['property']), [
+                        'font-size', 'font-family', 'font-weight', 'font-style', 'line-height',
+                        'letter-spacing', 'text-transform', 'text-decoration',
+                    ], true),
+                    true,
+                );
+                return trim($css) === '' ? '' : ' style="' . htmlspecialchars($css, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '"';
+            }, $clean) ?? $clean;
+            if ($clean !== $own) {
+                $document->spliceOwnHtml($index, 0, strlen($own), $clean);
+                $dropped[] = 'inline typography';
             }
             if ($dropped === []) {
                 continue;

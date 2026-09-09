@@ -116,14 +116,19 @@
             if (text === '') {
                 return;
             }
+            var originalNodes = Array.prototype.slice.call(marquee.childNodes);
             var group = document.createElement('span');
             group.className = 'marquee__group';
             var makeItem = function (hidden) {
                 var item = document.createElement('span');
                 item.className = 'marquee__item';
-                item.textContent = text;
+                originalNodes.forEach(function (node) {
+                    item.appendChild(hidden ? node.cloneNode(true) : node);
+                });
                 if (hidden) {
                     item.setAttribute('aria-hidden', 'true');
+                    item.setAttribute('inert', '');
+                    Array.prototype.forEach.call(item.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
                 }
                 return item;
             };
@@ -137,6 +142,8 @@
             }
             var clone = group.cloneNode(true);
             clone.setAttribute('aria-hidden', 'true');
+            clone.setAttribute('inert', '');
+            Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
             Array.prototype.forEach.call(clone.querySelectorAll('.marquee__item'), function (item) {
                 item.setAttribute('aria-hidden', 'true');
             });
@@ -146,6 +153,7 @@
             track.appendChild(clone);
             marquee.appendChild(track);
             marquee.classList.add('marquee--built');
+            if (!marquee.hasAttribute('tabindex')) { marquee.setAttribute('tabindex', '0'); }
         });
     }
 
@@ -246,10 +254,11 @@
         // move. Static paths (reduced motion, motion-skip, no JS) never call
         // this, so the final figure is what they show.
         function startCountUp(target) {
-            if (!target.classList.contains('count-up') || target.getAttribute('data-count-started') === 'true') {
+            if (!target.classList.contains('count-up') || target.classList.contains('motion-skip') || target.getAttribute('data-count-started') === 'true') {
                 return;
             }
             target.setAttribute('data-count-started', 'true');
+            var originalNodes = Array.prototype.slice.call(target.childNodes);
             var original = (target.textContent || '').trim();
             var match = /^([^0-9]*)([0-9][0-9,.\u00a0 ]*[0-9]|[0-9])(.*)$/.exec(original);
             if (!match) {
@@ -286,7 +295,12 @@
                 }
                 var progress = Math.min(1, (now - start) / duration);
                 var eased = 1 - Math.pow(1 - progress, 3);
-                target.textContent = progress >= 1 ? original : format(finalValue * eased);
+                if (progress >= 1) {
+                    target.textContent = '';
+                    originalNodes.forEach(function (node) { target.appendChild(node); });
+                } else {
+                    target.textContent = format(finalValue * eased);
+                }
                 if (progress < 1) {
                     window.requestAnimationFrame(step);
                 }

@@ -527,14 +527,14 @@ html:not(.motion-js) .marquee.is-long-line {
        little lower than the last, so the cards pile up (Cohesion's stack).
        Pure CSS, vertical only; the container is a plain column so every
        card has room to travel. Inert under reduced motion (this block). */
-    .sticky-stack {
-        display: grid;
+    .sticky-stack.sticky-stack {
+        display: grid !important;
         grid-template-columns: minmax(0, 1fr);
         gap: var(--wp--preset--spacing--md, 1.5rem);
     }
     .sticky-stack > * {
         position: sticky;
-        top: calc(var(--header-safe-top, 5rem) + var(--stack-offset, 0rem));
+        top: calc(var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px) + var(--stack-offset, 0rem));
         /* A card pins only while its container still has room below it; a
            short stack scrolls away before anything piles. Each card claims
            most of a viewport so the pile is visible as the reader scrolls. */
@@ -550,7 +550,10 @@ html:not(.motion-js) .marquee.is-long-line {
     /* A pinned card must own its surface, or the one beneath shows through. */
     .sticky-stack > *:not(.has-background) {
         background-color: var(--wp--preset--color--base, #fff);
+        color: var(--wp--preset--color--contrast, #111);
     }
+
+    html.motion-js .marquee { text-overflow: clip; }
 
     /* Marquee (frm W8c): the ONE lateral exception in the kit. motion.js
        rebuilds the marked paragraph as a track of two identical groups of

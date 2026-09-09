@@ -212,6 +212,9 @@ final class Motion
     /** Which site-wide note budget a class draws from. Entrance is uncapped. */
     private static function noteBucket(string $class): string
     {
+        if ($class === 'marquee') {
+            return 'marquee';
+        }
         if (in_array($class, self::AMBIENT_CLASSES, true)) {
             return 'ambient';
         }
