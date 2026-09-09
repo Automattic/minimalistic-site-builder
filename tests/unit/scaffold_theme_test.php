@@ -599,6 +599,10 @@ test('scaffold-theme rounds and clips the closing cta-panel from the shape scale
     assert_contains('.wp-block-group.cta-panel :is(h1, h2, h3)', $css, 'a clipped panel never clips its headline');
     assert_contains('overflow-wrap: anywhere', $css);
     assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important', $css, 'phone-scale headline cap');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush {', $css, 'the flush panel construction ships');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {', $css, 'the copy column carries the padding');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {', $css, 'the image covers its column');
+    assert_contains('object-fit: cover', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

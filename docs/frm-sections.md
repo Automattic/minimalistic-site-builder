@@ -28,6 +28,8 @@ Recipes without cards release the item pattern. Bento and price recipes keep the
 The extraction also includes the styles, shape scale, image limits, and card text repairs that these recipes require.
 Repairs preserve safe content and report removals in `warnings.json`.
 Project tile color repairs reach a fixed point.
+A closing panel with no image centers its heading, its lead line, and its action.
+A closing panel with an image bleeds that image to the panel edges under every card style except `framed`.
 
 The hero, header, footer, image-generation, motion, and site-identity experiments remain outside this extraction.
 Section badges, side labels, and step numeral tokens also remain outside it.

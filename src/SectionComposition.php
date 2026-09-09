@@ -162,6 +162,10 @@ final class SectionComposition
     public const PRICING_TIER_COUNTS = [2, 3];
 
     public const CTA_PANEL_CLASS = 'cta-panel';
+    /** Build-owned hooks for a closing panel whose image bleeds to its edges. */
+    public const CTA_PANEL_FLUSH_CLASS = 'cta-panel--flush';
+    public const CTA_PANEL_COPY_CLASS = 'cta-panel__copy';
+    public const CTA_PANEL_MEDIA_CLASS = 'cta-panel__media';
 
     public const FAQ_MIN_ITEMS = 3;
 
@@ -858,14 +862,37 @@ TEXT;
         if ($archetype === 'cta-panel') {
             $panels = 0;
             $buttons = 0;
+            $columns = 0;
+            $startAligned = 0;
             foreach ($document->indices() as $index) {
-                if ($document->name($index) === 'group'
+                $name = $document->name($index);
+                if ($name === 'group'
                     && in_array(self::CTA_PANEL_CLASS, self::classTokens($document, $index), true)) {
                     $panels++;
                 }
-                if ($document->name($index) === 'button') {
+                if ($name === 'button') {
                     $buttons++;
                 }
+                if ($name === 'columns') {
+                    $columns++;
+                }
+                if ($name === 'heading' || $name === 'paragraph') {
+                    $attrs = $document->attrs($index) ?? [];
+                    $legacy = $name === 'heading' ? ($attrs['textAlign'] ?? null) : ($attrs['align'] ?? null);
+                    $textAlign = $attrs['style']['typography']['textAlign'] ?? $legacy;
+                    if ($textAlign !== 'center') {
+                        $startAligned++;
+                    }
+                }
+            }
+            if ($columns === 0 && $startAligned > 0) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel alignment',
+                    ['archetype' => $archetype, 'start_aligned_text_blocks' => 0],
+                    ['start_aligned_text_blocks' => $startAligned],
+                    'safe parseable section was retained; a panel with no image centers its heading and lead line',
+                );
             }
             if ($panels !== 1) {
                 $warnings[] = self::markupWarning(

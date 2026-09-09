@@ -4261,6 +4261,245 @@ final class GeneratedMarkup
         return self::removeSpans($markup, self::outermostRemovalSpans($spans));
     }
 
+    /**
+     * Center the copy and the action of a closing cta-panel that holds no
+     * image. The recipe asks the model to center them in prose only, and a
+     * panel then ships with a centered heading over a start-aligned lead
+     * (portfolio3, lumen3, tbilisi4 on frm_sections). A CSS rule on the
+     * root cannot repair it: the paragraph carries its own `has-text-align-*`
+     * class, and a per-element class beats inherited alignment. A panel with
+     * a columns row keeps the start alignment of its text column.
+     */
+    public static function centerImagelessCtaPanel(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $panel = self::ctaPanelIndex($document);
+        if ($panel === null) {
+            return $markup;
+        }
+        $inside = [];
+        foreach ($document->indices() as $index) {
+            for ($ancestor = $document->parent($index); $ancestor !== null; $ancestor = $document->parent($ancestor)) {
+                if ($ancestor === $panel) {
+                    $inside[] = $index;
+                    break;
+                }
+            }
+        }
+        foreach ($inside as $index) {
+            if ($document->name($index) === 'columns') {
+                return $markup;
+            }
+        }
+        $adjusted = 0;
+        foreach ($inside as $index) {
+            $name = $document->name($index);
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'heading' || $name === 'paragraph') {
+                $style = $attrs['style'] ?? [];
+                $typography = is_array($style) ? ($style['typography'] ?? []) : null;
+                if (!is_array($style) || !is_array($typography)) {
+                    continue;
+                }
+                $legacy = $name === 'heading' ? ($attrs['textAlign'] ?? null) : ($attrs['align'] ?? null);
+                if (($typography['textAlign'] ?? null) === 'center' && ($legacy === null || $legacy === 'center')) {
+                    continue;
+                }
+                $attrs['style']['typography']['textAlign'] = 'center';
+                unset($attrs[$name === 'heading' ? 'textAlign' : 'align']);
+                $document->setAttrs($index, $attrs);
+                self::setOwnTextAlignClass($document, $index, 'center');
+                $adjusted++;
+                continue;
+            }
+            if ($name === 'buttons') {
+                $layout = $attrs['layout'] ?? [];
+                if (!is_array($layout) || ($layout['justifyContent'] ?? null) === 'center') {
+                    continue;
+                }
+                $attrs['layout'] = ['type' => 'flex'] + $layout;
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            }
+        }
+        if ($adjusted === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-copy-centered',
+            'part' => $part,
+            'authored' => $adjusted . ' start-aligned block(s) in a panel with no image',
+            'delivered' => 'centered copy and action',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Put one `has-text-align-<direction>` token on the block's own root tag,
+     * in place of any other direction, so the delivered HTML matches the
+     * attribute before the block fixer re-serializes it.
+     */
+    private static function setOwnTextAlignClass(BlockMarkup $document, int $index, string $direction): void
+    {
+        $own = $document->ownHtml($index);
+        if (preg_match('/<(?:p|h[1-6])\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return;
+        }
+        $opening = $m[0][0];
+        $token = 'has-text-align-' . $direction;
+        if (preg_match('/\sclass="([^"]*)"/', $opening, $c) === 1) {
+            $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $placed = false;
+            $kept = [];
+            foreach ($tokens as $t) {
+                if (preg_match('/^has-text-align-(?:left|center|right)$/', $t) !== 1) {
+                    $kept[] = $t;
+                } elseif (!$placed) {
+                    $kept[] = $token;
+                    $placed = true;
+                }
+            }
+            if (!$placed) {
+                // WP puts the alignment class right after the block class.
+                array_splice($kept, str_starts_with($kept[0] ?? '', 'wp-block-') ? 1 : 0, 0, [$token]);
+            }
+            $clean = str_replace($c[0], ' class="' . implode(' ', $kept) . '"', $opening);
+        } else {
+            $clean = preg_replace('/^<(p|h[1-6])\b/', '<$1 class="' . $token . '"', $opening, 1) ?? $opening;
+        }
+        if ($clean !== $opening) {
+            $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+        }
+    }
+
+    /**
+     * Bleed the image of a closing cta-panel to the panel's edges under every
+     * card construction except `framed`. The panel follows the site's cards:
+     * a framed card sets its media inside the card padding, and every other
+     * construction runs the media to the box edge. The recipe keeps the 60/40
+     * columns row. The build marks the panel and its two columns, and the
+     * theme's `.cta-panel--flush` rules zero the panel padding, stretch the
+     * image column, and move the padding onto the copy column.
+     */
+    public static function flushCtaPanelMedia(string $markup, string $part, string $cardStyle, array &$repairs = []): string
+    {
+        if ($cardStyle === 'framed') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $panel = self::ctaPanelIndex($document);
+        if ($panel === null) {
+            return $markup;
+        }
+        $rows = array_values(array_filter(
+            $document->children($panel),
+            static fn (int $child): bool => $document->name($child) === 'columns',
+        ));
+        if (count($rows) !== 1) {
+            return $markup;
+        }
+        $columns = array_values(array_filter(
+            $document->children($rows[0]),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        if (count($columns) !== 2) {
+            return $markup;
+        }
+        $media = null;
+        $copy = null;
+        foreach ($columns as $column) {
+            $names = array_map(static fn (int $child): string => $document->name($child), $document->children($column));
+            if ($names === ['image']) {
+                $media = $column;
+            } elseif ($names !== [] && array_intersect($names, ['image', 'cover', 'columns', 'gallery', 'media-text']) === []) {
+                $copy = $column;
+            }
+        }
+        if ($media === null || $copy === null) {
+            return $markup;
+        }
+        $added = 0;
+        $hooks = [
+            [$panel, SectionComposition::CTA_PANEL_FLUSH_CLASS],
+            [$copy, SectionComposition::CTA_PANEL_COPY_CLASS],
+            [$media, SectionComposition::CTA_PANEL_MEDIA_CLASS],
+        ];
+        foreach ($hooks as [$index, $token]) {
+            if (self::addOwnClassToken($document, $index, $token)) {
+                $added++;
+            }
+        }
+        if ($added === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-media-flushed',
+            'part' => $part,
+            'authored' => 'an image inset in the panel padding',
+            'delivered' => "the image bleeds to the panel edge under the '{$cardStyle}' card style",
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /** The first group that carries the cta-panel class, or null. */
+    private static function ctaPanelIndex(BlockMarkup $document): ?int
+    {
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'group'
+                && in_array(SectionComposition::CTA_PANEL_CLASS, self::classTokens(
+                    (string) (($document->attrs($index) ?? [])['className'] ?? ''),
+                ), true)
+            ) {
+                return $index;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Add one class token to a block's className attribute and to the class
+     * attribute of its own root tag. Returns false when the block already
+     * carries the token or has no root tag to write on.
+     */
+    private static function addOwnClassToken(BlockMarkup $document, int $index, string $token): bool
+    {
+        $attrs = $document->attrs($index) ?? [];
+        $classes = self::classTokens((string) ($attrs['className'] ?? ''));
+        if (in_array($token, $classes, true)) {
+            return false;
+        }
+        $own = $document->ownHtml($index);
+        if (preg_match('/<[a-z][a-z0-9]*\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return false;
+        }
+        $classes[] = $token;
+        $attrs['className'] = implode(' ', $classes);
+        $document->setAttrs($index, $attrs);
+        $opening = $m[0][0];
+        if (preg_match('/\sclass="([^"]*)"/', $opening, $c) === 1) {
+            $tokens = self::classTokens($c[1]);
+            if (!in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+            $clean = str_replace($c[0], ' class="' . implode(' ', $tokens) . '"', $opening);
+        } else {
+            $clean = preg_replace('/^<([a-z][a-z0-9]*)\b/', '<$1 class="' . $token . '"', $opening, 1) ?? $opening;
+        }
+        if ($clean !== $opening) {
+            $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+        }
+        return true;
+    }
+
     public static function stripStepPlatePaint(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);

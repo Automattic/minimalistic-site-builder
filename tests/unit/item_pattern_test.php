@@ -493,6 +493,94 @@ test('a closing cta-panel section keeps its one panel and loses every sibling (f
     assert_eq([], $repairs);
 });
 
+test('a cta-panel with no image centers its copy and action; a panel with a text column keeps its start edge', function (): void {
+    $section = static fn (string $inner): string => '<!-- wp:group {"anchor":"contacto","className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div id="contacto" class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+    $panel = static fn (string $inner): string => '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","align":"wide","className":"cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide cta-panel has-base-color has-contrast-background-color has-text-color has-background">' . $inner . '</div><!-- /wp:group -->';
+    $heading = '<!-- wp:heading {"fontFamily":"heading","style":{"typography":{"textAlign":"center"}}} --><h2 class="wp-block-heading has-text-align-center has-heading-font-family">Trabajar juntos</h2><!-- /wp:heading -->';
+    $lead = '<!-- wp:paragraph {"align":"left","fontSize":"lead","style":{"typography":{"textAlign":"left"}}} --><p class="has-text-align-left has-lead-font-size">Recibo consultas por encargos editoriales.</p><!-- /wp:paragraph -->';
+    $bare = '<!-- wp:paragraph --><p>Cada pedido se responde con una selección de material.</p><!-- /wp:paragraph -->';
+    $buttons = '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#contacto">Escribir</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
+
+    $repairs = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::centerImagelessCtaPanel($section($panel($heading . $lead . $bare . $buttons)), 'page-home--contacto', $repairs);
+    assert_eq('cta-panel-copy-centered', $repairs[0]['code'] ?? null);
+    assert_contains('3 start-aligned block(s)', $repairs[0]['authored']);
+    assert_contains($heading, $out, 'the centered heading is untouched');
+    assert_contains('<!-- wp:paragraph {"fontSize":"lead","style":{"typography":{"textAlign":"center"}}} --><p class="has-text-align-center has-lead-font-size">', $out, 'the lead loses align:left and its class flips: ' . $out);
+    assert_contains('<!-- wp:paragraph {"style":{"typography":{"textAlign":"center"}}} --><p class="has-text-align-center">', $out, 'a bare paragraph gains the class: ' . $out);
+    assert_contains('<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} -->', $out);
+    assert_true(!str_contains($out, 'has-text-align-left'));
+    assert_true(\Automattic\SiteBuild\BlockMarkup::parse($out)->unclosedIndices() === []);
+    assert_eq([], \Automattic\SiteBuild\SectionComposition::markupWarnings($out, 'cta-panel', 'page-home--contacto', null, false));
+
+    $fixedPoint = [];
+    assert_eq($out, \Automattic\SiteBuild\Units\GeneratedMarkup::centerImagelessCtaPanel($out, 'page-home--contacto', $fixedPoint));
+    assert_eq([], $fixedPoint);
+
+    $alignmentWarnings = array_values(array_filter(
+        \Automattic\SiteBuild\SectionComposition::markupWarnings($section($panel($heading . $lead . $buttons)), 'cta-panel', 'page-home--contacto', null, false),
+        static fn (string $warning): bool => str_contains($warning, 'cta panel alignment'),
+    ));
+    assert_eq(1, count($alignmentWarnings), 'the catalog reports the start-aligned lead when no pass repaired it');
+
+    $withImage = $panel('<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column" style="flex-basis:60%">' . $heading . $lead . $buttons . '</div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column" style="flex-basis:40%"><!-- wp:image {"className":"card-media"} --><figure class="wp-block-image card-media"><img src="a.jpg" alt=""/></figure><!-- /wp:image --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->');
+    $repairs = [];
+    assert_eq($section($withImage), \Automattic\SiteBuild\Units\GeneratedMarkup::centerImagelessCtaPanel($section($withImage), 'page-home--contacto', $repairs));
+    assert_eq([], $repairs);
+    assert_eq([], array_values(array_filter(
+        \Automattic\SiteBuild\SectionComposition::markupWarnings($section($withImage), 'cta-panel', 'page-home--contacto', null, false),
+        static fn (string $warning): bool => str_contains($warning, 'cta panel alignment'),
+    )));
+});
+
+test('a cta-panel with an image bleeds it to the panel edge under every card style except framed', function (): void {
+    $section = static fn (string $inner): string => '<!-- wp:group {"anchor":"trial-cta","className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div id="trial-cta" class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+    $copy = '<!-- wp:heading --><h2 class="wp-block-heading">Ready to simplify your jobsite?</h2><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Start free trial</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
+    $image = '<!-- wp:image {"className":"card-media"} --><figure class="wp-block-image card-media"><img src="crew.jpg" alt=""/></figure><!-- /wp:image -->';
+    $panel = static fn (string $inner, string $class = 'cta-panel reveal-fade'): string => '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","align":"wide","className":"' . $class . '","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl","left":"var:preset|spacing|lg","right":"var:preset|spacing|lg"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide ' . $class . ' has-base-color has-contrast-background-color has-text-color has-background" style="padding-top:var(--wp--preset--spacing--xl);padding-right:var(--wp--preset--spacing--lg);padding-bottom:var(--wp--preset--spacing--xl);padding-left:var(--wp--preset--spacing--lg)">' . $inner . '</div><!-- /wp:group -->';
+    $row = '<!-- wp:columns {"verticalAlignment":"center","align":"wide"} --><div class="wp-block-columns alignwide are-vertically-aligned-center">'
+        . '<!-- wp:column {"verticalAlignment":"center","width":"60%"} --><div class="wp-block-column is-vertically-aligned-center" style="flex-basis:60%">' . $copy . '</div><!-- /wp:column -->'
+        . '<!-- wp:column {"verticalAlignment":"center","width":"40%"} --><div class="wp-block-column is-vertically-aligned-center" style="flex-basis:40%">' . $image . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+
+    foreach (['borderless', 'flush', 'overlap'] as $style) {
+        $repairs = [];
+        $out = \Automattic\SiteBuild\Units\GeneratedMarkup::flushCtaPanelMedia($section($panel($row)), 'page-home--trial-cta', $style, $repairs);
+        assert_eq('cta-panel-media-flushed', $repairs[0]['code'] ?? null, $style);
+        assert_contains("under the '{$style}' card style", $repairs[0]['delivered']);
+        assert_contains('"className":"cta-panel reveal-fade cta-panel\\u002d\\u002dflush"', $out, 'the panel attribute gains the hook (the serializer escapes the dashes): ' . $out);
+        assert_contains('class="wp-block-group alignwide cta-panel reveal-fade has-base-color has-contrast-background-color has-text-color has-background cta-panel--flush"', $out, 'the panel tag gains the hook');
+        assert_contains('<!-- wp:column {"verticalAlignment":"center","width":"60%","className":"cta-panel__copy"} --><div class="wp-block-column is-vertically-aligned-center cta-panel__copy"', $out, 'the copy column: ' . $out);
+        assert_contains('<!-- wp:column {"verticalAlignment":"center","width":"40%","className":"cta-panel__media"} --><div class="wp-block-column is-vertically-aligned-center cta-panel__media"', $out, 'the image column');
+        assert_contains('padding-top:var(--wp--preset--spacing--xl)', $out, 'the authored padding stays; the theme rule neutralizes it');
+        assert_true(\Automattic\SiteBuild\BlockMarkup::parse($out)->unclosedIndices() === []);
+
+        $fixedPoint = [];
+        assert_eq($out, \Automattic\SiteBuild\Units\GeneratedMarkup::flushCtaPanelMedia($out, 'page-home--trial-cta', $style, $fixedPoint));
+        assert_eq([], $fixedPoint);
+    }
+
+    $repairs = [];
+    assert_eq($section($panel($row)), \Automattic\SiteBuild\Units\GeneratedMarkup::flushCtaPanelMedia($section($panel($row)), 'page-home--trial-cta', 'framed', $repairs), 'a framed site keeps the inset image');
+    assert_eq([], $repairs);
+
+    $stack = $panel('<!-- wp:heading --><h2 class="wp-block-heading">Trabajar juntos</h2><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Escribir</a></div><!-- /wp:button --></div><!-- /wp:buttons -->');
+    assert_eq($section($stack), \Automattic\SiteBuild\Units\GeneratedMarkup::flushCtaPanelMedia($section($stack), 'page-home--trial-cta', 'flush', $repairs), 'a panel with no image has nothing to bleed');
+
+    $twoImages = str_replace($copy, $image . $copy, $row);
+    assert_eq($section($panel($twoImages)), \Automattic\SiteBuild\Units\GeneratedMarkup::flushCtaPanelMedia($section($panel($twoImages)), 'page-home--trial-cta', 'flush', $repairs), 'an image inside the copy column is not the recipe row');
+    assert_eq([], $repairs);
+});
+
 test('card recipes keep cards under a ruled site pattern', function (): void {
     foreach (['bento-grid', 'pricing-tiers'] as $archetype) {
         $pages = [['slug' => 'home', 'sections' => [[

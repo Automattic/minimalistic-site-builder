@@ -12,9 +12,11 @@ The band uses its planned base or tinted surface. The panel carries the contrast
 - Let the theme set the panel radius and clip its contents.
 - Copy budget: Put one heading, one lead line, and exactly one `wp:button` in the panel.
 - Use the planned `primary_action` for the button's label and destination.
-- Center the short text and action if the panel has no image.
+- If the panel has no image, set `"style":{"typography":{"textAlign":"center"}}` on the heading and on the lead line.
+- If the panel has no image, set `"layout":{"type":"flex","justifyContent":"center"}` on the `wp:buttons` row.
 - Media: If the plan supplies an image, use a 60/40 columns row with text first and the image second.
 - Mark that image with `"className":"card-media"`.
+- Under every card style except `framed`, the build bleeds that image to the panel's edges and moves the panel padding onto the text column. Keep the columns row and the panel padding as written.
 - Identity: Use the assigned root marker on the top-level group.
 
 Keep all section content inside the panel.

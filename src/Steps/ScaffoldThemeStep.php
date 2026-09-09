@@ -945,6 +945,74 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Flush panel media: the closing cta-panel follows the site's card
+           construction. Under every card style except `framed` the build
+           marks a panel that holds a copy column and an image column with
+           `cta-panel--flush`, `cta-panel__copy`, and `cta-panel__media`. The
+           image then bleeds to the panel's top, bottom, and end edges, and
+           only the copy column carries the panel's padding. The zeroed panel
+           padding must beat the authored inline padding, exactly like
+           .card-flush. */
+        .wp-block-group.cta-panel.cta-panel--flush {
+            padding: 0 !important;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns {
+            max-width: none;
+            align-items: stretch;
+            gap: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .wp-block-column {
+            align-self: stretch;
+            min-width: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: var(--wp--preset--spacing--xl) var(--wp--preset--spacing--lg);
+        }
+        /* The copy column sets the row height. The image covers its column
+           from an absolute box, so a tall source image cannot inflate the
+           panel; the floor keeps a short message from squeezing it to a strip. */
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media {
+            position: relative;
+            min-height: 18rem;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media > figure.wp-block-image {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: auto;
+            object-fit: cover;
+            border-radius: 0 !important;
+        }
+        /* Core stacks the columns below 782px: the image then spans the panel
+           width at the ordinary card ratio, above or below the copy. */
+        @media (max-width: 781px) {
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media {
+                min-height: 0;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media > figure.wp-block-image {
+                position: static;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {
+                aspect-ratio: 3 / 2;
+                height: auto;
+            }
+        }
+        @media (max-width: 600px) {
+            .wp-block-group.cta-panel.cta-panel--flush {
+                padding-inline: 0 !important;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {
+                padding-inline: 1.25rem;
+            }
+        }
+
         CSS;
 
     private const README = <<<TXT

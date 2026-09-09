@@ -218,6 +218,8 @@ final class SectionUnit extends AbstractPageSectionUnit
         array_push($warnings, ...$band->warnings);
         if ($archetype === 'cta-panel') {
             $markup = GeneratedMarkup::stripCtaPanelSiblings($markup, $this->key($input), $repairs, $warnings);
+            $markup = GeneratedMarkup::centerImagelessCtaPanel($markup, $this->key($input), $repairs);
+            $markup = GeneratedMarkup::flushCtaPanelMedia($markup, $this->key($input), $cardStyle, $repairs);
         }
         // Advisory only: the catalog reports a section that ignored its
         // assignment and the build delivers the safe parseable markup anyway.

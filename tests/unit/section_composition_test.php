@@ -604,8 +604,8 @@ test('the cta-panel archetype checks one contained panel and exactly one action 
     $button = '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/start/">Start</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
     $panel = static fn (string $inner, string $class = 'cta-panel'): string => '<!-- wp:group {"className":"' . $class . '","align":"wide","backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group alignwide ' . $class . ' has-contrast-background-color has-base-color has-text-color has-background">'
-        . '<!-- wp:heading --><h2 class="wp-block-heading">Start tonight</h2><!-- /wp:heading -->'
-        . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
+        . '<!-- wp:heading {"style":{"typography":{"textAlign":"center"}}} --><h2 class="wp-block-heading has-text-align-center">Start tonight</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"style":{"typography":{"textAlign":"center"}}} --><p class="has-text-align-center">One line.</p><!-- /wp:paragraph -->' . $inner . '</div><!-- /wp:group -->';
     $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
 
@@ -623,6 +623,11 @@ test('the cta-panel archetype checks one contained panel and exactly one action 
 
     $noButton = $band($panel(''));
     assert_contains('"buttons":0', implode("\n", SectionComposition::markupWarnings($noButton, 'cta-panel', 'x')));
+
+    $startAligned = str_replace('<p class="has-text-align-center">', '<p class="has-text-align-left">', str_replace('"textAlign":"center"}}} --><p', '"textAlign":"left"}}} --><p', $band($panel($button))));
+    $joined = implode("\n", SectionComposition::markupWarnings($startAligned, 'cta-panel', 'page-home--closing'));
+    assert_contains('cta panel alignment', $joined, 'a panel with no image reports a start-aligned lead');
+    assert_contains('"start_aligned_text_blocks":1', $joined);
 
     $other = str_replace('section-composition--cta-panel', 'section-composition--centered-stack', $noPanel);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'centered-stack', 'x')), 'cta panel'));
