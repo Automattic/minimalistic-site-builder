@@ -74,3 +74,15 @@ test('the treatment kit declares its output path', function () {
     $step = new \Automattic\SiteBuild\Steps\FinalizeThemeStep();
     assert_true(in_array('theme/assets/treatment/*', $step->declaration()->writes, true));
 });
+
+test('a resumed title treatment uses sentence case and records one warning', function () {
+    with_project('retired-type', function ($project) {
+        $project->writeJson('designDirection.json', ['type_treatment' => 'title']);
+        assert_eq('sentence', \Automattic\SiteBuild\Steps\DesignDirectionStep::typeTreatmentFor($project));
+        assert_eq('sentence', \Automattic\SiteBuild\Steps\DesignDirectionStep::typeTreatmentFor($project));
+        $warnings = $project->readJson('warnings.json')['design-direction'];
+        assert_eq(1, count($warnings));
+        assert_contains('; delivered "sentence";', $warnings[0]);
+    });
+    assert_eq('', \Automattic\SiteBuild\FontShortlist::productWeightSentence('grotesque', 'pop'));
+});

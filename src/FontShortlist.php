@@ -172,7 +172,7 @@ final class FontShortlist
     }
 
     /** These traditions use medium display weights for grotesque and geometric type. */
-    public const PRODUCT_REGISTERS = ['modernist', 'technical', 'pop', 'playful', 'utilitarian'];
+    public const PRODUCT_REGISTERS = ['modernist', 'technical', 'playful', 'utilitarian'];
     public const PRODUCT_TYPE_REGISTERS = ['grotesque', 'geometric'];
 
     public static function productWeightSentence(string $typeRegister, string $register): string

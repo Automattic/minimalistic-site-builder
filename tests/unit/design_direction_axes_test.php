@@ -227,7 +227,7 @@ test('the retired title treatment falls to sentence with a warning (frm PR-5p)',
     );
     assert_eq('sentence', $direction['type_treatment']);
     $text = implode("\n", $warnings);
-    assert_contains('field type_treatment authored "title" delivered "sentence"', $text);
+    assert_contains('field type_treatment authored "title"; delivered "sentence"', $text);
     assert_contains('the title treatment is retired', $text);
     assert_true(!str_contains($text, 'invalid heading treatment'), 'the retirement speaks for itself; the generic fallback warning stays quiet');
 
