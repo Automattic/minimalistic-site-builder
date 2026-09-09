@@ -641,6 +641,38 @@ test('finalize-theme ships the device kit and prunes it for none', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme ships the statement-lines register for caps and prunes it otherwise (BIGR-1002)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'caps-tight']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/type-treatment/type-treatment.css');
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
+    assert_contains('text-transform: none;', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-type-treatment', get_theme_file_uri('assets/type-treatment/type-treatment.css'), "
+            . "array('forno-vero-style'), \$ver);",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/type-treatment/type-treatment.css'));", $php);
+
+    // lowercase keeps its craft voice, so the kit is pruned again.
+    $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'lowercase']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(
+        !$project->exists('theme/assets/type-treatment/type-treatment.css'),
+        'stale statement-lines register pruned',
+    );
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-type-treatment'), 'stale register enqueue pruned');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme ships surface and device kits independently', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');

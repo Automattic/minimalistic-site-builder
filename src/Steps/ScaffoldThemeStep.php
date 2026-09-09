@@ -902,15 +902,28 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* One axis: the hairline runs the full width of the group, so a
+           centered line above it reads as a second axis. The two-class
+           selector outranks core's `has-text-align-center`, so a centered
+           heading from the generator cannot split the section. */
+        .section-composition--statement-lines :is(.wp-block-heading, p) {
+            text-align: start;
+        }
+        /* The statement ledger carries its own register. The line sits one
+           ramp step under the section title, so the title still leads, and
+           the size follows the group's own width, so a long statement holds
+           the one line the archetype promises. The case comes from the
+           type-treatment kit, which drops the site's caps here. */
         .section-composition--statement-lines .wp-block-group.statement-lines {
             gap: 0;
+            container-type: inline-size;
         }
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
             margin: 0;
             padding-block: var(--wp--preset--spacing--md, 1.5rem);
             border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-            font-size: var(--wp--preset--font-size--section-title);
-            line-height: 1.1;
+            font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 4.6cqi);
+            line-height: 1.15;
             text-wrap: balance;
         }
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
@@ -919,7 +932,7 @@ final class ScaffoldThemeStep implements Step
         @media (max-width: 600px) {
 
             .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-                font-size: min(var(--wp--preset--font-size--section-title), 8vw);
+                font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 7vw);
             }
         }
 
