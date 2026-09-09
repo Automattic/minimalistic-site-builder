@@ -48,7 +48,11 @@ test('site-spec drops a host-supplied visual_vibe so a host mood never reaches a
     assert_eq(0, $llm->completeJsonCalls);
     assert_true(!array_key_exists('visual_vibe', $spec), 'the retired mood field is dropped, not blanked');
     $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
-    assert_contains('visual_vibe', $joined, 'the drop is recorded as a durable warning');
+    assert_contains(
+        "file='siteSpec.json'; field='visual_vibe'; authored value=\"sophisticated\"; delivered removed; "
+            . 'disposition=removed retired field',
+        $joined,
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -61,6 +65,12 @@ test('site-spec drops a generated visual_vibe and never asks the model for one',
 
     assert_true(!str_contains($llm->calls[0]['prompt'], 'visual_vibe'), 'the spec prompt no longer names the field');
     assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains(
+        "file='siteSpec.json'; field='visual_vibe'; authored value=\"warm and rustic\"; delivered removed; "
+            . 'disposition=removed retired field',
+        $joined,
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

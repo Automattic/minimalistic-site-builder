@@ -875,6 +875,27 @@ test('collect-images appends a site-logo spec for a business site', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images excludes a retired visual_vibe from the logo subject', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name'         => 'Hearth & Crumb',
+        'site_type'    => 'business storefront',
+        'area'         => 'bakery',
+        'visual_vibe'  => 'warm and rustic',
+        'persona_name' => '',
+    ]);
+
+    (new CollectImagesStep())->run($project);
+
+    $subjects = array_column($project->readJson('images.json'), 'subject', 'filename');
+    $subject = $subjects['site-logo.png'];
+    assert_contains('bakery', $subject);
+    assert_true(!str_contains($subject, 'warm and rustic'), 'the retired field value stays out of the subject');
+    assert_true(!str_contains($subject, 'mood'), 'the subject has no mood suffix');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images appends a site-logo for every non-personal site, whatever its kind', function () {
     foreach ([
         ['name' => 'Stillrange', 'site_type' => 'photography portfolio', 'area' => 'landscape photography', 'persona_name' => ''],

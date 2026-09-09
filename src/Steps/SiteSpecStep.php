@@ -12,6 +12,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 use Automattic\SiteBuild\WritingDirection;
 
 /**
@@ -20,7 +21,7 @@ use Automattic\SiteBuild\WritingDirection;
  *
  * Input:  meta.json (the user prompt, seeded by the runner)
  * Output: siteSpec.json — FACTUAL site information only (name, slug, title,
- *         type, topic, area, audience, a short visual vibe, required sections),
+ *         type, topic, area, audience, required sections),
  *         plus any concrete facts the user stated. No design decisions
  *         (colors/typography/layout) live here — those are made later, inline,
  *         by the theme-json and landing-page steps.
@@ -462,8 +463,10 @@ final class SiteSpecStep implements Step
         // prompt no longer asks for the field, and a host that still sends
         // it has it dropped here so it never reaches a design prompt.
         if (array_key_exists('visual_vibe', $spec)) {
+            $warnings[] = "file='siteSpec.json'; field='visual_vibe'; authored value="
+                . Warnings::value($spec['visual_vibe']) . '; delivered removed; '
+                . 'disposition=removed retired field; the design-direction step decides the mood';
             unset($spec['visual_vibe']);
-            $warnings[] = 'site spec carried "visual_vibe"; dropped — the design-direction step decides the mood';
         }
 
         // Sections must be a list so the page-plan step can build on it.
