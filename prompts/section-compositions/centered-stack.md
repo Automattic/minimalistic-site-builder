@@ -1,8 +1,8 @@
 ### centered-stack
 
 Build one constrained column and let type scale and whitespace carry it. This
-can be a quiet pause or an emphatic typographic beat. A divider or motif is
-welcome when it belongs to the site's visual language; it is not required.
+can be a quiet pause or an emphatic typographic beat. Do not add a divider or motif
+just to decorate the stack or close its heading.
 
 - Structure: one constrained column of headings and paragraphs. The theme
   centers the whole band through the root marker class, so author every

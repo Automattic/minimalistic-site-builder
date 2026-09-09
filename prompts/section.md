@@ -23,7 +23,7 @@ Rules:
 - ALL text sizing comes from the fontSizes presets via the "fontSize" attribute. NEVER hardcode a font size — no raw values or `clamp()` in `"style":{"typography":{"fontSize":...}}` and no hand-written `font-size:` inline styles. The scale (including the masthead-scale `display` step) already lives in theme.json; if no preset genuinely fits a rare case, reference a preset variable through the block attribute (`"style":{"typography":{"fontSize":"var:preset|font-size|<slug>"}}`) — never a raw value.
 - Paragraph scale discipline — each step of the scale has a role; use the right one:
     running copy (any paragraph, list, or card text that wraps past ~2 lines) = the `body` step. That's the theme default, so usually NO "fontSize" attribute at all. Never push multi-line reading copy up the scale for emphasis, and never shrink it to `caption`.
-    `caption` = genuine metadata only — labels, eyebrows, gallery captions, folio lines. Not sentences the visitor is meant to read.
+    `caption` = genuine metadata only — dates, credits or gallery captions, not eyebrows or decorative folios. Not sentences the visitor is meant to read.
     `lead` = the ONE standout line a section gets (if it has one): a single-sentence intro under the section title. One per section, kept short.
   The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
     Unbreakable contact tokens — email addresses, long URLs, and phone numbers that should remain intact — never take a display or heading scale, in a paragraph OR a heading: a long token either overflows its column or breaks inside the address, domain, or path, and both read as broken. A contact email is a `lead`-at-most mailto link or a button labeled with words, never the address as display type.
@@ -54,13 +54,13 @@ Section discipline:
 - Be bold with layout WITHIN your archetype (see COMPOSITION in the final section brief): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
 Text orientation (all sections):
-- Keep all headline and body copy horizontal. NEVER rotate reading text — no `writing-mode: vertical-rl`/`vertical-lr`, no `transform: rotate` on headings or paragraphs. Vertical orientation is allowed ONLY for a tiny decorative label or eyebrow (e.g. a frame number or single short word), never for a heading or a sentence.
+- Keep all headline and body copy horizontal. NEVER rotate reading text — no `writing-mode: vertical-rl`/`vertical-lr`, no `transform: rotate` on headings or paragraphs. Do not use rotated labels or frame numbers to evade the eyebrow and decorative-numbering bans.
 
 Visual richness — build atmosphere with tokens, not photo clutter and not `<style>` tags:
 - Use the optional theme.json gradient preset (`"gradient":"<slug>"` on a cover/group background), color blocks, typographic scale, and spacing rhythm via the `"style":{"spacing":{...}}` attribute on group/heading wrappers. Never add a shadow preset: the committed **Depth** fact is already wired once onto card shells, contained images, contained covers, and media-text surfaces by the build.
-- **Optional orientation labels:** a short category, date or other useful label may precede a heading when it serves the content and concept. Avoid repeating a decorative kicker above every heading or duplicating information already visible nearby.
-- **Numbering:** use numbers for meaningful sequences or identifiers and supplied facts. Do not invent statistics or add an index solely to decorate every band.
-- **Separators and borders:** use them when they group information, establish a deliberate graphic language or clarify a transition. Whitespace and typography are equally valid. Avoid adding a line automatically after every heading or paragraph.
+- **Eyebrows are banned.** Never put a kicker, small uppercase label, caption line or minor heading above a heading, including in heroes and repeated items. Put useful metadata below the heading or in body copy.
+- **Decorative numbering is banned.** No invented "01 / 02 / 03" section, card or step labels, folio numbers or identifier columns. Preserve real numeric content (prices, dates, addresses) and explicitly requested visible numbering. A process alone is not permission to add painted numerals.
+- **Lines and borders need a structural purpose.** Use whitespace, typography and grouping first. Keep functional control boundaries, table/index row divisions and required component frames. No rules under headings, between ordinary paragraphs or at section seams; no extra boxes around every content group. Matching a style is not sufficient justification.
 
 {{card_instructions}}
 

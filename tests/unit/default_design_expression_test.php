@@ -53,6 +53,9 @@ test('default CSS author receives inner-page and shared markup and preserves saf
         foreach (['Shared masthead', 'Home content', 'Inner-page content'] as $content) {
             assert_contains($content, $llm->calls[0]['prompt']);
         }
+        foreach (['Eyebrows are banned', 'Decorative numbering is banned', 'Lines and borders need a structural purpose'] as $rule) {
+            assert_contains($rule, $llm->calls[0]['prompt']);
+        }
         $first = $project->readText('theme/style.css');
         assert_contains('.design-home {display:grid;}', $first);
         assert_contains('.design-about {padding:2rem;}', $first);
@@ -82,6 +85,11 @@ test('default multipage sections brief every opening without fixed recipes and r
         $project->writeJson('pages.json', $plan);
         $requests = (new \Automattic\SiteBuild\Steps\SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->requests($project);
         assert_eq(8, count($requests));
+        foreach ($requests as $request) {
+            foreach (['Eyebrows are banned', 'Decorative numbering is banned', 'Lines and borders need a structural purpose'] as $rule) {
+                assert_contains($rule, sections_request_text($request));
+            }
+        }
         foreach (['home', 'about', 'contact'] as $page) {
             $prompt = sections_request_text($requests['page-' . $page . '--hero']);
             assert_contains('at least one image', $prompt);
