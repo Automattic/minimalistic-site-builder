@@ -96,7 +96,7 @@ The machine-readable input contract is
 complete payload at [`examples/site-spec.json`](../examples/site-spec.json).
 Both ship with the package and are available programmatically through
 `Package::siteSpecSchemaPath()` and `Package::siteSpecExamplePath()`. The schema
-requires all 16 canonical fixed fields, permits additional grounded factual
+requires every canonical fixed field, permits additional grounded factual
 properties at the top level, and defines strict recursive page objects. It
 describes the recommended input and normalized artifact; intake remains
 repair-oriented rather than adding a fatal schema-validation boundary.

@@ -573,7 +573,7 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
-    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'visual_vibe' => 'warm and rustic']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'topic' => 'demo']);
     seed_test_design_direction($project);
 
     $llm = new FakeLlm();

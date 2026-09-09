@@ -134,10 +134,33 @@ if (!function_exists('get_option')) {
     {
         return $GLOBALS['wp_options'][$key] ?? $default;
     }
+    // Core routes every write through sanitize_option(), which esc_html()s
+    // these two: the stored form is not the string that was handed in, and
+    // anything comparing the two has to know it.
     function update_option(string $key, $value): bool
     {
+        if ('blogname' === $key || 'blogdescription' === $key) {
+            $value = esc_html((string) $value);
+        }
         $GLOBALS['wp_options'][$key] = $value;
         return true;
+    }
+    // Mirrors _wp_specialchars($text, ENT_QUOTES), which does NOT double
+    // encode: an entity the value already carries is left alone, so storing a
+    // stored value again is a no-op.
+    function esc_html(string $text): string
+    {
+        $parts = preg_split(
+            '/(&(?:#(?:\d+|x[0-9a-f]+)|[a-z0-9]+);)/i',
+            $text,
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE
+        );
+        $out = '';
+        foreach (($parts ?: []) as $i => $part) {
+            $out .= 1 === $i % 2 ? $part : htmlspecialchars($part, ENT_QUOTES, 'UTF-8');
+        }
+        return $out;
     }
     function delete_option(string $key): bool
     {
@@ -308,6 +331,11 @@ if (!function_exists('get_option')) {
     {
         unset($GLOBALS['wp_attachments'][$id]);
         return true;
+    }
+    // Core strips tags and folds every whitespace run into one space.
+    function sanitize_text_field(string $value): string
+    {
+        return trim((string) preg_replace('/\s+/', ' ', strip_tags($value)));
     }
 }
 
@@ -1136,5 +1164,154 @@ test('generated seeder removes media sources on a foreign host like the intake s
     $cover = $sanitize($corpus[0]);
     assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $cover, 'seeder drops the JSON key with its comma');
     assert_contains('alt="Oven"', $cover, 'seeder keeps the element and its alt');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the seeder applies the build\'s site description and hands the tagline back', function () {
+    $slug = 'site-description';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    assert_eq(
+        ['description' => 'Artisan bread.'],
+        $project->readJson(ApplyIdentityStep::SITE_FILE),
+        'apply-identity ships the description beside the plugin that reads it',
+    );
+    assert_contains(
+        "__DIR__ . '/site.json'",
+        $project->readText(ScaffoldPluginStep::MAIN_FILE),
+        'the seeder reads the file apply-identity writes',
+    );
+
+    // An apostrophe and an ampersand are ordinary in a one-line description,
+    // and this option is esc_html()'d on the way in — so neither side of the
+    // round trip is the string the build shipped.
+    $project->writeJson(ApplyIdentityStep::SITE_FILE, ['description' => "Baker's corner & bakehouse"]);
+
+    wp_stub_reset();
+    update_option('blogdescription', "Miguel's own words");
+    $owner = get_option('blogdescription');
+    assert_eq('Miguel&#039;s own words', $owner, 'the stub stores what core stores');
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    // Jetpack builds the front page's og:description from this option and from
+    // nothing else, so an unset one is a shared link with no description.
+    assert_eq('Baker&#039;s corner &amp; bakehouse', get_option('blogdescription'));
+    $state = get_option(ApplyIdentityStep::identifierPrefix($slug) . '_content_state');
+    assert_eq($owner, $state['blogdescription'], 'the tagline it replaced is recorded as stored');
+
+    (content_fn($slug, 'deactivate'))();
+    assert_eq($owner, get_option('blogdescription'), 'the tagline comes back exactly, not re-escaped');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('deactivation keeps a tagline the owner wrote after activation', function () {
+    $slug = 'site-description-kept';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+    update_option('blogdescription', 'Bread, and only bread');
+
+    (content_fn($slug, 'deactivate'))();
+
+    assert_eq('Bread, and only bread', get_option('blogdescription'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a build that shipped no description leaves the tagline untouched', function () {
+    $slug = 'site-description-absent';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    // A composition that never ran apply-identity against a spec with any
+    // factual field — and the wpcom path that hands the seeder a stub spec.
+    unlink($project->path(ApplyIdentityStep::SITE_FILE));
+
+    wp_stub_reset();
+    update_option('blogdescription', 'Just another WordPress site');
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    assert_eq('Just another WordPress site', get_option('blogdescription'));
+    $state = get_option(ApplyIdentityStep::identifierPrefix($slug) . '_content_state');
+    assert_true(!isset($state['blogdescription']), 'nothing to record');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('every seeded page carries its own first image as the card thumbnail', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'card-thumbnail';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0],
+        ['slug' => 'lessons', 'title' => 'Lessons', 'front' => false, 'menu_order' => 10],
+        ['slug' => 'contact', 'title' => 'Contact', 'front' => false, 'menu_order' => 20],
+    ]]);
+    // Two images come before the photograph and both must lose: the mark,
+    // because a logo is not a picture of the page, and the drawn ornament,
+    // because .png is this pipeline's flourish extension and a wheat sprig
+    // makes the worst possible card.
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/site-logo.png" alt=""/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/wheat-sprig.png" alt=""/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero.jpg" alt="Dawn"/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/second.jpg" alt="Loaves"/></figure><!-- /wp:image -->',
+    );
+    // What a build with images actually delivers: generate-images has already
+    // rewritten the assembled plugin pages to served URLs, under whichever
+    // slug the build workspace used.
+    $project->writeText(
+        'plugin/pages/lessons.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="/wp-content/themes/build-9f2c/assets/second.jpg" alt="Loaves"/></figure><!-- /wp:image -->',
+    );
+    // A page with nothing but a flourish has no photograph to show.
+    $project->writeText(
+        'plugin/pages/contact.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/wheat-sprig.png" alt=""/></figure><!-- /wp:image -->',
+    );
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Mark', 'role' => 'site-logo'],
+        ['filename' => 'wheat-sprig.png', 'title' => 'Sprig'],
+        ['filename' => 'hero.jpg', 'title' => 'Hero'],
+        ['filename' => 'second.jpg', 'title' => 'Second'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    foreach ([
+        'site-logo.png' => 'PNG',
+        'wheat-sprig.png' => 'PNGSPRIG',
+        'hero.jpg' => 'JPEGONE',
+        'second.jpg' => 'JPEGTWO',
+    ] as $file => $bytes) {
+        file_put_contents($project->pluginPath('images/' . $file), $bytes);
+    }
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    $attachments = [];
+    foreach ($GLOBALS['wp_attachments'] as $id => $attachment) {
+        $attachments[(string) $attachment['post_title']] = $id;
+    }
+    $thumbnails = [];
+    $markers = [];
+    foreach ($GLOBALS['wp_posts'] as $post) {
+        if (($post['post_type'] ?? '') !== 'page') {
+            continue;
+        }
+        $thumbnails[(string) $post['post_name']] = (int) ($post['meta_input']['_thumbnail_id'] ?? 0);
+        $markers[(string) $post['post_name']] = (string) ($post['meta_input']['_wpcom_ai_generated_post'] ?? '');
+    }
+
+    assert_eq($attachments['Hero'], $thumbnails['home'], "the home page's card image is its first photo, not the mark or the ornament");
+    assert_eq($attachments['Second'], $thumbnails['lessons'], 'a page whose images were already rewritten to served URLs still gets one');
+    assert_eq(0, $thumbnails['contact'], 'a page with no photograph gets no thumbnail');
+    assert_eq(['home' => '1', 'lessons' => '1', 'contact' => '1'], $markers, 'the seeded marker still travels with every page');
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });

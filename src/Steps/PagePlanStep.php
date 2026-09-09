@@ -380,11 +380,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $projection = self::projectionFor($project);
 
+        // Keep the original bytes for the footer hash. Filter only the prompt context.
         $siteSpec = $project->readText('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
-            'site_spec'        => $siteSpec,
+            'site_spec'        => SiteSpecStep::promptText($project),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => $designDirection,
             'item_pattern'     => DesignDirectionStep::itemPatternFor($project),

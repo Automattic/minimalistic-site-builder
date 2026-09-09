@@ -12,6 +12,25 @@ use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
+test('sections excludes a retired spec mood on resume from all cache layers', function () {
+    [$project, $tmp] = sections_fixture();
+    try {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo', 'visual_vibe' => 'sophisticated']);
+        $step = new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+        $requests = $step->requests($project);
+
+        assert_eq(4, count($requests));
+        foreach ($requests as $request) {
+            $prompt = sections_request_text($request);
+            assert_true(!str_contains($prompt, 'visual_vibe'));
+            assert_true(!str_contains($prompt, 'sophisticated'));
+            assert_contains('Demo', $prompt);
+        }
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 /**
  * Unit tests for SectionsStep: it fires one request per part (header, footer,
  * each PAGE's sections), validates the markup, and writes the part files.
