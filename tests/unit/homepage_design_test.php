@@ -8,6 +8,28 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\HomepageDesignStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('homepage-design excludes a retired spec mood on resume', function () {
+    [$project, $llm, $tmp] = homepage_fixture();
+    try {
+        $spec = $project->readJson('siteSpec.json');
+        $spec['visual_vibe'] = 'sophisticated';
+        $project->writeJson('siteSpec.json', $spec);
+        $llm->queueJson(['seeds' => homepage_seeds()]);
+        $llm->queueText(homepage_document('RESUME', 'body { color: #222; }'));
+
+        homepage_run($project, $llm);
+
+        assert_eq(2, count($llm->calls));
+        foreach ($llm->calls as $call) {
+            assert_true(!str_contains($call['prompt'], 'visual_vibe'));
+            assert_true(!str_contains($call['prompt'], 'sophisticated'));
+            assert_contains('Hearth & Crumb', $call['prompt']);
+        }
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function homepage_fixture(array $meta = []): array
 {

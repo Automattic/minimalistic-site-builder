@@ -327,7 +327,6 @@ final class CollectImagesStep implements Step
         $area = trim((string) ($siteSpec['area'] ?? ''));
         $topic = trim((string) ($siteSpec['topic'] ?? ''));
         $siteType = trim((string) ($siteSpec['site_type'] ?? ''));
-        $vibe = trim((string) ($siteSpec['visual_vibe'] ?? ''));
         // Every non-personal site gets a mark, so the fallback is the
         // neutral word "organization". A nonprofit, a school, and a festival
         // all get a mark too.
@@ -339,13 +338,10 @@ final class CollectImagesStep implements Step
         } elseif ($siteType !== '' && GenerateImagesStep::safeSubjectMatter($siteType, $identities)) {
             $about = "a {$siteType}";
         }
-        $mood = ($vibe !== '' && GenerateImagesStep::safeSubjectMatter($vibe, $identities))
-            ? ", {$vibe} mood"
-            : '';
         return [
             'filename'    => 'site-logo.png',
             'src'         => 'theme:./assets/site-logo.png',
-            'subject'     => "simple geometric brand mark for {$about}{$mood}, single ink, no letters, no numerals, no wordmark, no signage",
+            'subject'     => "simple geometric brand mark for {$about}, single ink, no letters, no numerals, no wordmark, no signage",
             'pageContext' => 'site logo and site icon, small square mark in the header',
             'style'       => 'flat',
             'aspectRatio' => 'square',

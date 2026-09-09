@@ -84,7 +84,7 @@ final class DesignPreviewStep implements Step
 
             $siteSpecData = $project->readJson('siteSpec.json');
             $sitePages = PagePlanStep::flattenPages($siteSpecData);
-            $siteSpec = $project->readText('siteSpec.json');
+            $siteSpec = SiteSpecStep::promptText($project);
             $designDirection = $project->readText('designDirection.json');
             $prompt = $this->renderer->render('design-preview.md', [
                 'brief' => $brief,

@@ -521,6 +521,10 @@ test('transform-site batches missing shell through legacy unit and keeps marker 
         '<!doctype html><html><body><header><p>Header</p></header>'
         . '<main><section id="copy"><p>' . $benign . '</p></section></main></body></html>',
     );
+    $spec = $project->readJson('siteSpec.json');
+    $spec['visual_vibe'] = 'RETIRED-MOOD-SENTINEL';
+    $project->writeJson('siteSpec.json', $spec);
+    $originalSpec = $project->readText('siteSpec.json');
     $llm->queueText(
         '<!-- wp:group {"tagName":"footer"} --><footer class="wp-block-group">'
         . '<!-- wp:paragraph --><p>STUB-FOOTER-MARKER</p><!-- /wp:paragraph -->'
@@ -531,6 +535,11 @@ test('transform-site batches missing shell through legacy unit and keeps marker 
 
     assert_eq(1, $llm->completeBatchCalls);
     assert_contains('Build the site FOOTER template part', $llm->calls[0]['prompt']);
+    $prompt = implode('', $llm->calls[0]['opts']['cached_prefixes'] ?? []) . $llm->calls[0]['prompt'];
+    assert_true(!str_contains($prompt, 'visual_vibe'), 'a resumed shell prompt excludes the retired field');
+    assert_true(!str_contains($prompt, 'RETIRED-MOOD-SENTINEL'), 'a resumed shell prompt excludes the retired mood');
+    assert_contains('Northstar Studio', $prompt);
+    assert_eq($originalSpec, $project->readText('siteSpec.json'));
     assert_contains('STUB-FOOTER-MARKER', $project->readText('theme/parts/footer.html'));
     assert_contains($benign, $project->readText('theme/parts/page-home--copy.html'));
     $all = implode("\n", transform_site_outputs($project));

@@ -61,7 +61,6 @@ function html_first_site_spec(array $pages): array
         'topic' => 'artisan bread and pastries',
         'area' => 'bakery',
         'audience' => 'neighborhood locals',
-        'visual_vibe' => 'warm editorial',
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'hearthandcrumb.example',

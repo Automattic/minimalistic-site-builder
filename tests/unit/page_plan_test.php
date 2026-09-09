@@ -10,6 +10,28 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('page-plan excludes a retired spec mood on resume and preserves the user brief and footer rule', function () {
+    with_project('builder_plan_resume_', function ($project) {
+        $project->writeJson('siteSpec.json', plan_spec(['visual_vibe' => 'sophisticated']));
+        $project->writeJson('meta.json', ['prompt' => 'Use a warm and rustic style.']);
+        seed_test_design_direction($project);
+        $step = new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+        $requests = $step->requests($project);
+        $footerRule = FooterComposition::closingSectionRule(FooterComposition::surface(
+            FooterComposition::archetypeForProject($project),
+        ));
+
+        assert_eq(3, count($requests));
+        foreach ($requests as $request) {
+            assert_true(!str_contains($request['prompt'], 'visual_vibe'));
+            assert_true(!str_contains($request['prompt'], 'sophisticated'));
+            assert_contains('Demo', $request['prompt']);
+            assert_contains('Use a warm and rustic style.', $request['prompt']);
+            assert_contains($footerRule, $request['prompt']);
+        }
+    });
+});
+
 /**
  * Unit tests for PagePlanStep: per-section normalization (unique file-safe
  * slugs, art-direction enums, adjacency rule, card-grid cap — unchanged from
