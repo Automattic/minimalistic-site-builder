@@ -34,7 +34,7 @@ Always include exactly these fixed properties:
   ]
 }
 
-**You may invent a brand or persona name. Never invent an email, street address, phone number, or URL.** The site needs exactly ONE coherent identity for masthead, hero, and footer copyright: `name` and `persona_name`. When the prompt states a name or person, use it verbatim. When it doesn't, COMMIT to one invented name that fits the topic and `language` — a short proper name, not a description of the site type — and list every name key you invented in `invented` so the user can later be told to replace it. Never output a generic descriptor as `name`, and never invent more than one identity.
+**You may invent a brand or persona name. Never invent an email, street address, phone number, or URL. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state.** The site needs exactly ONE coherent identity for masthead, hero, and footer copyright: `name` and `persona_name`. When the prompt states a name or person, use it verbatim. When it doesn't, COMMIT to one invented name that fits the topic and `language` — a short proper name, not a description of the site type — and list every name key you invented in `invented` so the user can later be told to replace it. Never output a generic descriptor as `name`, and never invent more than one identity.
 
 `email_domain` is a contact fact, not identity: set it only when the user stated a domain, otherwise "". Never construct a contact address, even at a stated domain.
 

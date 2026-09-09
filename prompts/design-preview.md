@@ -19,7 +19,7 @@ SITE PAGES (the whole site — the shared header navigation uses these exact pat
 
 {{design_direction}}
 
-Treat design direction as binding. Write specific, finished visitor-facing copy grounded in brief and site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
+Treat design direction as binding. Write specific, finished visitor-facing copy grounded in brief and site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state.
 
 ## First-fold document contract
 
