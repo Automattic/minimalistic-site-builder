@@ -23,8 +23,8 @@ final class StepNumeral
 
     /** Section type or slug words that make a section a process (frm W6c). */
     private const PROCESS_WORDS = [
-        'process', 'step', 'steps', 'how-it-works', 'how', 'method', 'methodology', 'approach',
-        'workflow', 'timeline', 'journey', 'phase', 'phases', 'roadmap', 'onboarding', 'stages',
+        'process', 'step', 'steps', 'method', 'methodology',
+        'workflow', 'timeline', 'roadmap', 'onboarding',
     ];
 
     public static function explicit(mixed $raw): ?string
@@ -57,7 +57,8 @@ final class StepNumeral
      */
     private const STATED_NUMBERED_PHRASES = [
         'numbered stack', 'numbered list', 'numbered rows', 'numbered ledger', 'numbered items', 'numbered lines',
-        'numbered services', 'numbered cards', 'numbered columns', 'numbered',
+        'numbered services', 'numbered cards', 'numbered columns', 'numbered feature cards',
+        'numbered process', 'numbered steps', 'numbered workflow', 'numbered timeline', 'numbered method',
     ];
 
     /**
@@ -69,7 +70,7 @@ final class StepNumeral
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (preg_split('/[,.;:]/u', $text) ?: [] as $clause) {
             $clause = trim($clause);
-            if ($clause === '') {
+            if ($clause === '' || preg_match('/\b(?:no|not|never|without|avoid|omit|exclude)\b.*\bnumbered\b/u', $clause) === 1) {
                 continue;
             }
             foreach (self::STATED_NUMBERED_PHRASES as $phrase) {
@@ -82,24 +83,13 @@ final class StepNumeral
     }
 
     /**
-     * The stated numbered clause from a build's meta, the user's own words
-     * first and the refined brief second, or null.
+     * Read the numbered clause from the brief, or return null.
      *
      * @param array<string,mixed> $meta
      */
     public static function statedNumberedFor(array $meta): ?string
     {
-        foreach (['original_prompt', 'prompt'] as $key) {
-            $text = $meta[$key] ?? null;
-            if (!is_string($text) || trim($text) === '') {
-                continue;
-            }
-            $clause = self::statedNumbered($text);
-            if ($clause !== null) {
-                return $clause;
-            }
-        }
-        return null;
+        return is_string($meta['prompt'] ?? null) ? self::statedNumbered($meta['prompt']) : null;
     }
 
     /**
@@ -261,8 +251,21 @@ final class StepNumeral
                     continue;
                 }
                 $position++;
-                if (preg_match('/^(\s*<p\b[^>]*>\s*)(\d{1,2})(\s*<\/p>\s*)$/su', $own, $m) === 1 && $m[2] !== (string) $position) {
-                    $renumbered->spliceOwnHtml($index, 0, strlen($own), $m[1] . $position . $m[3]);
+                if (preg_match('/^(\s*<p\b[^>]*>)(.*?)(<\/p>\s*)$/su', $own, $m) === 1
+                    && trim(html_entity_decode(strip_tags($m[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== (string) $position) {
+                    $wroteDigit = false;
+                    $inner = preg_replace_callback('/(<[^>]*>)|([^<]+)/su', static function (array $part) use ($position, &$wroteDigit): string {
+                        if ($part[1] !== '') {
+                            return $part[0];
+                        }
+                        $text = html_entity_decode($part[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                        return preg_replace_callback('/[0-9]+/', static function () use ($position, &$wroteDigit): string {
+                            $value = $wroteDigit ? '' : (string) $position;
+                            $wroteDigit = true;
+                            return $value;
+                        }, $text) ?? $text;
+                    }, $m[2]) ?? $m[2];
+                    $renumbered->spliceOwnHtml($index, 0, strlen($own), $m[1] . $inner . $m[3]);
                     $repairs[] = [
                         'part' => $part,
                         'block' => 'paragraph.' . self::CLASS_NAME,
@@ -311,11 +314,11 @@ final class StepNumeral
     }
 
     private const NUMBERED_STOPWORDS = [
-        'one', 'two', 'three', 'four', 'five', 'six', 'with', 'and', 'the', 'card', 'cards', 'highlighted',
+        'numbered', 'number', 'numbers', 'list', 'listed', 'stack', 'items', 'columns', 'lines', 'ledger', 'rows', 'one', 'two', 'three', 'four', 'five', 'six', 'with', 'and', 'the', 'card', 'cards', 'highlighted',
         'highlight', 'highlights', 'inverted', 'featured', 'accent', 'violet', 'purple', 'blue', 'green', 'red',
         'orange', 'yellow', 'pink', 'black', 'white', 'dark', 'light', 'row', 'grid', 'large', 'small', 'each',
     ];
-    public static function clauseAppliesTo(?string $clause, array $section, bool $includePurpose = false): bool
+    public static function clauseAppliesTo(?string $clause, array $section): bool
     {
         if ($clause === null || trim($clause) === '') {
             return false;
@@ -323,7 +326,7 @@ final class StepNumeral
         $stems = [];
         foreach (preg_split('/[^\\p{L}]+/u', mb_strtolower($clause, 'UTF-8')) ?: [] as $word) {
             if (mb_strlen($word, 'UTF-8') >= 4 && !in_array($word, self::NUMBERED_STOPWORDS, true)) {
-                $stems[] = mb_substr($word, 0, 4, 'UTF-8');
+                $stems[] = rtrim($word, 's');
             }
         }
         if ($stems === []) {
@@ -331,10 +334,10 @@ final class StepNumeral
         }
         $haystack = mb_strtolower(implode(' ', array_map(
             static fn (string $key): string => (string) ($section[$key] ?? ''),
-            $includePurpose ? ['slug', 'title', 'type', 'purpose'] : ['slug', 'title', 'type'],
+            ['slug', 'title', 'type'],
         )), 'UTF-8');
         foreach (preg_split('/[^\\p{L}]+/u', $haystack) ?: [] as $word) {
-            if (mb_strlen($word, 'UTF-8') >= 4 && in_array(mb_substr($word, 0, 4, 'UTF-8'), $stems, true)) {
+            if (mb_strlen($word, 'UTF-8') >= 4 && in_array(rtrim($word, 's'), $stems, true)) {
                 return true;
             }
         }

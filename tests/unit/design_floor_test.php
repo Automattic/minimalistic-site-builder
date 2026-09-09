@@ -222,7 +222,7 @@ test('empty theme.json and empty markup yield no findings', function () {
 test('section prompt bans kickers above headings', function () {
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
     assert_contains('Eyebrows are banned', $section);
-    assert_contains('no brief earns it back', $section);
+    assert_contains('committed `step-numeral` chip is the only caption-scale exception', $section);
     assert_true(!str_contains($section, 'Eyebrows are rationed'));
     assert_contains('Never put an eyebrow or kicker line above the row heading', $section);
 });

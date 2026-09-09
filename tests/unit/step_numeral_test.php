@@ -117,7 +117,7 @@ test('numeral removal and renumber reach a fixed point and preserve sibling cont
 
 test('explicit numbered rows commit a numeral and match only section identity', function () {
     $repairs = [];
-    $meta = ['original_prompt' => 'Four numbered feature cards.'];
+    $meta = ['prompt' => 'Four numbered feature cards.'];
     assert_eq('ghost', DesignDirectionStep::withStatedStepNumeral(['step_numeral' => 'none'], $meta, $repairs)['step_numeral']);
     assert_eq(1, count($repairs));
     $repairs = [];
@@ -133,5 +133,26 @@ test('step numeral repair preserves whitespace around the digit', function () {
     $result = StepNumeral::normalize($raw, 'chip', 'process', true);
     assert_contains("> \n1 </p>", $result['markup']);
     assert_eq(1, count($result['repairs']));
+    assert_eq($result['markup'], StepNumeral::normalize($result['markup'], 'chip', 'process', true)['markup']);
+});
+
+test('step numerals reject negative briefs and unrelated section words', function () {
+    foreach (['Keep it minimal, no numbered lists please.', 'limited numbered editions'] as $brief) {
+        assert_eq(null, StepNumeral::statedNumbered($brief));
+    }
+    assert_eq('numbered steps', StepNumeral::statedNumbered('numbered steps'));
+    $clause = StepNumeral::statedNumbered('four numbered feature cards');
+    assert_true(!StepNumeral::clauseAppliesTo($clause, ['slug' => 'by-the-numbers']));
+    foreach ([['contact', 'how-to-find-us'], ['values', 'how-we-think'], ['team', 'journey'], ['pricing', 'phases']] as [$type, $slug]) {
+        assert_true(!StepNumeral::isProcessSection($type, $slug));
+    }
+});
+
+test('step numeral order preserves inline markup and decodes entities', function () {
+    $raw = step_numeral_section(step_numeral_item('<strong>3</strong>') . step_numeral_item('&#49;'));
+    $result = StepNumeral::normalize($raw, 'chip', 'process', true);
+    assert_contains('<strong>1</strong>', $result['markup']);
+    assert_contains('>2</p>', $result['markup']);
+    assert_eq([], $result['warnings']);
     assert_eq($result['markup'], StepNumeral::normalize($result['markup'], 'chip', 'process', true)['markup']);
 });
