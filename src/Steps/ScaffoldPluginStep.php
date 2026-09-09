@@ -493,13 +493,20 @@ final class ScaffoldPluginStep implements Step
          * import either way, so the theme slug in the URL does not matter.
          * Must run before the markup is pointed at the imported media.
          *
-         * The brand mark is skipped: a logo is not a picture of the page.
+         * A photograph is preferred over a flourish, which is what the two
+         * extensions mean here: content images are opaque and always .jpg
+         * (prompts/image-generation.md), while .png is the transparent
+         * pipeline — the site mark, and the drawn ornaments older projects
+         * still carry. A wheat-sprig motif at the top of a page is the first
+         * image on it and the worst possible card. The brand mark is skipped
+         * outright: a logo is not a picture of the page.
          */
         function {{FN_PREFIX}}_content_featured_image($content, $map) {
             $reference = '#(?:theme:\./|/wp-content/themes/[^/"\']+/)assets/([A-Za-z0-9-]+\.(?:jpe?g|png))#i';
             if ($map === array() || !preg_match_all($reference, (string) $content, $matches)) {
                 return 0;
             }
+            $fallback = 0;
             foreach ($matches[1] as $filename) {
                 $imported = isset($map['theme:./assets/' . $filename])
                     ? $map['theme:./assets/' . $filename]
@@ -512,11 +519,19 @@ final class ScaffoldPluginStep implements Step
                     continue;
                 }
                 $id = isset($imported['id']) ? (int) $imported['id'] : 0;
-                if ($id > 0) {
+                if ($id < 1) {
+                    continue;
+                }
+                if (preg_match('/\.jpe?g$/i', $filename)) {
                     return $id;
                 }
+                // Nothing but flourishes on this page: one is still better
+                // than the blank placeholder a card falls back to.
+                if ($fallback === 0) {
+                    $fallback = $id;
+                }
             }
-            return 0;
+            return $fallback;
         }
 
         /**

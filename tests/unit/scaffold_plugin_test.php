@@ -1251,11 +1251,14 @@ test('every seeded page carries its own first image as the card thumbnail', func
         ['slug' => 'lessons', 'title' => 'Lessons', 'front' => false, 'menu_order' => 10],
         ['slug' => 'contact', 'title' => 'Contact', 'front' => false, 'menu_order' => 20],
     ]]);
-    // The mark is the first placeholder on the home page and must still lose:
-    // a logo is not a picture of the page.
+    // Two images come before the photograph and both must lose: the mark,
+    // because a logo is not a picture of the page, and the drawn ornament,
+    // because .png is this pipeline's flourish extension and a wheat sprig
+    // makes the worst possible card.
     $project->writeText(
         'plugin/pages/home.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/site-logo.png" alt=""/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/wheat-sprig.png" alt=""/></figure><!-- /wp:image -->' . "\n"
         . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero.jpg" alt="Dawn"/></figure><!-- /wp:image -->' . "\n"
         . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/second.jpg" alt="Loaves"/></figure><!-- /wp:image -->',
     );
@@ -1266,14 +1269,25 @@ test('every seeded page carries its own first image as the card thumbnail', func
         'plugin/pages/lessons.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="/wp-content/themes/build-9f2c/assets/second.jpg" alt="Loaves"/></figure><!-- /wp:image -->',
     );
-    $project->writeText('plugin/pages/contact.html', '<!-- wp:paragraph --><p>Say hello.</p><!-- /wp:paragraph -->');
+    // A page whose only image is a flourish still gets it: one is better than
+    // the blank placeholder a card falls back to.
+    $project->writeText(
+        'plugin/pages/contact.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/wheat-sprig.png" alt=""/></figure><!-- /wp:image -->',
+    );
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'site-logo.png', 'title' => 'Mark', 'role' => 'site-logo'],
+        ['filename' => 'wheat-sprig.png', 'title' => 'Sprig'],
         ['filename' => 'hero.jpg', 'title' => 'Hero'],
         ['filename' => 'second.jpg', 'title' => 'Second'],
     ]]);
     @mkdir($project->pluginPath('images'), 0777, true);
-    foreach (['site-logo.png' => 'PNG', 'hero.jpg' => 'JPEGONE', 'second.jpg' => 'JPEGTWO'] as $file => $bytes) {
+    foreach ([
+        'site-logo.png' => 'PNG',
+        'wheat-sprig.png' => 'PNGSPRIG',
+        'hero.jpg' => 'JPEGONE',
+        'second.jpg' => 'JPEGTWO',
+    ] as $file => $bytes) {
         file_put_contents($project->pluginPath('images/' . $file), $bytes);
     }
 
@@ -1295,9 +1309,9 @@ test('every seeded page carries its own first image as the card thumbnail', func
         $markers[(string) $post['post_name']] = (string) ($post['meta_input']['_wpcom_ai_generated_post'] ?? '');
     }
 
-    assert_eq($attachments['Hero'], $thumbnails['home'], "the home page's card image is its first photo, not the mark");
+    assert_eq($attachments['Hero'], $thumbnails['home'], "the home page's card image is its first photo, not the mark or the ornament");
     assert_eq($attachments['Second'], $thumbnails['lessons'], 'a page whose images were already rewritten to served URLs still gets one');
-    assert_eq(0, $thumbnails['contact'], 'a page with no image gets no thumbnail');
+    assert_eq($attachments['Sprig'], $thumbnails['contact'], 'a page with nothing but a flourish still gets a card image');
     assert_eq(['home' => '1', 'lessons' => '1', 'contact' => '1'], $markers, 'the seeded marker still travels with every page');
 
     exec('rm -rf ' . escapeshellarg($tmp));
