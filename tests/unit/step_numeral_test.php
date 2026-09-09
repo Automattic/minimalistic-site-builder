@@ -127,3 +127,11 @@ test('explicit numbered rows commit a numeral and match only section identity', 
     assert_true(!StepNumeral::clauseAppliesTo(StepNumeral::statedNumberedFor($meta), ['slug' => 'faq', 'purpose' => 'Explain feature cards']));
     assert_eq('none', DesignDirectionStep::withStatedStepNumeral(['step_numeral' => 'none'], ['prompt' => 'A quiet website'], $repairs)['step_numeral']);
 });
+
+test('step numeral repair preserves whitespace around the digit', function () {
+    $raw = step_numeral_section(step_numeral_item(" \n7 "));
+    $result = StepNumeral::normalize($raw, 'chip', 'process', true);
+    assert_contains("> \n1 </p>", $result['markup']);
+    assert_eq(1, count($result['repairs']));
+    assert_eq($result['markup'], StepNumeral::normalize($result['markup'], 'chip', 'process', true)['markup']);
+});

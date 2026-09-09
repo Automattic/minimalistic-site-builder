@@ -261,7 +261,7 @@ final class StepNumeral
                     continue;
                 }
                 $position++;
-                if (preg_match('/^(\s*<p\b[^>]*>)(\d{1,2})(<\/p>\s*)$/su', $own, $m) === 1 && $m[2] !== (string) $position) {
+                if (preg_match('/^(\s*<p\b[^>]*>\s*)(\d{1,2})(\s*<\/p>\s*)$/su', $own, $m) === 1 && $m[2] !== (string) $position) {
                     $renumbered->spliceOwnHtml($index, 0, strlen($own), $m[1] . $position . $m[3]);
                     $repairs[] = [
                         'part' => $part,
