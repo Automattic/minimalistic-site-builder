@@ -2286,6 +2286,7 @@ test('normalize commits a catalog surface and falls unknown textures back to non
     $direction = DesignDirectionStep::normalize([
         'description' => 'Paper ground.',
         'surface' => 'Paper',
+        'surface_reason' => 'The process section presents a paper recipe journal.',
     ], 'cinematic-safe-zone');
     assert_eq('paper', $direction['surface']);
     assert_contains('**Surface**: paper', DesignDirectionStep::format($direction));
@@ -2771,4 +2772,19 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_eq('', $generic['tension']);
     assert_eq('', $generic['subject_anchor']);
+});
+
+
+test('normalize requires a concept reason for an optional texture', function () {
+    foreach ([null, '', '  ', [], 7] as $reason) {
+        $warnings = [];
+        $repairs = [];
+        $out = DesignDirectionStep::normalize(
+            ['description' => 'A plain site.', 'surface' => 'film', 'surface_reason' => $reason],
+            'cinematic-safe-zone', '', $repairs, $warnings,
+        );
+        assert_eq('none', $out['surface']);
+        assert_eq('', $out['surface_reason']);
+        assert_contains('path=surface; authored=film; delivered=none', implode(' ', $warnings));
+    }
 });
