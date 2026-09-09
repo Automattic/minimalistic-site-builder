@@ -35,7 +35,7 @@ Every family is equally available. Warm cream is the answer this brief will pull
 
 ## Differentiation — gauge the brief first
 
-Read the user's own words in the brief to determine how much design direction has already been provided. The site spec records facts — name, topic, audience, pages — and never a mood: nothing in it fixes a style.
+Read the user's own words in the brief to determine how much design direction has already been provided.
 
 - **Vague brief** (a topic with no stated style): the 3 seeds should read like proposals from 3 different designers — three different palettes, moods, eras, and imagery treatments.
 - **Specific brief** (the user describes a palette, style, mood, or era): honor those choices in ALL 3 seeds and vary only what the user left open. If that means two seeds end up with the same three answers, leave them that way. Don't invent a difference the user ruled out.

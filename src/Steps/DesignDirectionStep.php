@@ -221,7 +221,7 @@ final class DesignDirectionStep implements Step
             self::definitiveRequestedPageCount($meta),
         );
 
-        $spec = $project->readText('siteSpec.json');
+        $spec = SiteSpecStep::promptText($project);
         $specData = $project->readJson('siteSpec.json');
         // Loaded once: the expansion prompt samples its font shortlist from
         // it, and the monoculture floor below substitutes against it.

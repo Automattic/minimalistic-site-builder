@@ -205,7 +205,7 @@ final class SiteSpecStep implements Step
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
             Narrator::write('  [site-spec] warning: ' . count($warnings)
-                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
+                . " spec field(s) repaired or removed (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
     }
@@ -389,6 +389,23 @@ final class SiteSpecStep implements Step
         return $siteSpec !== [] && !self::isPersonal($siteSpec);
     }
 
+    /**
+     * siteSpec.json as the design prompts embed it. A project built before
+     * the field retired still carries `visual_vibe` on disk, and a `--from`
+     * resume skips this step, so the retired key is stripped here as well.
+     * A spec without the key returns the file bytes unchanged.
+     */
+    public static function promptText(Project $project): string
+    {
+        $text = $project->readText('siteSpec.json');
+        $data = json_decode($text, true);
+        if (!is_array($data) || !array_key_exists('visual_vibe', $data)) {
+            return $text;
+        }
+        unset($data['visual_vibe']);
+        return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+    }
+
     /** The normalized logical writing direction persisted in siteSpec.json. */
     public static function writingDirectionOf(Project $project): string
     {
@@ -456,17 +473,21 @@ final class SiteSpecStep implements Step
             }
         }
 
-        // A mood is not a fact. The design-direction step proposes three
-        // moods in its seed round and its judge commits one; a mood phrase
-        // in the spec pre-empted that round, because the seeds prompt reads
-        // a stated mood as a user wish to honor in every seed. The spec
-        // prompt no longer asks for the field, and a host that still sends
-        // it has it dropped here so it never reaches a design prompt.
+        // A mood is a design decision, not a fact. The seeds prompt honors a
+        // stated mood in every seed, so a mood in the spec pre-empted the
+        // design-direction round. The spec prompt no longer asks for the
+        // field. This block drops a stale host value, so the spec channel
+        // carries no mood. The user's prompt text is a separate channel.
+        // An empty value is the retired contract's no-mood state: dropped
+        // in silence, because nothing was authored.
         if (array_key_exists('visual_vibe', $spec)) {
-            $warnings[] = "file='siteSpec.json'; field='visual_vibe'; authored value="
-                . Warnings::value($spec['visual_vibe']) . '; delivered removed; '
-                . 'disposition=removed retired field; the design-direction step decides the mood';
+            $vibe = $spec['visual_vibe'];
             unset($spec['visual_vibe']);
+            $authored = is_array($vibe) ? $vibe !== [] : trim((string) $vibe) !== '';
+            if ($authored) {
+                $warnings[] = "file='siteSpec.json'; path=\"visual_vibe\"; authored=" . Warnings::value($vibe)
+                    . '; delivered=removed; disposition=retired field removed — the design-direction step decides the mood';
+            }
         }
 
         // Sections must be a list so the page-plan step can build on it.

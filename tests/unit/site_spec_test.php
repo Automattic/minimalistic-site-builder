@@ -34,7 +34,7 @@ test('site-spec normalizes a host-supplied spec without an LLM call', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec drops a host-supplied visual_vibe so a host mood never reaches a design prompt', function () {
+test('site-spec drops a host-supplied visual_vibe so a host mood never reaches a design prompt through the spec', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
         'name' => 'Tbilisi Tavern',
         'language' => 'en',
@@ -49,28 +49,42 @@ test('site-spec drops a host-supplied visual_vibe so a host mood never reaches a
     assert_true(!array_key_exists('visual_vibe', $spec), 'the retired mood field is dropped, not blanked');
     $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
     assert_contains(
-        "file='siteSpec.json'; field='visual_vibe'; authored value=\"sophisticated\"; delivered removed; "
-            . 'disposition=removed retired field',
+        "file='siteSpec.json'; path=\"visual_vibe\"; authored=\"sophisticated\"; delivered=removed; "
+            . 'disposition=retired field removed',
         $joined,
     );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec drops a generated visual_vibe and never asks the model for one', function () {
-    [$project, $llm, $tmp] = make_sitespec_fixture();
-    $llm->queueJson(['name' => 'Solo', 'language' => 'en', 'visual_vibe' => 'warm and rustic']);
+test('site-spec drops an empty host-supplied visual_vibe in silence', function () {
+    // The retired contract required the key, so a host on it sends "" for
+    // no mood. Nothing was authored, so nothing is reported.
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
+        'name' => 'Tbilisi Tavern',
+        'language' => 'en',
+        'visual_vibe' => '',
+        'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors']],
+    ]);
 
     (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_true(!str_contains($llm->calls[0]['prompt'], 'visual_vibe'), 'the spec prompt no longer names the field');
     assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
-    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
-    assert_contains(
-        "file='siteSpec.json'; field='visual_vibe'; authored value=\"warm and rustic\"; delivered removed; "
-            . 'disposition=removed retired field',
-        $joined,
-    );
+    $rows = $project->exists('warnings.json') ? ($project->readJson('warnings.json')['site-spec'] ?? []) : [];
+    assert_true(!str_contains(implode(' ', $rows), 'visual_vibe'), 'an empty retired field earns no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec prompt text strips a stale visual_vibe and leaves a clean spec byte-identical', function () {
+    [$project, , $tmp] = make_sitespec_fixture();
+    $project->writeJson('siteSpec.json', ['name' => 'Old Build', 'visual_vibe' => 'warm and rustic']);
+    $text = SiteSpecStep::promptText($project);
+    assert_true(!str_contains($text, 'visual_vibe'), 'a pre-retirement spec on disk sheds the field for prompts');
+    assert_contains('"name": "Old Build"', $text);
+
+    $project->writeJson('siteSpec.json', ['name' => 'Clean Build']);
+    assert_eq($project->readText('siteSpec.json'), SiteSpecStep::promptText($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -193,6 +207,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
         'persona_name' => '',
         'email_domain' => 'HearthAndCrumb.com',          // must be lowercased
         'invented' => ['name', 'colors'],                // unknown key must be dropped
+        'visual_vibe' => 'warm and rustic',              // retired field the model may still emit
         'sections' => ['Hero', 'Menu', 'About', 'Visit'],
         // An extra factual field the user stated — must pass through.
         'hours' => 'Tue–Sun 7am–3pm',
@@ -213,14 +228,22 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('Hero', $spec['sections'][0]);
     assert_eq('Tue–Sun 7am–3pm', $spec['hours']);        // arbitrary fact preserved
 
-    // No design fields should be invented/filled.
+    // No design fields should be invented/filled. A mood the model still
+    // emits is dropped and reported.
     assert_true(!isset($spec['visual_vibe']), 'no mood in factual spec');
     assert_true(!isset($spec['colors']), 'no colors in factual spec');
     assert_true(!isset($spec['typography']), 'no typography in factual spec');
     assert_true(!isset($spec['layout']), 'no layout in factual spec');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains(
+        "file='siteSpec.json'; path=\"visual_vibe\"; authored=\"warm and rustic\"; delivered=removed; "
+            . 'disposition=retired field removed',
+        $joined,
+    );
 
-    // The rendered prompt must carry the user's words.
+    // The rendered prompt must carry the user's words, and must not ask for the retired field.
     assert_contains('hearthandcrumb.com', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'visual_vibe'), 'the spec prompt no longer names the field');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

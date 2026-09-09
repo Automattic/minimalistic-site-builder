@@ -845,6 +845,7 @@ test('collect-images appends a site-logo spec for a business site', function () 
         'site_type'    => 'business storefront',
         'area'         => 'bakery',
         'topic'        => 'artisan bread',
+        'visual_vibe'  => 'warm and rustic', // retired field a stale spec may still carry
         'persona_name' => '',
     ]);
     $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery in Portland']);
@@ -869,29 +870,9 @@ test('collect-images appends a site-logo spec for a business site', function () 
     assert_contains('bakery', $logo['subject']);
     assert_contains('no letters', $logo['subject']);
     assert_true(!str_contains($logo['subject'], 'Hearth'), 'site name stays out of the subject');
-    assert_true(!str_contains($logo['subject'], 'mood'), 'the spec carries no mood, so the subject has no mood suffix');
+    assert_true(!str_contains($logo['subject'], 'warm and rustic'), 'a retired mood value stays out of the subject');
+    assert_true(!str_contains($logo['subject'], 'mood'), 'the subject has no mood suffix');
     assert_eq('site logo and site icon, small square mark in the header', $logo['pageContext']);
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('collect-images excludes a retired visual_vibe from the logo subject', function () {
-    [$project, $tmp] = collect_fixture();
-    $project->writeJson('siteSpec.json', [
-        'name'         => 'Hearth & Crumb',
-        'site_type'    => 'business storefront',
-        'area'         => 'bakery',
-        'visual_vibe'  => 'warm and rustic',
-        'persona_name' => '',
-    ]);
-
-    (new CollectImagesStep())->run($project);
-
-    $subjects = array_column($project->readJson('images.json'), 'subject', 'filename');
-    $subject = $subjects['site-logo.png'];
-    assert_contains('bakery', $subject);
-    assert_true(!str_contains($subject, 'warm and rustic'), 'the retired field value stays out of the subject');
-    assert_true(!str_contains($subject, 'mood'), 'the subject has no mood suffix');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -941,7 +922,7 @@ test('collect-images does not append a site-logo for a personal site', function 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('collect-images logo subject drops identity-bearing area, topic, and vibe', function () {
+test('collect-images logo subject drops identity-bearing area and topic', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeJson('siteSpec.json', [
         'name'        => 'Hearth & Crumb',

@@ -150,10 +150,9 @@ After: `site-spec (facts only) → design-doc (design.md per the DESIGN.md stand
 from prompt + siteSpec)`.
 
 - **siteSpec.json is factual only.** Fixed properties: `name`, `slug`, `title`,
-  `site_type`, `topic`, `area`, `audience`, `visual_vibe` (a short mood phrase —
-  not concrete colors/fonts), `sections`. Any concrete facts the user stated
-  (hours, location, products…) pass through as extra keys. No `colors`,
-  `typography`, or `layout` are invented here.
+  `site_type`, `topic`, `area`, `audience`, `sections`. Any concrete facts the
+  user stated (hours, location, products…) pass through as extra keys. No
+  `colors`, `typography`, or `layout` are invented here.
 - **design.md follows the [DESIGN.md standard](https://github.com/google-labs-code/design.md):**
   YAML front matter with `colors` (base/contrast/primary/secondary/accent),
   `typography` (heading/body), `rounded`, `spacing`, then a Markdown body
