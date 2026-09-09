@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -126,6 +127,7 @@ final class FinalizeThemeStep implements Step
         $imageCrop = DesignDirectionStep::imageCropFor($project);
         $depth = DesignDirectionStep::depthFor($project);
         $surface = DesignDirectionStep::surfaceFor($project);
+        $typeTreatment = DesignDirectionStep::typeTreatmentFor($project);
         $palette = self::paletteColors($project);
         $imageTreatmentCss = ImageTreatment::kitCss($imageTreatment, $palette);
         $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
@@ -175,6 +177,12 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $typeTreatmentShipped = self::writeOverlayKit(
+            $project,
+            self::typeTreatmentKit(),
+            TypeTreatment::kitCss($typeTreatment),
+            $headerWarnings,
+        );
         $overlays = [];
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
@@ -197,6 +205,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($deviceShipped) {
             $overlays[] = self::deviceKit();
+        }
+        if ($typeTreatmentShipped) {
+            $overlays[] = self::typeTreatmentKit();
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -225,6 +236,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($deviceShipped
             ? "  device: '{$device}' utility enqueued\n"
             : "  device: {$device} (kit not shipped)\n");
+        Narrator::write($typeTreatmentShipped
+            ? "  type treatment: '{$typeTreatment}' statement-lines register enqueued\n"
+            : '  type treatment: ' . ($typeTreatment ?? 'none committed') . " (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
@@ -295,7 +309,16 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::screenKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
+        return [
+            self::shapeKit(),
+            self::imageTreatmentKit(),
+            self::imageCropKit(),
+            self::screenKit(),
+            self::depthKit(),
+            self::surfaceKit(),
+            self::deviceKit(),
+            self::typeTreatmentKit(),
+        ];
     }
 
     public static function surfaceKit(): OverlayKit
@@ -303,6 +326,20 @@ final class FinalizeThemeStep implements Step
         return new OverlayKit(
             'surface',
             '// Optional section texture. Loads after generated style.css.',
+        );
+    }
+
+    /**
+     * The statement-lines register: one archetype opts out of an uppercase
+     * site heading case. Only `caps-tight` and `caps-tracked` ship CSS, so
+     * every other treatment prunes the kit.
+     */
+    public static function typeTreatmentKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'type-treatment',
+            "// Committed statement-lines register: the archetype drops an\n"
+                . '// uppercase site heading case. Loads after generated style.css.',
         );
     }
 
@@ -410,7 +447,7 @@ final class FinalizeThemeStep implements Step
      * build. readText() remains outside the JSON catch: an actual filesystem
      * read failure is infrastructure, not an imperfect generated value.
      *
-     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid',1:list<string>}
+     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid'|'overlay-transient',1:list<string>}
      */
     private static function headerBehaviorFor(Project $project): array
     {
