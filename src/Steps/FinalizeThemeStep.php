@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -166,7 +167,16 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $treatmentShipped = self::writeOverlayKit(
+            $project,
+            self::treatmentKit(),
+            TypeTreatment::kitCss(DesignDirectionStep::typeTreatmentFor($project) ?? ''),
+            $headerWarnings,
+        );
         $overlays = [];
+        if ($treatmentShipped) {
+            $overlays[] = self::treatmentKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -309,6 +319,15 @@ final class FinalizeThemeStep implements Step
      * (the media half of core/media-text, the core/cover canvas). `sharp` and an
      * absent commitment resolve to no CSS, so the kit is pruned instead.
      */
+    public static function treatmentKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'treatment',
+            "// Set the display line height for uppercase headings.\n"
+                . '// Load after generated style.css.',
+        );
+    }
+
     public static function shapeKit(): OverlayKit
     {
         return new OverlayKit(

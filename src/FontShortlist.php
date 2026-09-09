@@ -46,6 +46,9 @@ final class FontShortlist
             'Barlow', 'Gantari', 'Onest', 'Geologica',
             'Anybody', 'Archivo Narrow', 'Roboto Condensed', 'Overpass',
             'Red Hat Text', 'Readex Pro', 'Cabin',
+            // Add product fonts that the overuse policy permits.
+            'Inter Tight', 'Albert Sans', 'Be Vietnam Pro', 'Host Grotesk',
+            'Golos Text', 'Reddit Sans',
         ],
         'didone' => [
             'Bodoni Moda', 'Libre Bodoni', 'DM Serif Display', 'DM Serif Text',
@@ -74,6 +77,8 @@ final class FontShortlist
             'Lexend', 'Questrial', 'Josefin Sans', 'DM Sans',
             'Red Hat Display', 'League Spartan', 'Comfortaa', 'Fredoka',
             'Quicksand', 'Exo 2', 'Syne', 'Unbounded',
+            // Add geometric fonts from the reference sites.
+            'Funnel Sans', 'Funnel Display', 'Wix Madefor Display', 'Parkinsans',
         ],
         'transitional' => [
             'Libre Baskerville', 'Baskervville', 'PT Serif', 'Ibarra Real Nova',
@@ -147,8 +152,12 @@ final class FontShortlist
      * The prompt paragraph the expansion template injects, or '' when there
      * is nothing worth saying (degraded seed, unknown tradition).
      */
-    public static function promptParagraph(string $typeRegister, string $identifier, FontCatalog $catalog): string
-    {
+    public static function promptParagraph(
+        string $typeRegister,
+        string $identifier,
+        FontCatalog $catalog,
+        string $register = '',
+    ): string {
         $candidates = self::candidates($typeRegister, $identifier, $catalog);
         if ($candidates === []) {
             return '';
@@ -158,7 +167,23 @@ final class FontShortlist
             . 'Treat the list as a starting shelf, not a fence: pick from it, or go beyond it '
             . 'when you can say what makes another real Google Fonts family in this tradition '
             . 'righter for THIS site. Do not default to the one famous family the tradition is '
-            . 'known by; that reflex is how every generated site ends up set in the same face.';
+            . 'known by; that reflex is how every generated site ends up set in the same face.'
+            . self::productWeightSentence($typeRegister, $register);
+    }
+
+    /** These traditions use medium display weights for grotesque and geometric type. */
+    public const PRODUCT_REGISTERS = ['modernist', 'technical', 'pop', 'playful', 'utilitarian'];
+    public const PRODUCT_TYPE_REGISTERS = ['grotesque', 'geometric'];
+
+    public static function productWeightSentence(string $typeRegister, string $register): string
+    {
+        if (!in_array($register, self::PRODUCT_REGISTERS, true)
+            || !in_array($typeRegister, self::PRODUCT_TYPE_REGISTERS, true)) {
+            return '';
+        }
+        return ' Use a MEDIUM weight for the display heading for this product or portfolio tradition. '
+            . 'Commit 500 and 600 in `weights`. Use `type_treatment: "tight"` and body weight 400. '
+            . 'Do not use weight 800 for the display heading.';
     }
 
     /**
