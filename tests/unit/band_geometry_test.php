@@ -15,8 +15,10 @@ test('the rounded band kit insets contrast and band surfaces with the panel radi
     assert_contains(':not([class*="hero-composition--"])', $css, 'the page opening keeps its edges');
     assert_contains(':not(.section-composition--full-bleed-cover)', $css, 'an image cover keeps its edges');
     assert_contains('margin-inline: var(--wp--preset--spacing--md, 1.5rem)', $css);
-    assert_contains('border-radius: var(--shape-radius-panel, 1.5rem)', $css, 'the radius is the committed panel scale');
-    assert_contains('overflow: hidden', $css);
+    assert_contains('border-radius: 1.5rem', $css, 'the radius is the committed panel scale');
+    assert_contains('overflow: clip', $css);
+    assert_contains(':not(.page-opening--section)', $css);
+    assert_true(!str_contains($css, 'overflow: hidden'));
     assert_contains('margin-inline: var(--wp--preset--spacing--sm, 0.75rem)', $css, 'phones keep a smaller gutter');
     assert_true(!str_contains($css, '!important'), 'the band kit fights nothing');
     assert_contains('inset from the viewport', BandGeometry::meaning('rounded'));
@@ -57,7 +59,11 @@ test('finalize-theme ships the band kit for rounded and prunes it for square (fr
     $tmp = sys_get_temp_dir() . '/builder_fin_band_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'band_geometry' => 'rounded']);
-    finalize_static_header($project);
+    $project->writeJson('headerBehavior.json', [
+        'behavior' => 'static', 'mode' => 'stacked', 'transition' => 'instant',
+        'topSurface' => 'base', 'scrolledSurface' => 'base', 'foreground' => 'contrast',
+        'topTreatment' => 'solid', 'scrolledTreatment' => 'solid',
+    ]);
     quietly(fn () => (new FinalizeThemeStep())->run($project));
     assert_contains('.has-contrast-background-color, .has-band-background-color', $project->readText('theme/assets/band/band.css'));
     $php = $project->readText('theme/functions.php');
@@ -73,16 +79,27 @@ test('finalize-theme ships the band kit for rounded and prunes it for square (fr
 test('band geometry reads explicit brief phrases and preserves other fields', function () {
     foreach (['Rounded panels', 'rounded near-black panels', 'a dark rounded band'] as $brief) {
         $repairs = [];
-        $result = DesignDirectionStep::withStatedBandGeometry(['band_geometry' => 'square', 'canvas' => 'full-bleed'], ['original_prompt' => $brief], $repairs);
+        $result = DesignDirectionStep::withStatedBandGeometry(['band_geometry' => 'square', 'canvas' => 'full-bleed'], ['prompt' => $brief], $repairs);
         assert_eq('rounded', $result['band_geometry']);
         assert_eq('full-bleed', $result['canvas']);
         assert_eq(1, count($repairs));
         $repairs = [];
-        assert_eq($result, DesignDirectionStep::withStatedBandGeometry($result, ['original_prompt' => $brief], $repairs));
+        assert_eq($result, DesignDirectionStep::withStatedBandGeometry($result, ['prompt' => $brief], $repairs));
         assert_eq([], $repairs);
     }
     assert_eq(null, DesignDirectionStep::statedBandGeometry('A hero in a rounded frame'));
-    foreach (['sharp' => '0', 'soft' => '1.5rem', 'round' => '2.5rem'] as $shape => $radius) {
-        assert_contains('var(--shape-radius-panel, ' . $radius . ')', BandGeometry::kitCss('rounded', $shape));
+    foreach (['sharp' => '1.5rem', 'soft' => '1.5rem', 'round' => '2.5rem'] as $shape => $radius) {
+        assert_contains('border-radius: ' . $radius, BandGeometry::kitCss('rounded', $shape));
     }
+});
+
+test('a subpage opening has the band exclusion in both block representations', function () {
+    $unit = new \Automattic\SiteBuild\Units\SectionUnit(new \Automattic\SiteBuild\Tests\FakeLlm(), new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group --><div class="wp-block-group"><!-- wp:heading {"level":1} --><h1 class="wp-block-heading">About</h1><!-- /wp:heading --></div><!-- /wp:group -->';
+    $input = ['page' => ['slug' => 'about'], 'section' => ['slug' => 'intro'], 'is_opening' => true];
+    $result = $unit->finish($raw, $input);
+    $document = \Automattic\SiteBuild\BlockMarkup::parse($result->markup);
+    assert_eq('page-opening--section', $document->attrs($document->topLevel())['className']);
+    assert_contains('class="wp-block-group page-opening--section"', $result->markup);
+    assert_eq($result->markup, $unit->finish($result->markup, $input)->markup);
 });

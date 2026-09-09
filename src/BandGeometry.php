@@ -6,7 +6,7 @@ namespace Automattic\SiteBuild;
 /**
  * Bounded band geometry (frm W4c): whether a full-width section band that
  * paints its own surface runs edge to edge (`square`) or sits inset from the
- * viewport with the committed panel radius (`rounded`), the way Luzia's dark
+ * viewport with the band radius (`rounded`), the way Luzia's dark
  * process band and closing band do. The build executes it on the page's
  * top-level section groups that carry a contrast or band surface; page
  * openings and image covers keep their edges.
@@ -26,7 +26,7 @@ final class BandGeometry
     {
         return match ($geometry) {
             'rounded' => 'every contrast or band-coloured section band sits inset from the viewport by one gutter'
-                . ' and takes the committed panel radius, so dark bands read as rounded plates on the page ground;'
+                . ' and takes the band radius, so dark bands read as rounded plates on the page ground;'
                 . ' the hero and image covers keep their edges. Author no radius, margin or width on section roots',
             default   => 'section bands run edge to edge; nothing is inset or rounded at the band level',
         };
@@ -34,7 +34,7 @@ final class BandGeometry
 
     public static function kitCss(?string $raw, ?string $shape = 'soft'): ?string
     {
-        $radius = match ($shape) { 'sharp' => '0', 'round' => '2.5rem', default => '1.5rem' };
+        $radius = match ($shape) { 'round' => '2.5rem', default => '1.5rem' };
         $geometry = self::explicit($raw);
         if ($geometry === null || $geometry === 'square') {
             return null;
@@ -46,13 +46,13 @@ final class BandGeometry
                radius, clipped so a background follows the corner. Page
                openings and image covers keep their edges. The gutter is the
                site's md space on desktop and its sm space on phones. */
-            :is(.wp-site-blocks, .entry-content, .wp-block-post-content) > .wp-block-group.has-background:is(.has-contrast-background-color, .has-band-background-color):not([class*="hero-composition--"]):not(.section-composition--full-bleed-cover) {
+            :is(.wp-site-blocks, .entry-content, .wp-block-post-content) > .wp-block-group.has-background:is(.has-contrast-background-color, .has-band-background-color):not([class*="hero-composition--"]):not(.page-opening--section):not(.section-composition--full-bleed-cover) {
                 margin-inline: var(--wp--preset--spacing--md, 1.5rem);
-                border-radius: var(--shape-radius-panel, {$radius});
-                overflow: hidden;
+                border-radius: {$radius};
+                overflow: clip;
             }
             @media (max-width: 781px) {
-                :is(.wp-site-blocks, .entry-content, .wp-block-post-content) > .wp-block-group.has-background:is(.has-contrast-background-color, .has-band-background-color):not([class*="hero-composition--"]):not(.section-composition--full-bleed-cover) {
+                :is(.wp-site-blocks, .entry-content, .wp-block-post-content) > .wp-block-group.has-background:is(.has-contrast-background-color, .has-band-background-color):not([class*="hero-composition--"]):not(.page-opening--section):not(.section-composition--full-bleed-cover) {
                     margin-inline: var(--wp--preset--spacing--sm, 0.75rem);
                 }
             }

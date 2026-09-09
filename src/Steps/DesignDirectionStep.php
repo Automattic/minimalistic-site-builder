@@ -2304,13 +2304,7 @@ final class DesignDirectionStep implements Step
 
     public static function statedBandGeometryFor(array $meta): ?string
     {
-        foreach (['original_prompt', 'prompt'] as $key) {
-            $text = $meta[$key] ?? null;
-            if (is_string($text) && trim($text) !== '' && self::statedBandGeometry($text) !== null) {
-                return self::statedBandGeometry($text);
-            }
-        }
-        return null;
+        return is_string($meta['prompt'] ?? null) ? self::statedBandGeometry($meta['prompt']) : null;
     }
 
     public static function withStatedBandGeometry(array $direction, array $meta, array &$repairs = []): array

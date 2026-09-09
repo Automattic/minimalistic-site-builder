@@ -23,6 +23,7 @@ final class PageOpeningFallback
         $foreground = $surface === 'contrast' ? 'base' : 'contrast';
         $attrs = [
             'anchor' => $slug,
+            'className' => 'page-opening--section',
             'backgroundColor' => $surface,
             'textColor' => $foreground,
             'layout' => ['type' => 'constrained'],
@@ -34,7 +35,7 @@ final class PageOpeningFallback
                 . '<!-- /wp:heading -->'
             : '<!-- wp:post-title {"level":1,"isLink":false,"fontSize":"section-title"} /-->';
         $markup = '<!-- wp:group ' . self::encode($attrs) . ' -->' . "\n"
-            . '<div id="' . self::escape($slug) . '" class="wp-block-group has-' . self::escape($surface)
+            . '<div id="' . self::escape($slug) . '" class="wp-block-group page-opening--section has-' . self::escape($surface)
             . '-background-color has-background has-' . self::escape($foreground) . '-color has-text-color">'
             . $titleMarkup . '</div>' . "\n<!-- /wp:group -->";
         $part = 'page-' . (string) ($page['slug'] ?? '') . '--' . $slug;
