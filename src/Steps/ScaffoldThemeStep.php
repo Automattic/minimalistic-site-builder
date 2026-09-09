@@ -575,6 +575,23 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster > .wp-block-cover {
             overflow: hidden;
         }
+        /* A copy zone anchored to one side resolves to a custom cover
+           contentPosition ("center left" / "center right"). Core then sets
+           the cover's inner container to `width: auto`, and inside the
+           cover's flex box that shrink-wraps the container to its content's
+           intrinsic width instead of the cover's. A columns copy zone with
+           percentage widths then resolves against that shrunken box, not the
+           hero: tbilisi3 rendered its 56% column at 347px and its poster H1
+           in four short lines, while HeroHeadlineFit had sized the H1 for
+           the 620px measure the block tree states (BIGR-992). Keep the
+           container at full width; the constrained layout inside places the
+           zone on the content column. Core's rule doubles the position
+           class, so this doubles it too and wins on specificity, not on
+           stylesheet order. */
+        .hero-composition--cinematic-safe-zone > .wp-block-cover.has-custom-content-position.has-custom-content-position > .wp-block-cover__inner-container,
+        .hero-composition--layered-poster > .wp-block-cover.has-custom-content-position.has-custom-content-position > .wp-block-cover__inner-container {
+            width: 100%;
+        }
         /* cinematic-safe-zone overlays copy on a full-bleed image and reserves
            image room with a right-side percentage inset. When the copy is
            authored as columns, the constrained layout otherwise caps it at

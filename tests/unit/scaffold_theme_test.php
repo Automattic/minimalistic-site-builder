@@ -292,6 +292,23 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // columns copy container must span full width or the constrained-layout
     // contentSize cap collides with the inset and starves the copy.
     assert_contains('.hero-composition--cinematic-safe-zone .wp-block-columns {', $css);
+    // A side-anchored copy zone gives the cover a custom contentPosition,
+    // and core's `width: auto` on the inner container then shrink-wraps a
+    // columns copy zone to a fraction of its own contentSize (BIGR-992).
+    // The skeleton keeps the container full width on both cover recipes,
+    // at a specificity above core's doubled position class.
+    foreach (['cinematic-safe-zone', 'layered-poster'] as $recipe) {
+        assert_eq(
+            1,
+            preg_match(
+                '/\.hero-composition--' . preg_quote($recipe, '/')
+                    . ' > \.wp-block-cover\.has-custom-content-position\.has-custom-content-position'
+                    . ' > \.wp-block-cover__inner-container[^{]*\{\s*width: 100%;\s*\}/',
+                $css,
+            ),
+            $recipe . ' keeps the custom-positioned cover inner container at full width',
+        );
+    }
     assert_contains('@media (max-width: 781.98px)', $css);
     foreach ([
         'stack-copy-first',
