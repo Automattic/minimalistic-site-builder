@@ -997,9 +997,9 @@ final class DesignDirectionStep implements Step
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         // Use a ring on a light ground and record the lost glass value.
         $depthGround = $groundKey
-            ?? (is_string($palette['base'] ?? null) && $palette['base'] !== '' ? GroundKey::classify($palette['base']) : null);
+            ?? (is_string($palette['base'] ?? null) && $palette['base'] !== '' ? GroundKey::classify($palette['base']) : 'light');
         if ($depth === 'glass' && $depthGround === 'light') {
-            $warnings[] = 'designDirection.json: field depth authored "glass" delivered "' . Depth::GLASS_LIGHT_FALLBACK
+            $warnings[] = 'designDirection.json: field depth authored "glass"; delivered "' . Depth::GLASS_LIGHT_FALLBACK
                 . '"; disposition glass is a dark-ground treatment and this direction commits a light ground';
             $depth = Depth::GLASS_LIGHT_FALLBACK;
         }

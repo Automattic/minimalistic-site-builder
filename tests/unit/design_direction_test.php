@@ -1399,7 +1399,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
     foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
-            $base + ['depth' => strtoupper($depth)],
+            $base + ['depth' => strtoupper($depth), 'palette' => ['base' => '#101010']],
             'cinematic-safe-zone',
             '',
             warnings: $warnings,
@@ -2807,7 +2807,7 @@ test('glass fallback writes a durable warning and retains the direction', functi
     assert_eq('ring', $delivered['depth']);
     assert_eq($authored['description'], $delivered['description']);
     $warnings = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
-    assert_contains('designDirection.json: field depth authored "glass" delivered "ring"', $warnings);
+    assert_contains('designDirection.json: field depth authored "glass"; delivered "ring"', $warnings);
     assert_contains('disposition', $warnings);
     $repairs = $secondWarnings = [];
     $again = DesignDirectionStep::normalize($delivered, $delivered['hero_blueprint']['recipe'], '', $repairs, $secondWarnings);

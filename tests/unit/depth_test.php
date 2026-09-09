@@ -85,3 +85,19 @@ test('every bounded depth renders a direction fact, glass included', function ()
     }
     assert_contains('frosted panels', \Automattic\SiteBuild\Steps\DesignDirectionStep::format(['description' => 'x', 'depth' => 'glass']));
 });
+
+test('glass uses a ring when the base is absent or invalid', function () {
+    foreach ([[], ['base' => 'white']] as $palette) {
+        $warnings = [];
+        $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => $palette, 'depth' => 'glass'],
+            'cinematic-safe-zone', warnings: $warnings,
+        );
+        assert_eq('ring', $direction['depth']);
+        assert_contains('field depth authored "glass"; delivered "ring"', implode("\n", $warnings));
+        $again = [];
+        assert_eq('ring', \Automattic\SiteBuild\Steps\DesignDirectionStep::normalize($direction, 'cinematic-safe-zone', warnings: $again)['depth']);
+        assert_true(!str_contains(implode("\n", $again), 'field depth'));
+    }
+    assert_eq(3, substr_count(Depth::kitCss('glass'), '.card-style--overlap > .card-body.overlap-up.has-band-background-color'));
+});

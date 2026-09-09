@@ -110,17 +110,20 @@ final class Depth
         $glass = $depth === 'glass'
             ? <<<CSS
 
-                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
+                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
                     background-color: color-mix(in srgb, var(--wp--preset--color--band) 72%, transparent) !important;
                 }
                 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
+                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
                         -webkit-backdrop-filter: blur(14px) saturate(1.2);
                         backdrop-filter: blur(14px) saturate(1.2);
                     }
                 }
                 @media (prefers-reduced-transparency: reduce) {
-                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color,
+                .wp-block-group.card-style--overlap > .card-body.overlap-up.has-band-background-color {
                         background-color: var(--wp--preset--color--band) !important;
                         -webkit-backdrop-filter: none;
                         backdrop-filter: none;
