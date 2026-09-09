@@ -63,9 +63,9 @@ use Automattic\SiteBuild\Warnings;
  *         - for an explicit depth commitment, writes and enqueues the
  *           build-owned depth kit that consumes the matching `depth` shadow
  *           preset on cards and contained media; full-bleed media stays flat.
- *         - for a committed page surface other than `none`, writes and
+ *         - for an optional section texture other than `none`, writes and
  *           enqueues the build-owned overlay (assets/surface/surface.css) that
- *           claims `body::before` as a fixed grain sheet; `none` prunes it.
+ *           paints below a marked section; `none` removes the stylesheet.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -231,9 +231,7 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
-     * The surface overlay claims `body::before`, so if the generated
-     * stylesheet was already using it, something lost its layer. Silence there
-     * would mean a design's own decoration vanishing with nothing said.
+     * Record a generated rule that conflicts with the texture pseudo-element.
      *
      * @return list<string>
      */
@@ -243,11 +241,12 @@ final class FinalizeThemeStep implements Step
             return [];
         }
         $css = $project->readText('theme/style.css');
-        if (preg_match('/\bbody\b(?:\s|:where\([^)]*\))*::?before\b/i', $css) !== 1) {
+        $class = Surface::className($surface);
+        if ($class === null || preg_match('/\.' . preg_quote($class, '/') . '[^{}]*::?before\b/i', $css) !== 1) {
             return [];
         }
-        return ["file='theme/style.css'; path=\"body::before\"; authored=generated design rule;"
-            . " delivered=overridden; disposition the '{$surface}' surface overlay claims html body::before"
+        return ["file='theme/style.css'; path=\"{$class}::before\"; authored=generated design rule;"
+            . " delivered=overridden; disposition the '{$surface}' surface overlay claims {$class}::before"
             . ' and resets it, so a generated rule on the same pseudo-element no longer renders'];
     }
 
@@ -291,8 +290,7 @@ final class FinalizeThemeStep implements Step
     {
         return new OverlayKit(
             'surface',
-            "// Committed page surface: a fixed overlay, never on a scrolling\n"
-                . '// container. Loads after generated style.css.',
+            '// Optional section texture. Loads after generated style.css.',
         );
     }
 
