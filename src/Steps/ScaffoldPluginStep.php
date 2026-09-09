@@ -259,25 +259,18 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
-                // Put the build's own image references back in placeholder
-                // form first. generate-images rewrites them to the served theme
-                // URL before delivery, assembled plugin pages included, so that
-                // is the spelling that actually arrives — while every rule
-                // below is written against `theme:./assets/`, including the one
-                // that decides whether an inline `url()` may stay. Folding here
-                // is what keeps this side's sanitizer identical to the build's,
-                // and it corrects a stale build-workspace slug on the way.
+                // The build's own image references arrive in the served
+                // spelling: generate-images rewrites them before delivery,
+                // assembled plugin pages included, while every rule below is
+                // written against `theme:./assets/` — the sanitizer's inline
+                // `url()` allowlist included. Fold once here and both sides
+                // keep the one rule.
                 //
-                // Deliberately narrow, because folding is not free: a `theme:`
-                // URL the sweep below does not recognise is an unknown scheme,
-                // and kses replaces the whole attribute with '#'. So fold only
-                // what that sweep accepts — a root-relative path, a lowercase
-                // hyphenated jpg/png — and leave every other reference as the
-                // working URL it already is: a subdirectory, a font, a query
-                // string, an underscore in the name. The reference must also
-                // start an attribute value, so a host is never left stranded in
-                // front of the placeholder, and a foreign one is never laundered
-                // into a spelling the source guard trusts.
+                // Fold only what that allowlist accepts, and only where a value
+                // starts: a `theme:` URL it does not recognise is an unknown
+                // scheme that kses turns into '#', and a match mid-value would
+                // strand a host in front of the placeholder or launder a
+                // foreign one past the source guard.
                 $content = (string) preg_replace(
                     '#(?<=["\'(\s])/wp-content/themes/[^/"\'\s]+/assets/([a-z0-9-]+\.(?:jpe?g|png))(?=["\')\s])#i',
                     'theme:./assets/$1',

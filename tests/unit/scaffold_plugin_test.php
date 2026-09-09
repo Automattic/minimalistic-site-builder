@@ -1339,6 +1339,7 @@ test('the seeder resolves the served URLs a build with images actually delivers'
         // unknown scheme, and it replaces the whole attribute with '#'.
         . '<img src="/wp-content/themes/demo/assets/bg_hero.jpg" alt="Underscore">' . "\n"
         . '<img src="/wp-content/themes/demo/assets/hero.2x.jpg" alt="Dotted">' . "\n"
+        . '<img src="/wp-content/themes/demo/assets/hero.jpg?ver=2" alt="Versioned">' . "\n"
         // A foreign host must not reach the placeholder spelling, or it arrives
         // at the source guard already wearing one the guard trusts.
         . '<img src="https://evil.tld/wp-content/themes/x/assets/track.jpg" alt="Foreign">' . "\n"
@@ -1368,7 +1369,6 @@ test('the seeder resolves the served URLs a build with images actually delivers'
     // Jetpack's image scan needs to see a picture at all.
     assert_contains('"id":' . $attId, $home, 'the block carries the attachment id');
     assert_contains('wp-image-' . $attId, $home, 'the img carries the paired class');
-    assert_contains('http://example.test/wp-content/uploads/2026/07/hero.jpg', $home);
     assert_contains(
         'background-image:url(http://example.test/wp-content/uploads/2026/07/hero.jpg)',
         $home,
@@ -1386,6 +1386,7 @@ test('the seeder resolves the served URLs a build with images actually delivers'
     // it arrived with. Folding it would have stored src="#" instead.
     assert_contains('/wp-content/themes/demo/assets/bg_hero.jpg', $home, 'an underscore in the name is left alone');
     assert_contains('/wp-content/themes/demo/assets/hero.2x.jpg', $home, 'a dotted name is left alone');
+    assert_contains('/wp-content/themes/demo/assets/hero.jpg?ver=2', $home, 'a query string is left alone');
     assert_true(!str_contains($home, 'src="#"'), 'nothing was folded into a scheme kses then stripped');
     // The foreign host never became a placeholder, so the source guard still
     // sees it for what it is.
