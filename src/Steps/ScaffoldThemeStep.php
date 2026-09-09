@@ -575,6 +575,34 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster > .wp-block-cover {
             overflow: hidden;
         }
+        /* A side-anchored copy zone resolves to a custom cover
+           contentPosition ("center left" / "center right"). Core's
+           `.is-position-*` rule then sets the inner container to
+           `width: auto`, and the cover's flex box shrink-wraps it to the
+           zone's intrinsic width. A columns zone with percentage widths
+           resolves against that box, not the hero: tbilisi3 rendered its
+           56% column at 347px and its poster H1 in four short lines, while
+           HeroHeadlineFit had sized the H1 for the 620px measure the block
+           tree states (BIGR-992). Restore full width, and keep the anchored
+           side by justifying the zone here: with a full-width flex item the
+           cover's `justify-content` has nothing left to move, and the
+           constrained layout would otherwise center the zone over the
+           focal half, where CoverContrastStep never samples. Core's width
+           rule is (0,5,0); the repeated inner-container class lifts this
+           one to (0,6,0). The margins beat the layout's `:where()` auto
+           margins the same way. */
+        .hero-composition--cinematic-safe-zone > .wp-block-cover.has-custom-content-position.has-custom-content-position > .wp-block-cover__inner-container.wp-block-cover__inner-container,
+        .hero-composition--layered-poster > .wp-block-cover.has-custom-content-position.has-custom-content-position > .wp-block-cover__inner-container.wp-block-cover__inner-container {
+            width: 100%;
+        }
+        :is(.hero-composition--cinematic-safe-zone, .hero-composition--layered-poster) > .wp-block-cover:is(.is-position-top-left, .is-position-center-left, .is-position-bottom-left) > .wp-block-cover__inner-container > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
+            margin-left: 0 !important;
+            margin-right: auto !important;
+        }
+        :is(.hero-composition--cinematic-safe-zone, .hero-composition--layered-poster) > .wp-block-cover:is(.is-position-top-right, .is-position-center-right, .is-position-bottom-right) > .wp-block-cover__inner-container > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
+            margin-left: auto !important;
+            margin-right: 0 !important;
+        }
         /* cinematic-safe-zone overlays copy on a full-bleed image and reserves
            image room with a right-side percentage inset. When the copy is
            authored as columns, the constrained layout otherwise caps it at
