@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
@@ -354,6 +355,8 @@ final class DesignDirectionStep implements Step
             $direction['canvas'] = $constraints['hero_canvas'];
         }
 
+        $direction = self::withStatedStepNumeral($direction, $meta, $repairs);
+
         if ($repairs !== []) {
             Narrator::write('  [design-direction] repaired ' . count($repairs)
                 . " generated direction field(s) (reported separately from durable warnings).\n");
@@ -459,6 +462,7 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
+            'step_numeral' => StepNumeral::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -1010,6 +1014,7 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $stepNumeral = self::normalizeStepNumeral($raw['step_numeral'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1109,6 +1114,7 @@ final class DesignDirectionStep implements Step
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
+            'step_numeral' => $stepNumeral,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -1357,6 +1363,18 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeStepNumeral(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            StepNumeral::ALL,
+            StepNumeral::DEFAULT,
+            'step_numeral',
+            $warnings,
+            'unsupported step numeral replaced by none',
+        );
+    }
+
     public static function normalizeSurface(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1841,6 +1859,11 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
         }
 
+        $stepNumeral = StepNumeral::explicit($direction['step_numeral'] ?? null);
+        if ($stepNumeral !== null && $stepNumeral !== StepNumeral::DEFAULT) {
+            $facts[] = "- **Step numeral**: {$stepNumeral} — " . StepNumeral::meaning($stepNumeral) . '.';
+        }
+
         $device = Device::explicit($direction['device'] ?? null);
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
@@ -2214,6 +2237,14 @@ final class DesignDirectionStep implements Step
         return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
+    public static function stepNumeralFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return StepNumeral::DEFAULT;
+        }
+        return self::normalizeStepNumeral($project->readJson(self::FILE)['step_numeral'] ?? null);
+    }
+
     /**
      * The committed page surface, or `none` when no direction was persisted
      * or the field is absent.
@@ -2253,5 +2284,18 @@ final class DesignDirectionStep implements Step
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+
+    public static function withStatedStepNumeral(array $direction, array $meta, array &$repairs = []): array
+    {
+        $stated = StepNumeral::statedNumberedFor($meta);
+        $committed = StepNumeral::explicit($direction['step_numeral'] ?? null);
+        if ($stated !== null && ($committed === null || $committed === 'none')) {
+            $repairs[] = 'designDirection.json: field step_numeral authored '
+                . self::describe($direction['step_numeral'] ?? null) . ' delivered "ghost"; disposition the brief requires step numerals';
+            $direction['step_numeral'] = 'ghost';
+        }
+        return $direction;
     }
 }

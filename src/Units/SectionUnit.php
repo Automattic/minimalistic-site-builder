@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
@@ -143,7 +144,11 @@ final class SectionUnit extends AbstractPageSectionUnit
             self::BRIEF_LAYER_MARKER,
         ]);
         $request['cached_prefixes'] = [$siteLayer, $buildLayer, $pageLayer];
-        $request['prompt'] = $brief;
+        $numberedDirective = StepNumeral::numberedDirective(
+            $input['step_numeral'] ?? null,
+            StepNumeral::clauseAppliesTo($input['stated_numbered'] ?? null, $section),
+        );
+        $request['prompt'] = $brief . ($numberedDirective === '' ? '' : "\n" . $numberedDirective);
         return $request;
     }
 
@@ -177,6 +182,18 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
+        $numeral = StepNumeral::normalize(
+            $markup,
+            is_string($input['step_numeral'] ?? null) ? $input['step_numeral'] : null,
+            $this->key($input),
+            StepNumeral::isProcessSection(
+                (string) ($input['section']['type'] ?? ''),
+                (string) ($input['section']['slug'] ?? ''),
+            ) || StepNumeral::clauseAppliesTo($input['stated_numbered'] ?? null, $input['section'] ?? []),
+        );
+        $markup = $numeral['markup'];
+        array_push($warnings, ...$numeral['warnings']);
+        array_push($repairs, ...$numeral['repairs']);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

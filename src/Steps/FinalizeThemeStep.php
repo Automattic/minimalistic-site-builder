@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -166,7 +167,12 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $stepNumeral = DesignDirectionStep::stepNumeralFor($project);
+        $numeralShipped = self::writeOverlayKit($project, self::numeralKit(), StepNumeral::kitCss($stepNumeral), $headerWarnings);
         $overlays = [];
+        if ($numeralShipped) {
+            $overlays[] = self::numeralKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -284,7 +290,12 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::numeralKit()];
+    }
+
+    public static function numeralKit(): OverlayKit
+    {
+        return new OverlayKit('numeral', '// Apply the step_numeral token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit

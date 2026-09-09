@@ -1520,3 +1520,30 @@ test('the header nav rule keeps its row shape out of the stacked archetypes (BIG
     // One page still overrides everything: no page-list, no self link.
     assert_contains('this site is ONE page', SectionsStep::navRuleFor(1, 'split-nav'));
 });
+
+test('sections records step-numeral removals and preserves sibling content', function () {
+    [$project, $tmp] = sections_fixture();
+    $sibling = '<!-- wp:paragraph --><p>Sibling content stays intact.</p><!-- /wp:paragraph -->';
+    $raw = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"className":"step-numeral"} --><p class="step-numeral">1</p><!-- /wp:paragraph -->'
+        . $sibling . '</div><!-- /wp:group -->';
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText($raw);
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $delivered = $project->readText('theme/parts/page-home--about.html');
+    assert_contains($sibling, $delivered);
+    assert_true(!str_contains($delivered, 'class="step-numeral"'));
+    assert_true($project->exists('theme/parts/page-home--hero.html'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    foreach (["file='theme/parts/page-home--about.html'", 'paragraph.step-numeral', 'authored=', 'delivered=removed', 'disposition='] as $context) {
+        assert_contains($context, $warnings);
+    }
+    $again = \Automattic\SiteBuild\StepNumeral::normalize($delivered, 'none', 'page-home--about', false);
+    assert_eq($delivered, $again['markup']);
+    assert_eq([], $again['warnings']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

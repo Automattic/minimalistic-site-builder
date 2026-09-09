@@ -1136,6 +1136,8 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
+                    'stated_numbered' => \Automattic\SiteBuild\StepNumeral::statedNumberedFor($project->exists('meta.json') ? $project->readJson('meta.json') : []),
+                    'step_numeral' => DesignDirectionStep::stepNumeralFor($project),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'header_contract' => $opening
                         ? ($frontHero
