@@ -1024,7 +1024,7 @@ final class SectionsStep implements Step
     ): array
     {
         $pages = self::repairedPages($sourcePages ?? self::pages($project), $repairs);
-        $siteSpec = $project->readText('siteSpec.json');
+        $siteSpec = SiteSpecStep::promptText($project);
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $cardStyle = DesignDirectionStep::cardStyleFor($project, $warnings);

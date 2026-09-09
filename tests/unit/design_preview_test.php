@@ -12,6 +12,30 @@ use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('design-preview excludes a retired spec mood on resume', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    try {
+        $spec = $project->readJson('siteSpec.json');
+        $spec['visual_vibe'] = 'sophisticated';
+        $project->writeJson('siteSpec.json', $spec);
+        $original = $project->readText('siteSpec.json');
+        $llm->queueText(design_preview_document());
+
+        design_preview_run($project, $llm);
+
+        assert_true(count($llm->calls) >= 1);
+        foreach ($llm->calls as $call) {
+            assert_true(!str_contains($call['prompt'], 'visual_vibe'));
+            assert_true(!str_contains($call['prompt'], 'sophisticated'));
+            assert_contains('Hearth & Crumb', $call['prompt']);
+        }
+        assert_true($project->exists('design/preview.html'));
+        assert_eq($original, $project->readText('siteSpec.json'));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function design_preview_fixture(): array
 {
