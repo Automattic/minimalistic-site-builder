@@ -52,4 +52,16 @@ test('WORD_WRAP_CSS names the hero heading subjects so it can beat scaffold spec
     assert_contains('overflow-wrap: normal', $body);
     $layered = css_block_for_selector($css, '.hero-composition--layered-poster .wp-block-heading');
     assert_true($layered !== null, 'wrap policy includes the layered-poster heading subject');
+    $authored = css_block_for_selector($css, '.hero-composition--authored .wp-block-heading');
+    assert_true($authored !== null, 'authored heroes must not bypass the whole-word policy');
+    assert_contains('overflow-wrap: normal', $authored);
+});
+
+test('scaffold authored headings preserve whole words without forbidding deliberate breaks', function () {
+    $css = (new ReflectionClass(\Automattic\SiteBuild\Steps\ScaffoldThemeStep::class))->getConstant('STYLE_CSS');
+    $body = css_block_for_selector($css, '.hero-composition--authored .wp-block-heading');
+    assert_true($body !== null);
+    assert_contains('overflow-wrap: normal', $body);
+    assert_contains('word-break: normal', $body);
+    assert_true(!str_contains($body, 'nowrap'));
 });

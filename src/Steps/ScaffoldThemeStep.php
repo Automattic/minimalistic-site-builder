@@ -652,11 +652,13 @@ final class ScaffoldThemeStep implements Step
             hyphens: auto;
         }
 
-        /* Authored heroes have no forced size or topology. Let core layouts
-           reflow naturally and break an otherwise uncontainable token only
-           as the last resort, instead of silently shrinking every headline. */
+        /* Authored heroes retain deliberate <br> breaks, never accidental
+           mid-word wrapping. The trusted heading fitter handles a word that
+           exceeds its rendered column without imposing a line-count target. */
         .hero-composition--authored .wp-block-heading {
-            overflow-wrap: anywhere;
+            overflow-wrap: normal;
+            word-break: normal;
+            hyphens: none;
         }
         .hero-composition--authored {
             container-type: inline-size;

@@ -207,9 +207,17 @@ final class HeroComposition
         }
         return "Choose the hero composition by starting with this site's concept, not a template. "
             . "Set hero_blueprint.recipe to authored (the default authoring mode, not a layout). "
-            . "In composition describe the actual arrangement, hierarchy, framing, media and copy; "
-            . "in rationale explain why those decisions express THIS concept; in mobile_layout describe "
-            . "how the composition reflows in source reading order on a narrow screen. Include at least one image; "
+            . "In rationale name the primary impression and why it belongs to THIS subject and requested style. "
+            . "In composition name the focal point, how image and headline work together, and the essential content; "
+            . "identify supporting details better placed later rather than filling the opening with everything available. "
+            . "Describe actual grouping, alignment and spacing relationships, not independent coordinates for each element. "
+            . "In mobile_layout preserve that hierarchy in a deliberate source reading order, not a blind stack of desktop columns. "
+            . "Use source_order for an optional ordered list of unique design-* class names on disjoint meaningful elements "
+            . "(such as a principal image and supporting details) whose relative DOM order matters. Name the corresponding "
+            . "elements in composition; do not prescribe every wrapper or add elements just to populate the list. "
+            . "An empty list is valid. This is not a universal image-first rule, content quota or first-screen height limit. "
+            . "Before returning the blueprint, resolve competing focal points and details that delay its primary impression. "
+            . "Include at least one image; "
             . "multiple images are welcome when they serve the concept. media_mode is foreground-image, cover-image, or mixed. "
             . "The supported blocks own their responsive behavior. "
             . "Do not map aesthetic labels to fixed templates; give the required imagery a meaningful role. "
@@ -569,7 +577,7 @@ final class HeroComposition
         // limit, copy count or mandatory helper regions. Missing media cannot
         // be placed safely without making a new composition decision.
         if (self::isAuthored($recipe)) {
-            return preg_match('~<img\b~i', $markup) === 1 ? [] : [
+            $warnings = preg_match('~<img\b~i', $markup) === 1 ? [] : [
                 self::markupWarning(
                     $part,
                     'hero image',
@@ -578,6 +586,10 @@ final class HeroComposition
                     'safe hero retained without its required imagery; add at least one image that serves the composition; no copy or sibling was removed',
                 ),
             ];
+            array_push($warnings, ...self::sourceOrderWarnings(
+                $markup, $blueprint['source_order'] ?? [], "theme/parts/{$part}.html",
+            ));
+            return $warnings;
         }
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
@@ -784,6 +796,60 @@ final class HeroComposition
             return '';
         }
         return html_entity_decode((string) ($match[1] ?? $match[2] ?? $match[3] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    /**
+     * Advisory DOM-order check, not a visual-quality score or a repair.
+     * The model names its own disjoint targets; no class means "image first"
+     * universally. Inspect saved HTML, not comment attributes. Missing,
+     * duplicated or overlapping targets cannot prove a reading order.
+     *
+     * @param list<string> $order normalized hero_blueprint.source_order
+     * @return list<string>
+     */
+    public static function sourceOrderWarnings(string $markup, array $order, string $file, ?string $anchor = null): array
+    {
+        if ($order === []) {
+            return [];
+        }
+        $dom = Html::loadUtf8Html($markup, LIBXML_NONET);
+        $root = $anchor === null ? $dom?->documentElement : $dom?->getElementById($anchor);
+        $found = array_fill_keys($order, []);
+        $sequence = [];
+        if ($root !== null) {
+            foreach ([$root, ...iterator_to_array($root->getElementsByTagName('*'))] as $node) {
+                $classes = preg_split('/\s+/', trim($node->getAttribute('class'))) ?: [];
+                foreach ($order as $class) {
+                    if (in_array($class, $classes, true)) {
+                        $found[$class][] = $node;
+                        $sequence[] = $class;
+                    }
+                }
+            }
+        }
+        $counts = array_map('count', $found);
+        $overlap = false;
+        $targets = array_merge(...array_values($found));
+        foreach ($targets as $i => $node) {
+            foreach ($targets as $j => $other) {
+                if ($i === $j) {
+                    continue;
+                }
+                for ($ancestor = $node; $ancestor !== null; $ancestor = $ancestor->parentNode) {
+                    if ($ancestor->isSameNode($other)) {
+                        $overlap = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ($root !== null && !$overlap && $sequence === $order && count(array_filter($counts, static fn ($count) => $count !== 1)) === 0) {
+            return [];
+        }
+        return ['file=' . self::describe($file) . '; block=' . self::describe($anchor ?? 'hero root')
+            . '; path=hero_blueprint.source_order; authored=' . self::describe($order)
+            . '; delivered=' . self::describe(['sequence' => $sequence, 'target_counts' => $counts, 'overlapping_targets' => $overlap])
+            . '; disposition=retained content unchanged; reconcile the named targets and their DOM order with the hero intent; no visual order was inferred'];
     }
 
     private static function imageAspect(string $alt): string

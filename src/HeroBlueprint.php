@@ -20,8 +20,8 @@ final class HeroBlueprint
             return $blueprint;
         }
         return array_intersect_key($blueprint, array_flip([
-            'version', 'recipe', 'composition', 'rationale', 'mobile_layout', 'media_mode', 'cta_treatment',
-        ]));
+            'version', 'recipe', 'composition', 'rationale', 'mobile_layout', 'media_mode', 'cta_treatment', 'source_order',
+        ])) + ['source_order' => []];
     }
 
     public const VERSION = 1;
@@ -130,6 +130,11 @@ final class HeroBlueprint
                     $warnings[] = self::warning($field, $raw[$field] ?? null, $defaults[$field],
                         'missing composition guidance replaced by concept-led fallback; hero author still chooses the layout');
                 }
+            }
+            // Optional, model-chosen relationships, never a default topology.
+            // Invalid entries lose only their check, not any hero content.
+            if (array_key_exists('source_order', $raw)) {
+                $out['source_order'] = self::sourceOrder($raw['source_order'], $repairs, $warnings);
             }
             // Defaults needed by the shared header interface are not missing
             // creative decisions; they do not constrain the authored layout.
@@ -298,6 +303,38 @@ final class HeroBlueprint
             self::repairSpatialCompatibility($out, $defaults, $repairs);
         }
 
+        return $out;
+    }
+
+    /**
+     * @param list<string> $repairs
+     * @param list<string> $warnings
+     * @return list<string>
+     */
+    private static function sourceOrder(mixed $raw, array &$repairs, array &$warnings): array
+    {
+        if (!is_array($raw) || !array_is_list($raw)) {
+            $warnings[] = self::warning('source_order', $raw, [],
+                'invalid source-order contract removed; composition prose and content retained');
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $index => $value) {
+            $class = is_string($value) ? trim($value) : '';
+            if (preg_match('/\Adesign-[a-zA-Z0-9_-]+\z/', $class) !== 1) {
+                $warnings[] = self::warning("source_order.{$index}", $value, 'removed',
+                    'invalid design class removed from source-order contract; other relationships retained');
+                continue;
+            }
+            if (in_array($class, $out, true)) {
+                self::repair($repairs, "source_order.{$index}", $value, $class, 'duplicate class consolidated');
+                continue;
+            }
+            if ($value !== $class) {
+                self::repair($repairs, "source_order.{$index}", $value, $class, 'trimmed class');
+            }
+            $out[] = $class;
+        }
         return $out;
     }
 
