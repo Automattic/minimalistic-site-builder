@@ -177,6 +177,15 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::ownMarqueeScale($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markFigures(
+            $markup,
+            $this->key($input),
+            is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
+            $repairs,
+        );
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

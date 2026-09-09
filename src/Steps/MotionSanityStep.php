@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Motion;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -293,6 +294,29 @@ final class MotionSanityStep implements Step
             $customTarget = in_array(CustomMotionStep::CLASS_NAME, $jsonTokens, true)
                 || in_array(CustomMotionStep::CLASS_NAME, $htmlTokens, true);
 
+            // A kit device on that block IS the explicit request (frm PR-8j):
+            // spector-like14 tagged its "MORE PROJECTS" marquee paragraph and
+            // its stat figures `custom-motion`, the eviction below dropped the
+            // kit `marquee` and `count-up`, and the custom step then wrote
+            // one keyframe for all three blocks. The reviewed kit device
+            // stays and the custom tag leaves the block instead.
+            if ($customTarget) {
+                $device = self::kitDeviceOnBlock($jsonTokens, $htmlTokens, $allowed);
+                if ($device !== null) {
+                    $customTarget = false;
+                    $jsonTokens = array_values(array_diff($jsonTokens, [CustomMotionStep::CLASS_NAME]));
+                    if ($jsonTokens === []) {
+                        unset($attrs['className']);
+                    } else {
+                        $attrs['className'] = implode(' ', $jsonTokens);
+                    }
+                    $doc->setAttrs($i, $attrs);
+                    $doc->removeClassTokenInOwnHtml($i, CustomMotionStep::CLASS_NAME);
+                    $notes[] = "{$doc->name($i)}: dropped '" . CustomMotionStep::CLASS_NAME
+                        . "' (the kit device '{$device}' on the block already implements the request)";
+                }
+            }
+
             $droppedJson = [];
             $droppedHtml = [];
             $kitOnBlock = 0;
@@ -466,6 +490,35 @@ final class MotionSanityStep implements Step
     }
 
     /**
+     * The kit classes that are devices in their own right, not entrance
+     * presets (frm PR-8j): a marquee and a counting figure. A custom-motion
+     * tag beside one of them asks for what the kit already ships.
+     *
+     * @var list<string>
+     */
+    private const KIT_DEVICE_CLASSES = ['marquee', 'count-up'];
+
+    /**
+     * The first kit device the profile allows on a block, or null.
+     *
+     * @param string[] $jsonTokens
+     * @param string[] $htmlTokens
+     * @param string[] $allowed
+     */
+    private static function kitDeviceOnBlock(array $jsonTokens, array $htmlTokens, array $allowed): ?string
+    {
+        foreach (self::KIT_DEVICE_CLASSES as $device) {
+            if (!in_array($device, $allowed, true)) {
+                continue;
+            }
+            if (in_array($device, $jsonTokens, true) || in_array($device, $htmlTokens, true)) {
+                return $device;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Why one class token must be dropped, or null to keep it. Mutates the
      * per-block kit counter and the page-level budget when a budgeted class
      * is KEPT.
@@ -522,14 +575,62 @@ final class MotionSanityStep implements Step
         if ($token === 'stagger-children' && count($doc->children($i)) < 2) {
             return 'stagger-children needs a container with at least two children';
         }
-        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
-        $isAmbient = in_array($token, Motion::AMBIENT_CLASSES, true);
-        $isHero = $token === 'hero-entrance';
+        // The card stack (frm W8d) is scroll-driven layout: one per page, on
+        // a container of two to six children, never an entrance budget.
+        if (in_array($token, Motion::STACK_CLASSES, true)) {
+            $children = count($doc->children($i));
+            if ($children < 2 || $children > 6) {
+                return 'sticky-stack needs a container of two to six cards';
+            }
+            $budget['stack'] ??= 0;
+            if ($budget['stack'] >= 1) {
+                return 'sticky-stack budget: one stack per page';
+            }
+            $budget['stack']++;
+            $keptKitClass = $token;
+            $kitOnBlock++;
+            return null;
+        }
+        // A count-up figure (frm W8b) is an entrance for observation only: a
+        // stat row counts every figure, so it spends no section budget, and
+        // it needs text to count.
+        $isCountUp = $token === 'count-up';
+        if ($isCountUp && !in_array($doc->name($i), ['heading', 'paragraph'], true)) {
+            return 'count-up runs on a heading or paragraph that starts with a figure';
+        }
+        if ($isCountUp) {
+            // A model-authored count on prose or a date counts nonsense from
+            // zero (zova-like11 counted "2024"). The boundary marker skips
+            // both; the same rule applies to what the model marked itself.
+            $figure = trim(html_entity_decode(strip_tags($doc->innerHtml($i)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match(GeneratedMarkup::FIGURE_PATTERN, $figure) !== 1) {
+                return 'count-up counts a figure-only block; prose keeps its text still';
+            }
+            if (preg_match('/^(?:18|19|20|21)\d{2}$/', $figure) === 1) {
+                return 'count-up never counts a year';
+            }
+        }
+        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true)
+            && !in_array($token, Motion::UNBUDGETED_ENTRANCES, true);
+        // The marquee (frm W8c) is a band, not image motion: it keeps its own
+        // one-per-page slot so a hero ken-burns does not silence the brief's
+        // marquee, and it runs on a paragraph only.
+        $isMarquee = $token === 'marquee';
+        $isAmbient = !$isMarquee && in_array($token, Motion::AMBIENT_CLASSES, true);
+        $isHero = in_array($token, Motion::HERO_CLASSES, true);
+        $budget['marquee'] ??= 0;
+        if ($isMarquee && $doc->name($i) !== 'paragraph') {
+            return 'marquee runs on a paragraph only';
+        }
+        // hero-entrance and word-reveal budget separately: the copy group
+        // may fade in while the headline's words arrive one at a time.
+        $heroKey = $token === 'hero-entrance' ? 'hero' : 'word';
+        $budget[$heroKey] ??= 0;
 
         // Check every budget before consuming any of them: a class rejected
         // by a page-level limit must not steal this section's entrance slot.
         if ($isHero && !$heroAllowed) {
-            return 'hero-entrance is allowed only in the first section';
+            return "{$token} is allowed only in the first section";
         }
         if ($isEntrance && $sectionEntrances >= Motion::MAX_ENTRANCES_PER_SECTION) {
             return 'section entrance budget: at most two entrances per section';
@@ -537,8 +638,11 @@ final class MotionSanityStep implements Step
         if ($isAmbient && $budget['ambient'] >= 1) {
             return 'ambient budget: one signature effect per page';
         }
-        if ($isHero && $budget['hero'] >= 1) {
-            return 'hero-entrance budget: once per page';
+        if ($isMarquee && $budget['marquee'] >= 1) {
+            return 'marquee budget: one loop per page';
+        }
+        if ($isHero && $budget[$heroKey] >= 1) {
+            return "{$token} budget: once per page";
         }
 
         if ($isEntrance) {
@@ -547,8 +651,11 @@ final class MotionSanityStep implements Step
         if ($isAmbient) {
             $budget['ambient']++;
         }
+        if ($isMarquee) {
+            $budget['marquee']++;
+        }
         if ($isHero) {
-            $budget['hero']++;
+            $budget[$heroKey]++;
         }
 
         $keptKitClass = $token;
