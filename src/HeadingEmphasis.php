@@ -57,18 +57,15 @@ final class HeadingEmphasis
     }
 
     /**
-     * Two-tone headings that read as a label glued to a second title (frm
-     * PR-5w): luzia-like50 shipped "Questions <span>Common answers</span>".
-     * A heading whose bare lead is one or two words and whose span opens
-     * with a capital letter is two titles, not one sentence; the build
-     * cannot rewrite the copy, so it reports each one.
+     * Report known label-plus-title forms without a letter-case heuristic.
      *
-     * @return list<string> the offending headings' plain text
+     * @return list<string>
      */
     public static function gluedTwoTone(string $markup): array
     {
         $glued = [];
-        if (preg_match_all('/<h[1-6][^>]*>(.*?)<\/h[1-6]>/su', $markup, $headings) !== 1 && ($headings[1] ?? []) === []) {
+        preg_match_all('/<h[1-6][^>]*>(.*?)<\/h[1-6]>/su', $markup, $headings);
+        if (($headings[1] ?? []) === []) {
             return [];
         }
         foreach ($headings[1] as $inner) {
@@ -80,13 +77,11 @@ final class HeadingEmphasis
             if ($lead === '' || $tail === '') {
                 continue;
             }
-            $leadWords = preg_split('/\s+/u', $lead, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-            $leadEndsClause = preg_match('/[,:;]$/u', $lead) === 1;
-            $tailCapital = preg_match('/^\p{Lu}/u', $tail) === 1 && preg_match('/^\p{Lu}[\p{Ll}]/u', $tail) === 1;
-            // "Sofia Sousa", "FinFlow teams": a proper name or a camel-cased brand opens with a capital and is not a title.
-            $tailIsName = (preg_match('/^\p{Lu}\S*\s+\p{Lu}/u', $tail) === 1 && count(preg_split('/\s+/u', $tail, -1, PREG_SPLIT_NO_EMPTY) ?: []) <= 3)
-                || preg_match('/^\p{Lu}\p{Ll}+\p{Lu}/u', $tail) === 1;
-            if (count($leadWords) <= 2 && $tailCapital && !$leadEndsClause && !$tailIsName) {
+            $labelLead = preg_match('/^(?:questions|process|services|testimonials|contact|faq)$/iu', $lead) === 1;
+            $secondInvitation = preg_match("/^let['’]s create$/iu", $lead) === 1
+                && preg_match('/^ready to\b/iu', $tail) === 1;
+            $continuation = preg_match('/^(?:from|for|with|of|in|on|to|that|which|at|by|without|through|about)\b/iu', $tail) === 1;
+            if (($labelLead && !$continuation) || $secondInvitation) {
                 $glued[] = trim(html_entity_decode(strip_tags($inner), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
             }
         }

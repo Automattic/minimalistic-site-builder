@@ -352,7 +352,7 @@ final class CssChecks
         string $hook = 'emph',
         bool $bareDeclarationList = false,
     ): array {
-        $pattern = '/(?<![\\w-])\\.' . preg_quote($hook, '/') . '(?![\\w-])/';
+        $pattern = '/\\.' . preg_quote($hook, '/') . '(?![\\w-])/';
         [$repaired, $dropped] = self::dropDeclarations(
             $css,
             static function (array $declaration) use ($pattern): bool {

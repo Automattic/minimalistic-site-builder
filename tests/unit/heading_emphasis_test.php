@@ -94,3 +94,27 @@ test('the two-tone fact asks for one sentence and a glued label-plus-title headi
     assert_eq(['Questions Common answers'], $glued, implode(' | ', $glued));
     assert_eq([], HeadingEmphasis::gluedTwoTone('<h2>No span here</h2>'));
 });
+
+test('heading emphasis guards compound selectors and ignores letter case in label checks', function () {
+    foreach (['span.emph', 'h2 span.emph', '.x.emph'] as $selector) {
+        [$css, $dropped] = \Automattic\SiteBuild\CssChecks::dropEmphasisHookDeclarations($selector . '{white-space:nowrap}.safe{color:red}');
+        assert_eq(['white-space:nowrap'], $dropped);
+        assert_contains('.safe{color:red}', $css);
+        assert_eq([$css, []], \Automattic\SiteBuild\CssChecks::dropEmphasisHookDeclarations($css));
+    }
+    assert_eq(['Questions Common Answers'], HeadingEmphasis::gluedTwoTone('<h2>Questions <span class="emph">Common Answers</span></h2>'));
+    assert_eq([], HeadingEmphasis::gluedTwoTone('<h2>Selected work <span class="emph">From the Last Two Years</span></h2>'));
+});
+
+test('SectionUnit checks two-tone copy only for the two-tone commitment', function () {
+    $unit = new \Automattic\SiteBuild\Units\SectionUnit(new \Automattic\SiteBuild\Tests\FakeLlm(), new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group --><div class="wp-block-group"><!-- wp:heading --><h2 class="wp-block-heading">Questions <span class="emph">Common Answers</span></h2><!-- /wp:heading --></div><!-- /wp:group -->';
+    foreach (['none', 'italic-word', 'highlight', 'two-tone'] as $emphasis) {
+        $result = $unit->finish($raw, [
+            'page' => ['slug' => 'home'], 'section' => ['slug' => 'faq'],
+            'design_direction' => DesignDirectionStep::format(['description' => 'x', 'heading_emphasis' => $emphasis]),
+        ]);
+        $warnings = array_filter($result->warnings, static fn (string $warning): bool => str_contains($warning, 'authored=two-tone'));
+        assert_eq($emphasis === 'two-tone' ? 1 : 0, count($warnings));
+    }
+});

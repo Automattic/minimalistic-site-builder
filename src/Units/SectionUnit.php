@@ -180,10 +180,12 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
 
-        foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
-            $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
-                . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
-                . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+        if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
+            foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+                $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                    . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                    . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+            }
         }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];

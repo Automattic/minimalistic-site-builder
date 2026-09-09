@@ -290,7 +290,7 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit()];
+        return [self::emphasisKit(), self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
     }
 
     public static function emphasisKit(): OverlayKit
