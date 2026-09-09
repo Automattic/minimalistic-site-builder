@@ -79,7 +79,7 @@ test('the framed-screen kit ships for ui-mockup only, keys on the image role hoo
     assert_contains(':not(.wp-block-cover *)', $css, 'a cover keeps its own treatment');
     assert_contains(':not([class*="avatar"])', $css, 'an avatar is not a screen');
     assert_contains(':has(> img:not([src$=".png"]))', $css, 'a transparent asset is not a screen');
-    assert_contains('border-radius: var(--shape-radius-panel, 1rem)', $css, 'the frame takes the committed panel radius');
+    assert_contains('border-radius: var(--shape-radius-panel, 1rem)', $css, 'the frame accepts a panel radius and uses 1rem when it is absent');
     assert_contains('inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent)', $css, 'the ring is drawn in the surface ink');
     assert_contains('inset-inline-start: 0.875rem', $css, 'the window dots follow the writing direction');
     assert_contains('.screen-frame--tilt', $css);
