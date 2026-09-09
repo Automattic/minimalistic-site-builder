@@ -429,3 +429,83 @@ function item_pattern_unit_input(?string $pattern): array
         'header_contract' => '',
     ];
 }
+
+test('a cardless archetype releases its planned item pattern and corrects the notes (frm PR-3v)', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'asymmetric-split', 'item_pattern' => null],
+            ['slug' => 'services', 'type' => 'services', 'layout_archetype' => 'statement-lines', 'item_pattern' => 'card', 'content_notes' => 'Four service cards.'],
+            ['slug' => 'numbers', 'type' => 'metrics', 'layout_archetype' => 'stat-ledger', 'item_pattern' => 'rule-row'],
+            ['slug' => 'partners', 'type' => 'partners', 'layout_archetype' => 'logo-strip', 'item_pattern' => null],
+            ['slug' => 'values', 'type' => 'values', 'layout_archetype' => 'feature-row-hairlines', 'item_pattern' => 'card'],
+            ['slug' => 'plans', 'type' => 'pricing', 'layout_archetype' => 'pricing-tiers', 'item_pattern' => 'card'],
+            ['slug' => 'work', 'type' => 'case-studies', 'layout_archetype' => 'equal-card-grid', 'item_pattern' => 'card'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'card', $repairs);
+    assert_eq([null, null, null, null, null, 'card', 'card'], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(3, count($repairs), 'one repair per authored pattern on a cardless archetype');
+    assert_contains("sections[1].item_pattern", $repairs[0]);
+    assert_contains("released the 'statement-lines' section from the item idiom", $repairs[0]);
+    assert_contains("sections[2].item_pattern", $repairs[1]);
+    assert_contains("sections[4].item_pattern", $repairs[2]);
+    assert_contains('Four service cards.', $delivered[0]['sections'][1]['content_notes']);
+    assert_contains('Build correction', $delivered[0]['sections'][1]['content_notes'], 'the author is told the idiom did not survive');
+    assert_true(!isset($delivered[0]['sections'][5]['content_notes']), 'pricing keeps its cards untouched');
+
+    $fixedPointRepairs = [];
+    assert_eq($delivered, PagePlanStep::reconcileItemPatternAssignments($delivered, 'card', $fixedPointRepairs));
+    assert_eq([], $fixedPointRepairs);
+});
+
+test('a closing cta-panel section keeps its one panel and loses every sibling (frm PR-3an)', function (): void {
+    $panel = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","align":"wide","className":"cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide cta-panel has-base-color has-contrast-background-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Let\'s work together</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Have a project in mind?</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#contact">Get in touch</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $echo = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:heading {"level":3,"fontSize":"display"} --><h3 class="wp-block-heading has-display-font-size">Sophie van der Meer</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Web design and digital direction.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $badge = '<!-- wp:paragraph {"className":"section-badge"} --><p class="section-badge">Next step</p><!-- /wp:paragraph -->';
+    $section = static fn (string $inner): string => '<!-- wp:group {"anchor":"closing","className":"section-composition--cta-panel","layout":{"type":"constrained"}} -->'
+        . '<div id="closing" class="wp-block-group section-composition--cta-panel">' . $inner . '</div><!-- /wp:group -->';
+
+    $repairs = [];
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($badge . $panel . $echo), 'page-home--closing', $repairs, $warnings);
+    assert_eq($section($panel), $out, 'the badge before and the echo after both go');
+    assert_eq(2, count($warnings));
+    assert_contains('holds one panel and nothing else in its root', $warnings[1]);
+    assert_contains("block='wp:group[0] > wp:group[1]'; authored=", $warnings[1], 'the echo group after the panel: ' . $warnings[1]);
+    assert_contains("block='wp:group[0] > wp:paragraph[0]'", $warnings[0], 'the badge before it');
+    assert_eq('cta-panel-siblings-stripped', $repairs[0]['code'] ?? null);
+    assert_true(\Automattic\SiteBuild\BlockMarkup::parse($out)->unclosedIndices() === []);
+
+    $repairs = [];
+    $warnings = [];
+    assert_eq($section($panel), \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($panel), 'page-home--closing', $repairs, $warnings));
+    assert_eq($section($echo), \Automattic\SiteBuild\Units\GeneratedMarkup::stripCtaPanelSiblings($section($echo), 'page-home--closing', $repairs, $warnings));
+    assert_eq([], $warnings);
+    assert_eq([], $repairs);
+});
+
+test('card recipes keep cards under a ruled site pattern', function (): void {
+    foreach (['bento-grid', 'pricing-tiers'] as $archetype) {
+        $pages = [['slug' => 'home', 'sections' => [[
+            'slug' => 'plans', 'type' => 'pricing', 'layout_archetype' => $archetype,
+            'item_pattern' => 'rule-row', 'content_notes' => 'Keep all plan features.',
+        ]]]];
+        $repairs = [];
+        $out = PagePlanStep::reconcileItemPatternAssignments($pages, 'rule-row', $repairs);
+        assert_eq('card', $out[0]['sections'][0]['item_pattern']);
+        assert_contains('Keep all plan features.', $out[0]['sections'][0]['content_notes']);
+        assert_eq(1, count($repairs));
+        $again = [];
+        assert_eq($out, PagePlanStep::reconcileItemPatternAssignments($out, 'rule-row', $again));
+        assert_eq([], $again);
+    }
+});

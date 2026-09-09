@@ -575,3 +575,121 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme styles native accordion rows for the faq-split archetype (frm W3b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_faq_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-details > summary', $css);
+    assert_contains('.wp-block-details[open] > summary::after', $css);
+    assert_contains('.faq-list > .wp-block-details:first-child', $css);
+    assert_contains('prefers-reduced-motion', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme rounds and clips the closing cta-panel from the shape scale (frm W3d)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_cta_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-group.cta-panel {', $css);
+    assert_contains('border-radius: var(--shape-radius-panel, 0)', $css);
+    assert_contains('overflow: hidden', $css);
+    assert_contains('.wp-block-group.cta-panel :is(h1, h2, h3)', $css, 'a clipped panel never clips its headline');
+    assert_contains('overflow-wrap: anywhere', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important', $css, 'phone-scale headline cap');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme sets the pricing figure in the heading face and lifts the recommended tier (frm W3c)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pricing_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--pricing-tiers .price-figure {', $css);
+    assert_contains('font-size: var(--wp--preset--font-size--section-title)', $css);
+    assert_contains('.section-composition--pricing-tiers .equal-cards > .wp-block-column > .card-highlight {', $css);
+    assert_contains('transform: translateY(-0.75rem)', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme draws stat-ledger hairlines between figure columns and stacks them on phones (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--display), 26cqi)', $css, 'a figure never runs out of its column (frm PR-3m: the column cap)');
+    assert_true(!str_contains($css, '7vw, 26cqi'), 'the viewport cap is gone: it shrank phone figures');
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column {', $css);
+    assert_contains('container-type: inline-size', $css, 'each ledger column is its own inline-size container');
+    assert_contains('min-width: 0', $css, 'a ledger column may shrink below its figure');
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,', $css);
+    assert_contains('border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css, 'the phone hairline is horizontal');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme shares the hairline column rules with the feature row (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_featurerow_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {', $css);
+    assert_true(substr_count($css, 'border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)') >= 1, 'the hairline is shared');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy-first on phones (frm W3g)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_zigzag_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Luzia');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--zigzag-steps .wp-block-columns {', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-group.step-plate,', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:not(:has(*)) {', $css, 'an emptied media column keeps the plate shape');
+    assert_contains('min-block-size: 14rem', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {', $css);
+    assert_contains('order: -1', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme sets statement lines at section-title scale with hairlines between them (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_statements_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 8vw)', $css, 'phones scale the line with the viewport');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme keys the project-grid tile rules on covers inside columns, never on a section band (frm PR-3q)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_grid_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Lumina');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    exec('rm -rf ' . escapeshellarg($tmp));
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover {', $css);
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover:hover .wp-block-cover__image-background {', $css);
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover {'), 'a section-level image band is a cover too and must keep its height');
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover__image-background {'), 'the band backdrop keeps its own scale');
+});
+
+test('the stat-ledger figure rule names level-3 figures, so a section heading in a lead column wraps (frm PR-3z)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_h2_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $rule = '.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {';
+    assert_contains($rule, $css);
+    $body = substr($css, (int) strpos($css, $rule), 700);
+    assert_contains('white-space: nowrap;', $body, 'the figure still never wraps mid-token');
+    assert_contains('26cqi', $body);
+    assert_true(!str_contains($css, '.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {'), 'no level-agnostic figure rule remains');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
