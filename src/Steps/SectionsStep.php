@@ -1098,6 +1098,7 @@ final class SectionsStep implements Step
             ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
             (string) $contract['header']['archetype'] ?: null,
             HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
+            chrome: DesignDirectionStep::headerChromeFor($project),
         )['behavior'];
         $jobs = [
             'header' => [

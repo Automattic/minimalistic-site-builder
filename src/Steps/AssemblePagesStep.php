@@ -320,6 +320,7 @@ final class AssemblePagesStep implements Step
         return match ($headerBehavior) {
             'sticky-soft' => 'site-header-shell site-header-shell--sticky-soft',
             'overlay-to-solid' => 'site-header-shell site-header-shell--overlay-to-solid',
+            'overlay-transient' => 'site-header-shell site-header-shell--overlay-transient',
             default => null,
         };
     }
@@ -334,6 +335,11 @@ final class AssemblePagesStep implements Step
         return match ($headerBehavior) {
             'sticky-soft' => 'site-header-shell site-header-shell--sticky-soft',
             'overlay-to-solid' => 'site-header-shell site-header-shell--sticky-soft site-header-shell--force-solid',
+            // A transient overlay asked for no persistent chrome, so the blog
+            // fallback keeps the header in the flow and only forces the
+            // opaque surface the overlay paint vocabulary would otherwise
+            // veil over a page with no image-led opening.
+            'overlay-transient' => 'site-header-shell site-header-shell--force-solid',
             default => null,
         };
     }

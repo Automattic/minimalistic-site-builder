@@ -5,6 +5,7 @@ use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
@@ -2362,6 +2363,49 @@ test('normalize commits a catalog device', function () {
     $warnings = [];
     assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
     assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('header chrome normalizes actionably and the accessor falls back to transient (BIGR-998)', function () {
+    // Persistent chrome is an explicit commitment. An absent field says
+    // nothing and delivers the transient default without a warning; a value
+    // outside the vocabulary lost authored intent and is durable-warning
+    // material, exactly like the sibling bounded axes.
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A header that stays.',
+        'header_chrome' => 'Persistent',
+    ], 'cinematic-safe-zone');
+    assert_eq('persistent', $direction['header_chrome']);
+
+    $absent = DesignDirectionStep::normalize([
+        'description' => 'Nothing committed.',
+    ], 'cinematic-safe-zone');
+    assert_eq(HeaderChrome::TRANSIENT, $absent['header_chrome']);
+
+    $warnings = [];
+    assert_eq('transient', HeaderChrome::normalize('always-on', $warnings));
+    assert_eq(1, count($warnings));
+    foreach (['field header_chrome', 'always-on', 'delivered "transient"', 'invalid header chrome'] as $part) {
+        assert_contains($part, $warnings[0]);
+    }
+
+    $blank = [];
+    assert_eq('transient', HeaderChrome::normalize('', $blank));
+    assert_eq([], $blank, 'an empty commitment is the documented default, not a defect');
+
+    assert_eq('persistent', HeaderChrome::explicit(' PERSISTENT '));
+    assert_eq(null, HeaderChrome::explicit(['persistent']));
+    assert_true(HeaderChrome::isPersistent('persistent'));
+    assert_true(!HeaderChrome::isPersistent('transient'));
+    assert_true(!HeaderChrome::isPersistent(null), 'an uncommitted axis never asks for chrome');
+
+    $tmp = sys_get_temp_dir() . '/builder_header_chrome_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project), 'a missing artifact commits nothing');
+    $project->writeJson('designDirection.json', ['header_chrome' => ['persistent']]);
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project));
+    $project->writeJson('designDirection.json', ['header_chrome' => ' Persistent ']);
+    assert_eq('persistent', DesignDirectionStep::headerChromeFor($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('the direction description is never edited to remove motif words', function () {

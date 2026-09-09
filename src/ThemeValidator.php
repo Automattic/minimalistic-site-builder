@@ -148,8 +148,11 @@ final class ThemeValidator
                 $headerBehavior = $project->readJson(HeaderBehavior::FILE);
                 if (is_array($headerBehavior)) {
                     $headerBehavior = HeaderBehavior::validateArtifact($headerBehavior);
-                    $requiresClearOpeningProof = $headerBehavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
-                        && $headerBehavior['topTreatment'] === HeaderBehavior::TREATMENT_TRANSPARENT;
+                    $requiresClearOpeningProof = in_array(
+                        $headerBehavior['behavior'],
+                        HeaderBehavior::OVERLAY_BEHAVIORS,
+                        true,
+                    ) && $headerBehavior['topTreatment'] === HeaderBehavior::TREATMENT_TRANSPARENT;
                 }
             } catch (\RuntimeException|\InvalidArgumentException) {
                 // ValidateThemeStep records the malformed artifact itself. Do

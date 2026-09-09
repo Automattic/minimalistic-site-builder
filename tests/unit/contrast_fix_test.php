@@ -498,7 +498,7 @@ function overlay_lint_project(bool $overlay, string $textColor = 'base'): array
             ['slug' => 'secondary', 'color' => '#9E9E9E', 'name' => 'Secondary'],
         ]]],
     ]);
-    $className = $overlay ? 'header-behavior-overlay-to-solid' : 'site-header';
+    $className = $overlay ? 'header-behavior-overlay' : 'site-header';
     $project->writeText(
         'theme/parts/header.html',
         '<!-- wp:group {"className":"' . $className . '","textColor":"' . $textColor . '","layout":{"type":"constrained"}} -->'

@@ -57,6 +57,19 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
         'no selector outside the driver scope fixes the header'
     );
 
+    // A transient overlay shares every paint rule and takes no promotion:
+    // the design direction asked for a header that leaves (BIGR-998).
+    assert_contains('.site-header-shell--overlay-transient', $css);
+    assert_true(
+        !str_contains($css, 'html.header-state-js .site-header-shell--overlay-transient'),
+        'the driver scope never fixes a transient overlay'
+    );
+    assert_contains(
+        'html.header-state-js.header-chrome-persistent',
+        $css,
+        'only chrome that survives the scroll claims the anchor offset'
+    );
+
     $state = header_asset_css_block($css, 'html.header-is-scrolled');
     assert_contains('background-color: var(--header-scrolled-surface)', $state);
     assert_contains('box-shadow: var(--header-scrolled-shadow)', $state);
@@ -69,7 +82,7 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
 
     $clearOverlay = header_asset_css_block(
         $css,
-        '.header-behavior-overlay-to-solid.header-top-transparent',
+        '.header-behavior-overlay.header-top-transparent',
     );
     assert_contains('--header-start-surface: transparent', $clearOverlay);
     assert_contains(
@@ -109,7 +122,7 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     // The overlay's progressive glass block is the LAST backdrop-filter
     // @supports: the sticky treatment block earlier also gates on color-mix.
     $glass = header_asset_last_css_block($css, '@supports ((-webkit-backdrop-filter: blur(1px))');
-    assert_contains('.header-behavior-overlay-to-solid::before', $glass);
+    assert_contains('.header-behavior-overlay::before', $glass);
     assert_contains('-webkit-backdrop-filter: blur(14px) saturate(115%)', $glass);
     assert_contains('backdrop-filter: blur(14px) saturate(115%)', $glass);
     assert_contains('pointer-events: none', $glass);
@@ -120,7 +133,7 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
         !str_contains($glass, 'transition-property: backdrop-filter'),
         'the potentially expensive glass filter switches states without animation',
     );
-    assert_contains('.site-header-shell--overlay-to-solid + .wp-block-post-content', $css);
+    assert_contains(".site-header-shell--overlay-transient)\n    + .wp-block-post-content", $css);
     assert_contains('margin-block-start: 0', $css);
 
     // Classic WordPress exposes body.admin-bar but no dependable custom
@@ -155,7 +168,7 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     // the needle itself fails closed if sticky-soft loses its coverage.
     $printGlass = header_asset_css_block(
         $print,
-        ':is(.header-behavior-overlay-to-solid, .header-behavior-sticky-soft)::before',
+        ':is(.header-behavior-overlay, .header-behavior-sticky-soft)::before',
     );
     assert_contains('content: none !important', $printGlass);
     assert_contains('backdrop-filter: none !important', $printGlass);

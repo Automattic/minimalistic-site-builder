@@ -735,7 +735,7 @@ test('validate-theme checks delivered root colors and nested persistent position
 
 test('validate-theme checks overlay foreground against the trusted scrim worst case', function () {
     [$project, $tmp] = final_validation_project();
-    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+    $classes = 'header-behavior-overlay header-start-transparent '
         . 'header-scrolled-contrast header-foreground-primary';
     $project->writeJson('headerBehavior.json', [
         'behavior' => 'overlay-to-solid',
