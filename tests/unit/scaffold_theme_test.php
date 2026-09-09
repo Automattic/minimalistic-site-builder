@@ -678,16 +678,12 @@ test('scaffold-theme sets statement lines one ramp step under the title, with ha
         'the statement line no longer ties with the section title',
     );
     assert_contains(
-        'font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 4.6cqi);',
+        'font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));',
         $body,
         'the line sits one ramp step under the title and follows the group width',
     );
     assert_contains('container-type: inline-size;', $css, 'the group is the query container the cqi unit reads');
-    assert_contains(
-        'font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 7vw)',
-        $css,
-        'phones scale the line with the viewport',
-    );
+    assert_eq(1, substr_count($css, $rule), 'one size rule prevents a viewport breakpoint jump');
     // One axis: the two-class selector outranks core's has-text-align-center.
     assert_contains('.section-composition--statement-lines :is(.wp-block-heading, p) {', $css);
     assert_contains('text-align: start;', $css);

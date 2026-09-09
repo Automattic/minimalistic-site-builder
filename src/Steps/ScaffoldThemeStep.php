@@ -909,6 +909,8 @@ final class ScaffoldThemeStep implements Step
         .section-composition--statement-lines :is(.wp-block-heading, p) {
             text-align: start;
         }
+        /* Keep one size rule at all viewport widths. The 1.25rem minimum
+           keeps narrow statements readable without a jump at 600px. */
         /* The statement ledger carries its own register. The line sits one
            ramp step under the section title, so the title still leads, and
            the size follows the group's own width, so a long statement holds
@@ -922,18 +924,12 @@ final class ScaffoldThemeStep implements Step
             margin: 0;
             padding-block: var(--wp--preset--spacing--md, 1.5rem);
             border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-            font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 4.6cqi);
+            font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));
             line-height: 1.15;
             text-wrap: balance;
         }
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
             border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-        }
-        @media (max-width: 600px) {
-
-            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-                font-size: min(var(--wp--preset--font-size--heading, 2.828rem), 7vw);
-            }
         }
 
         .wp-block-group.cta-panel {
