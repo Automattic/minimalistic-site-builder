@@ -19,6 +19,27 @@ test('type treatment maps every bounded commitment to exact case and tracking le
     }
 });
 
+test('the statement-lines register drops the caps of an uppercase site treatment (BIGR-1002)', function () {
+    // A statement line carries a whole statement, not a label. Under caps it
+    // loses the word shapes a reader recognizes and sets wide enough to wrap,
+    // which breaks the archetype's one-line premise.
+    foreach (['caps-tight' => '-0.02em', 'caps-tracked' => '0.01em'] as $treatment => $tracking) {
+        $css = (string) TypeTreatment::kitCss($treatment);
+        assert_contains(
+            '.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {',
+            $css,
+        );
+        assert_contains('text-transform: none;', $css);
+        assert_contains("letter-spacing: {$tracking};", $css);
+    }
+
+    // Every other treatment ships no kit: lowercase is a deliberate craft
+    // voice on long lines, and the rest never set caps.
+    foreach (['sentence', 'tight', 'title', 'lowercase', 'small-caps', '', null, 7] as $treatment) {
+        assert_eq(null, TypeTreatment::kitCss($treatment));
+    }
+});
+
 test('type treatment rejects absent and unsupported commitments without guessing', function () {
     foreach ([null, '', 'small-caps', ['title'], 7, 'title'] as $value) {
         assert_eq(null, TypeTreatment::typography($value));
@@ -59,20 +80,20 @@ test('the display-lines kit ships for the uppercase treatments only and finalize
     $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'caps-tracked']);
     finalize_static_header($project);
     quietly(fn () => (new \Automattic\SiteBuild\Steps\FinalizeThemeStep())->run($project));
-    assert_contains('line-height: 0.92', $project->readText('theme/assets/treatment/treatment.css'));
-    assert_contains("wp_enqueue_style('forno-vero-treatment', get_theme_file_uri('assets/treatment/treatment.css'), array('forno-vero-style'), \$ver);", $project->readText('theme/functions.php'));
+    assert_contains('line-height: 0.92', $project->readText('theme/assets/type-treatment/type-treatment.css'));
+    assert_contains("wp_enqueue_style('forno-vero-type-treatment', get_theme_file_uri('assets/type-treatment/type-treatment.css'), array('forno-vero-style'), \$ver);", $project->readText('theme/functions.php'));
     $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'sentence']);
     quietly(fn () => (new \Automattic\SiteBuild\Steps\FinalizeThemeStep())->run($project));
-    assert_true(!$project->exists('theme/assets/treatment/treatment.css'), 'stale treatment kit pruned');
+    assert_true(!$project->exists('theme/assets/type-treatment/type-treatment.css'), 'stale treatment kit pruned');
     exec('rm -rf ' . escapeshellarg($tmp));
     $scaffold = (string) file_get_contents(repo_path('src/Steps/ScaffoldThemeStep.php'));
     assert_contains('text-wrap: balance;', $scaffold, 'every hero heading balances its lines');
 });
 
 
-test('the treatment kit declares its output path', function () {
+test('the type-treatment kit declares its output path', function () {
     $step = new \Automattic\SiteBuild\Steps\FinalizeThemeStep();
-    assert_true(in_array('theme/assets/treatment/*', $step->declaration()->writes, true));
+    assert_true(in_array('theme/assets/type-treatment/*', $step->declaration()->writes, true));
 });
 
 test('a resumed title treatment uses sentence case and records one warning', function () {

@@ -36,6 +36,57 @@ final class TypeTreatment
         return $treatment === null ? null : self::TYPOGRAPHY[$treatment];
     }
 
+    /**
+     * Tracking for the statement-lines register, per uppercase treatment. The
+     * site value is tuned for caps; sentence case at the same value sets too
+     * tight under `caps-tight` and far too open under `caps-tracked`.
+     *
+     * @var array<string,string>
+     */
+    private const STATEMENT_LINE_TRACKING = [
+        'caps-tight'   => '-0.02em',
+        'caps-tracked' => '0.01em',
+    ];
+
+    /**
+     * The statement-lines register: an opt-out from the site heading case for
+     * one archetype.
+     *
+     * A statement line carries a whole statement, not a label. Under an
+     * uppercase site treatment five stacked statements lose the word shapes a
+     * reader recognizes, and each line sets wider, so a statement that fits
+     * one line in sentence case wraps to two. That breaks the archetype's own
+     * premise. Under `caps-tight` and `caps-tracked` these lines keep the
+     * heading family and drop the caps.
+     *
+     * Every other treatment ships no kit: `lowercase` is a deliberate craft
+     * voice on long lines, and `sentence`, `tight` and `title` never set caps.
+     */
+    public static function kitCss(mixed $treatment): ?string
+    {
+        $treatment = self::explicit($treatment);
+        if ($treatment === null || !isset(self::STATEMENT_LINE_TRACKING[$treatment])) {
+            return null;
+        }
+        $tracking = self::STATEMENT_LINE_TRACKING[$treatment];
+
+        return <<<CSS
+
+            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
+                text-transform: none;
+                letter-spacing: {$tracking};
+            }
+
+            /* The build sets the '{$treatment}' display line height. */
+            .hero-composition__copy .wp-block-heading:is(h1, .has-display-font-size),
+            .wp-block-heading.has-display-font-size {
+                line-height: 0.92;
+                text-wrap: balance;
+            }
+
+            CSS;
+    }
+
     public static function meaning(string $treatment): string
     {
         return match ($treatment) {
@@ -50,22 +101,4 @@ final class TypeTreatment
 
     /** The treatments whose display headings stack as tight uppercase lines (frm W5c). */
     public const STACKED_LINE_TREATMENTS = ['caps-tight', 'caps-tracked'];
-
-    /** Set the uppercase display line height. Preserve the line height of other heading levels. */
-    public static function kitCss(mixed $treatment): ?string
-    {
-        $treatment = self::explicit($treatment);
-        if ($treatment === null || !in_array($treatment, self::STACKED_LINE_TREATMENTS, true)) {
-            return null;
-        }
-        return <<<CSS
-            /* The build sets the '{$treatment}' display line height. */
-            .hero-composition__copy .wp-block-heading:is(h1, .has-display-font-size),
-            .wp-block-heading.has-display-font-size {
-                line-height: 0.92;
-                text-wrap: balance;
-            }
-
-            CSS;
-    }
 }
