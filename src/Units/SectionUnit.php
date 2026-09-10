@@ -197,6 +197,14 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
         $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markFigures(
+            $markup,
+            $this->key($input),
+            is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
+            $repairs,
+        );
 
         if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
             foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {

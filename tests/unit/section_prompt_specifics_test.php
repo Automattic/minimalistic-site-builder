@@ -49,6 +49,9 @@ test('section specifics gate motion vocabulary and keep shared cache prefixes st
         $prompt = section_unit_request_text($request);
         assert_eq($profile !== 'none', str_contains($prompt, '- `hover-lift`'));
         assert_eq(!in_array($profile, ['none', 'minimal'], true), str_contains($prompt, '- `reveal-up`'));
+        foreach (['sticky-stack', 'count-up', 'marquee'] as $effect) {
+            assert_eq(!in_array($profile, ['none', 'minimal'], true), str_contains($prompt, '- `' . $effect . '`'), "$profile/$effect");
+        }
         foreach (array_diff(['calm', 'energetic', 'dramatic'], [$profile]) as $other) {
             assert_true(!str_contains($prompt, '- `' . $other . '`:'), "$profile excludes $other choreography");
         }

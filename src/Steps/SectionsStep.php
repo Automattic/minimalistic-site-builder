@@ -1144,6 +1144,7 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
+                    'motion_profile' => DesignDirectionStep::motionProfileFor($project),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'header_contract' => $opening
                         ? ($frontHero
