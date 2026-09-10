@@ -16,6 +16,8 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  *   prompt context (outline is the OWNING page's outline)
  * - card_style: normalized site-wide card construction enforced on delivery;
  *   list-thumb rows also receive their non-stacking and tight-gap invariants
+ * - motion_profile: committed Motion profile; absent/invalid means static,
+ *   matching the delivery gate. Only its permitted instructions are sent.
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/item_pattern/text_placement/handoff. The
@@ -47,6 +49,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   theme_json:string|array<mixed>,
      *   design_direction:string,
      *   card_style?:string,
+     *   motion_profile?:string,
      *   outline:string,
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
@@ -108,7 +111,10 @@ final class SectionUnit extends AbstractPageSectionUnit
             ),
         ]);
 
+        $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
+            'card_instructions' => $rules->card($cardStyle),
+            'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'card_style'        => $cardStyle,
             'page_title'        => $this->pageString($input, 'title'),

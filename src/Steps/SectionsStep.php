@@ -1049,6 +1049,7 @@ final class SectionsStep implements Step
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
             'card_style'        => $cardStyle,
+            'motion_profile'    => DesignDirectionStep::motionProfileFor($project),
             'site_pages'        => PagePlanStep::sitePagesList($pages),
             // A host capability, not a site fact: it says whether a real form
             // backend exists to replace the placeholders, so it stays in the
