@@ -968,7 +968,7 @@ test('plan warnings report a footer-like page section without hiding valid sibli
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true, 'sections' => [
             ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
-            ['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo', 'layout_archetype' => 'centered-stack'],
+            ['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo', 'layout_archetype' => 'bento-grid'],
         ]],
     ]]);
 

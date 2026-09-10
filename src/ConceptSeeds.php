@@ -69,6 +69,18 @@ final class ConceptSeeds
     public const TINTS = GroundTint::ALL;
 
     /**
+     * Every design tradition a seed can commit to: the proposed list plus
+     * the brief-only extras. Persisted on the direction so build-owned gates
+     * (the header pool) can read the tradition without re-parsing a seed.
+     *
+     * @return list<string>
+     */
+    public static function knownRegisters(): array
+    {
+        return array_values(array_unique([...self::REGISTERS, ...array_keys(self::EXTRA_REGISTERS)]));
+    }
+
+    /**
      * Looks a brief may lock that are not on the universal lists. Canonical
      * word => phrases in the user's prompt that count as naming it. Topic
      * clichés do not belong here — only words the user actually wrote.

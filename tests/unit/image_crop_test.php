@@ -5,10 +5,10 @@ use Automattic\SiteBuild\ImageCrop;
 
 test('ImageCrop emits one deterministic ratio map per uniform commitment', function () {
     $expected = [
-        'landscape' => ['3 / 2', '4 / 3', '4 / 3', '16 / 9'],
-        'portrait' => ['4 / 5', '2 / 3', '3 / 4', '4 / 5'],
-        'square' => ['1 / 1', '1 / 1', '1 / 1', '1 / 1'],
-        'panoramic' => ['16 / 9', '3 / 2', '16 / 9', '21 / 9'],
+        'landscape' => ['3 / 2', '4 / 3', '16 / 9'],
+        'portrait' => ['4 / 5', '2 / 3', '4 / 5'],
+        'square' => ['1 / 1', '1 / 1', '1 / 1'],
+        'panoramic' => ['16 / 9', '3 / 2', '21 / 9'],
     ];
 
     foreach ($expected as $crop => $ratios) {
@@ -18,8 +18,7 @@ test('ImageCrop emits one deterministic ratio map per uniform commitment', funct
             assert_contains("aspect-ratio: {$ratio}", $css, "{$crop} carries {$ratio}");
         }
         assert_contains('.feature-media img', $css);
-        assert_contains('.list-thumb-flush .card-media-thumb img', $css);
-        assert_contains('aspect-ratio: auto !important', $css, 'flush list rows remain text-height driven');
+        assert_true(!str_contains($css, 'card-media-thumb'), 'the retired thumbnail hook ships no crop');
     }
     assert_eq(null, ImageCrop::kitCss('mixed'));
     assert_eq(null, ImageCrop::kitCss('unknown'));

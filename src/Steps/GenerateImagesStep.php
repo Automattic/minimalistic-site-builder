@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -210,6 +211,19 @@ final class GenerateImagesStep implements Step
         }
 
         $specs = $project->readJson('images.json');
+        // Keep the image kind on each row for generation, repair, and request logs.
+        $imageKind = DesignDirectionStep::imageKindFor($project);
+        // A ui-mockup interface follows the page ground and accent.
+        $screenTheme = $imageKind === 'ui-mockup' ? DesignDirectionStep::screenThemeFor($project) : '';
+        foreach ($specs as &$row) {
+            if (is_array($row)) {
+                $row['image_kind'] = $imageKind;
+                if ($screenTheme !== '') {
+                    $row['screen_theme'] = $screenTheme;
+                }
+            }
+        }
+        unset($row);
         if ($specs === []) {
             $this->markComplete($project);
             return;
@@ -230,7 +244,7 @@ final class GenerateImagesStep implements Step
 
         // The design direction's photographic grade, injected into EVERY prompt
         // so the independently generated images read as one photographic series.
-        $imageGrade = DesignDirectionStep::imageGradeFor($project);
+        $imageGrade = ImageKind::skipsGrade($imageKind) ? '' : DesignDirectionStep::imageGradeFor($project);
         $imageCrop = DesignDirectionStep::imageCropFor($project) ?? '';
 
         $assetDir = $project->themePath('assets');
@@ -553,11 +567,13 @@ final class GenerateImagesStep implements Step
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
                 (string) ($spec['pageContext'] ?? ''),
-                (string) ($spec['style'] ?? ''),
+                ($spec['role'] ?? '') === 'site-logo' ? 'flat-design' : (string) ($spec['style'] ?? ''),
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
                 imageCrop: $imageCrop,
+                imageKind: ($spec['role'] ?? '') === 'site-logo' ? 'photo' : (string) ($spec['image_kind'] ?? ''),
+                screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
@@ -582,6 +598,9 @@ final class GenerateImagesStep implements Step
     {
         $rows = [];
         foreach ($pending as $spec) {
+            if (ImageKind::skipsGrade((string) ($spec['image_kind'] ?? ''))) {
+                continue;
+            }
             $rows = array_merge($rows, self::gradeSubjectWarningsFor(
                 (string) ($spec['filename'] ?? ''),
                 (string) ($spec['subject'] ?? ''),
@@ -656,7 +675,8 @@ final class GenerateImagesStep implements Step
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => $imageGrade,
-        ] + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
+        ] + (($spec['image_kind'] ?? '') !== '' ? ['image_kind' => (string) $spec['image_kind']] : [])
+          + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
           + self::deliveredSubjectLog($spec, $imageGrade, $subject);
     }
 
@@ -673,7 +693,7 @@ final class GenerateImagesStep implements Step
     {
         $authored = $subject ?? (string) ($spec['subject'] ?? '');
         $filename = (string) ($spec['filename'] ?? '');
-        if (trim($imageGrade) === '' || trim($authored) === '') {
+        if (trim($imageGrade) === '' || trim($authored) === '' || ImageKind::skipsGrade((string) ($spec['image_kind'] ?? ''))) {
             return [];
         }
         if (GeminiImage::mimeForFilename($filename) === 'image/png') {
@@ -715,6 +735,7 @@ final class GenerateImagesStep implements Step
             ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                 (string) $result['bytes'],
                 $genSpec['mime'],
+                ImageKind::keepsSolidCutout((string) ($specs[$i]['image_kind'] ?? '')) && ($specs[$i]['role'] ?? '') !== 'site-logo',
             );
             if ($genSpec['mime'] === 'image/png' && ($specs[$i]['role'] ?? '') === 'site-logo') {
                 if (!ImageTransparency::isKeyed($bytes)) {
@@ -784,7 +805,7 @@ final class GenerateImagesStep implements Step
      *
      * @return array{bytes:string,borderTrimmed:int}
      */
-    private function deliverableBytes(string $bytes, string $mime): array
+    private function deliverableBytes(string $bytes, string $mime, bool $solidCutout = false): array
     {
         // Defense in depth: ImageClient implementations are replaceable.
         // WpcomImageClient already requested and, only if needed, locally
@@ -796,7 +817,7 @@ final class GenerateImagesStep implements Step
             // The image model cannot render real alpha: the prompt asked for a flat
             // solid white background instead, keyed out here so the asset
             // gets the transparency its .png promises.
-            $bytes = ImageTransparency::keyOutBackground($bytes);
+            $bytes = ImageTransparency::keyOutBackground($bytes, !$solidCutout);
         } else {
             // Opaque images sometimes arrive as a printed photograph with
             // a flat white border painted into the pixels (BIGR-956);
@@ -850,40 +871,59 @@ final class GenerateImagesStep implements Step
                 }
                 continue;
             }
-            $finding = implode('; ', $verdict['findings']);
-            Narrator::write("    QA {$filename}: {$finding}; regenerating once\n");
-
+            $kind = ImageKind::effectiveKind($spec);
             $authored = (string) ($spec['subject'] ?? '');
-            $subject = ImageQa::correctedSubject($authored, $verdict);
-            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
-            $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
-            if ($error !== null) {
-                Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the first image\n");
-                $specs[$i]['qa'] = ['regenerated' => false, 'finding' => $finding];
-                $project->addWarnings($this->id(), [ImageQa::warningRow(
-                    $filename,
-                    $authored,
-                    $verdict['findings'],
-                    "regeneration failed: {$error}",
-                )]);
-                continue;
-            }
+            // A product screen earns more than one retry. A reworded prompt
+            // does not move a painted-pixel defect (BIGR-956 measured the same
+            // thing on painted photo borders): an A/B over nine screens left
+            // the first-pass leak rate flat at 6 of 9 clean under both the old
+            // and the reworded clause. Each sample is an independent draw, so
+            // the lever that does move the delivered rate is the number of
+            // draws, and ImageQa reads every one of them.
+            $budget = ImageKind::regenerationBudget($kind, $verdict['findings']);
+            $finding = implode('; ', $verdict['findings']);
+            $attempts = 0;
 
-            $second = $this->inspect($project, $spec, $rel);
-            if ($second === null || $second['ok']) {
-                Narrator::write("    QA {$filename}: regenerated image " . ($second === null ? 'unverified' : 'passes') . "\n");
-                $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                continue;
+            while ($attempts < $budget) {
+                $attempts++;
+                $left = $budget - $attempts;
+                Narrator::write("    QA {$filename}: {$finding}; regenerating (attempt {$attempts} of {$budget})\n");
+
+                $subject = ImageQa::correctedSubject($authored, $verdict, $kind);
+                $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
+                $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
+                if ($error !== null) {
+                    Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the last image\n");
+                    $specs[$i]['qa'] = ['regenerated' => $attempts > 1, 'finding' => $finding];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow(
+                        $filename,
+                        $authored,
+                        $verdict['findings'],
+                        "regeneration failed: {$error}",
+                    )]);
+                    continue 2;
+                }
+
+                $next = $this->inspect($project, $spec, $rel);
+                if ($next === null || $next['ok']) {
+                    Narrator::write("    QA {$filename}: regenerated image " . ($next === null ? 'unverified' : 'passes') . "\n");
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
+                    continue 2;
+                }
+                $verdict = $next;
+                $finding = implode('; ', $next['findings']);
+                if ($left === 0) {
+                    $plural = $budget === 1 ? 'one regeneration' : "{$budget} regenerations";
+                    Narrator::write("    QA {$filename}: still failing ({$finding}); delivered with a warning\n");
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow(
+                        $filename,
+                        $authored,
+                        $next['findings'],
+                        "still failing after {$plural}",
+                    )]);
+                }
             }
-            $secondFinding = implode('; ', $second['findings']);
-            Narrator::write("    QA {$filename}: still failing ({$secondFinding}); delivered with a warning\n");
-            $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $secondFinding];
-            $project->addWarnings($this->id(), [ImageQa::warningRow(
-                $filename,
-                $authored,
-                $second['findings'],
-                'still failing after one regeneration',
-            )]);
         }
     }
 
@@ -902,7 +942,9 @@ final class GenerateImagesStep implements Step
         $filename = (string) ($spec['filename'] ?? '');
         try {
             $prompt = $this->renderer->render('image-qa.md', [
-                'subject' => (string) ($spec['subject'] ?? ''),
+                'subject'      => (string) ($spec['subject'] ?? ''),
+                'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
+                'text_rule'    => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
             ]);
             $answer = $this->llm->completeWithImage(
                 $prompt,
@@ -947,7 +989,7 @@ final class GenerateImagesStep implements Step
             + ['image_qa' => $finding];
         $error = null;
         $this->drainBatch([$genSpec], function (int $pos, array $result) use (
-            $project, $rel, $filename, $genSpec, $logRequest, &$error
+            $project, $rel, $filename, $genSpec, $logRequest, $spec, &$error
         ): void {
             try {
                 if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
@@ -956,6 +998,7 @@ final class GenerateImagesStep implements Step
                 ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
                     (string) $result['bytes'],
                     $genSpec['mime'],
+                    ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
                 );
             } catch (\Throwable $e) {
                 $error = $e->getMessage();

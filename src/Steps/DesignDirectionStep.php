@@ -5,9 +5,12 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
@@ -305,6 +308,7 @@ final class DesignDirectionStep implements Step
                 $seedTypeRegister,
                 (string) ($specData['slug'] ?? $project->slug()),
                 $fontCatalog,
+                $seedRegister,
             ),
             'hero_composition' => $heroComposition,
             'hero_blueprint_shape' => json_encode(
@@ -463,6 +467,7 @@ final class DesignDirectionStep implements Step
             'subject_anchor'   => '',
             'tension'          => '',
             'image_grade'      => '',
+            'image_kind'       => ImageKind::DEFAULT,
             'image_treatment'  => ImageTreatment::DEFAULT,
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
@@ -476,6 +481,8 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'surface_reason'   => '',
             'device'           => Device::DEFAULT,
+            'section_label' => SectionLabel::DEFAULT,
+            'heading_emphasis' => HeadingEmphasis::DEFAULT,
             'header_chrome'    => HeaderChrome::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
@@ -483,6 +490,7 @@ final class DesignDirectionStep implements Step
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
+            'register'         => '',
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
     }
@@ -1034,6 +1042,15 @@ final class DesignDirectionStep implements Step
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
         );
+        $rawTreatment = is_string($raw['type_treatment'] ?? null) ? strtolower(trim($raw['type_treatment'])) : null;
+        if ($rawTreatment !== null && in_array($rawTreatment, TypeTreatment::RETIRED, true)) {
+            // frm PR-5p: Title Case transforms every word of every heading;
+            // the references set two-tone headings in sentence case.
+            $warnings[] = 'designDirection.json: field type_treatment authored "' . $rawTreatment
+                . '"; delivered "' . TypeTreatment::DEFAULT . '"; disposition the title treatment is retired'
+                . ' (a capitalize transform sets every heading in Title Case), so the sentence treatment stands';
+            $raw['type_treatment'] = TypeTreatment::DEFAULT;
+        }
         $typeTreatment = BoundedChoice::normalize(
             $raw['type_treatment'] ?? null,
             TypeTreatment::ALL,
@@ -1048,6 +1065,14 @@ final class DesignDirectionStep implements Step
         $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
+        // Use a ring on a light ground and record the lost glass value.
+        $depthGround = $groundKey
+            ?? (is_string($palette['base'] ?? null) && $palette['base'] !== '' ? GroundKey::classify($palette['base']) : 'light');
+        if ($depth === 'glass' && $depthGround === 'light') {
+            $warnings[] = 'designDirection.json: field depth authored "glass"; delivered "' . Depth::GLASS_LIGHT_FALLBACK
+                . '"; disposition glass is a dark-ground treatment and this direction commits a light ground';
+            $depth = Depth::GLASS_LIGHT_FALLBACK;
+        }
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
             CtaStyle::ALL,
@@ -1072,6 +1097,16 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
+        $imageKind = BoundedChoice::normalize(
+            $raw['image_kind'] ?? null,
+            ImageKind::ALL,
+            ImageKind::DEFAULT,
+            'image_kind',
+            $warnings,
+            'unsupported imagery kind replaced by photo',
+        );
+        $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $headerChrome = HeaderChrome::normalize($raw['header_chrome'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
@@ -1155,6 +1190,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_kind'       => $imageKind,
             'image_treatment'  => $imageTreatment,
             'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -1173,6 +1209,8 @@ final class DesignDirectionStep implements Step
             'surface'          => $surface,
             'surface_reason'   => $surfaceReason,
             'device'           => $device,
+            'section_label' => $sectionLabel,
+            'heading_emphasis' => $headingEmphasis,
             // Whether the header survives the scroll. HeaderBehavior keeps
             // the archetype, depth, and contrast vetoes on top of it.
             'header_chrome'    => $headerChrome,
@@ -1190,6 +1228,9 @@ final class DesignDirectionStep implements Step
             'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
             'style_signature'  => self::normalizeProseCommitment($raw, 'style_signature', $warnings),
             'concept_seed'     => $conceptSeed,
+            'register'         => BoundedChoice::explicit($conceptRegister, ConceptSeeds::knownRegisters())
+                ?? BoundedChoice::explicit($raw['register'] ?? null, ConceptSeeds::knownRegisters())
+                ?? '',
             'hero_blueprint'   => $blueprint,
             'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
         ];
@@ -1380,6 +1421,31 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeSectionLabel(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            SectionLabel::ALL,
+            SectionLabel::DEFAULT,
+            'section_label',
+            $warnings,
+            'unsupported section label replaced by none',
+        );
+    }
+
+    /** @param list<string> $warnings */
+    public static function normalizeHeadingEmphasis(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            HeadingEmphasis::ALL,
+            HeadingEmphasis::DEFAULT,
+            'heading_emphasis',
+            $warnings,
+            'unsupported heading emphasis replaced by none',
+        );
+    }
+
     public static function normalizeSurface(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1845,6 +1911,7 @@ final class DesignDirectionStep implements Step
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
                 'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+                'glass'       => 'the build turns band-coloured cards into frosted panels (a translucent band tint over the blurred page, one light hairline, a deep soft drop); inverted cards stay solid',
             } . '. Full-bleed media stays unelevated; do not add another shadow.';
         }
 
@@ -1871,6 +1938,33 @@ final class DesignDirectionStep implements Step
                 . 'Keep the hero, header, footer, tables, forms, and other sections plain. '
                 . 'A page can use no texture. The build supplies the CSS below section content. '
                 . 'Do not combine a texture with a decorative device.';
+        }
+
+        $imageKind = ImageKind::explicit($direction['image_kind'] ?? null);
+        if ($imageKind !== null && $imageKind !== ImageKind::DEFAULT) {
+            $facts[] = "- **Image kind**: {$imageKind} — " . ImageKind::meaning($imageKind)
+                . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
+                . '`; the build appends the kind\'s render instruction to every image request.'
+                . ($imageKind === 'ui-mockup'
+                    ? ' The build frames every contained picture as a product screen (panel radius, hairline ring,'
+                        . ' soft shadow, no window chrome), so author no frame, border or shadow around an image. Add the class `'
+                        . ImageKind::TILT_CLASS . '` to the figure or hero media wrapper of at most ONE screen per page (the hero media or the first'
+                        . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
+                    : '');
+        }
+
+        $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
+        if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
+            $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
+                . '. Mark at most ONE clause per heading, only in the hero H1 and in section headings, never in'
+                . ' paragraphs, navigation or buttons; never author a colour, face or background on the span.';
+        }
+
+        $sectionLabel = SectionLabel::explicit($direction['section_label'] ?? null);
+        if ($sectionLabel !== null && $sectionLabel !== 'none') {
+            $facts[] = "- **Section label**: {$sectionLabel} — " . SectionLabel::meaning($sectionLabel)
+                . '. Never in the hero or any page opening; never two per section; the label names the topic'
+                . ' ("Use cases", "Pricing"), never repeats the heading.';
         }
 
         $device = Device::explicit($direction['device'] ?? null);
@@ -1904,11 +1998,11 @@ final class DesignDirectionStep implements Step
         $imageCrop = ImageCrop::explicit($direction['image_crop'] ?? null);
         if ($imageCrop !== null) {
             $facts[] = '- **Image crop**: ' . $imageCrop . ' — ' . match ($imageCrop) {
-                'landscape' => 'the build makes ordinary cards 3:2, dominant cards and thumbs 4:3, and feature media 16:9',
-                'portrait'  => 'the build makes ordinary cards and feature media 4:5, dominant cards 2:3, and thumbs 3:4',
-                'square'    => 'the build makes every card, thumbnail, and feature-media crop 1:1',
-                'panoramic' => 'the build makes ordinary cards and thumbs 16:9, dominant cards 3:2, and feature media 21:9',
-                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2, dominant cards 4:5, and thumbs 1:1',
+                'landscape' => 'the build makes ordinary cards 3:2, dominant cards 4:3, and feature media 16:9',
+                'portrait'  => 'the build makes ordinary cards and feature media 4:5, and dominant cards 2:3',
+                'square'    => 'the build makes every card and feature-media crop 1:1',
+                'panoramic' => 'the build makes ordinary cards 16:9, dominant cards 3:2, and feature media 21:9',
+                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2 and dominant cards 4:5',
             } . '. Full-bleed media remains wide; use the documented crop role classes and do not author an aspect ratio.';
         }
 
@@ -2112,6 +2206,18 @@ final class DesignDirectionStep implements Step
         return ImageCrop::explicit($project->readJson(self::FILE)['image_crop'] ?? null);
     }
 
+    /** Read the bounded design tradition from the direction artifact. */
+    public static function registerFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        return BoundedChoice::explicit(
+            $project->readJson(self::FILE)['register'] ?? null,
+            ConceptSeeds::knownRegisters(),
+        ) ?? '';
+    }
+
     /**
      * The committed direction's canvas ("full-bleed" or "framed"), or '' when
      * no direction was persisted. A framed canvas keeps a mat of page
@@ -2243,7 +2349,56 @@ final class DesignDirectionStep implements Step
         if (!$project->exists(self::FILE)) {
             return null;
         }
-        return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
+        $raw = $project->readJson(self::FILE)['type_treatment'] ?? null;
+        if (is_string($raw) && in_array(strtolower(trim($raw)), TypeTreatment::RETIRED, true)) {
+            $project->addWarnings('design-direction', [
+                'designDirection.json: field type_treatment authored ' . self::describe($raw)
+                    . '; delivered "sentence"; disposition the title treatment is retired',
+            ]);
+            return TypeTreatment::DEFAULT;
+        }
+        return TypeTreatment::explicit($raw);
+    }
+
+    /** Return the image kind, or photo when the field is absent. */
+    public static function imageKindFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return ImageKind::DEFAULT;
+        }
+        return ImageKind::explicit($project->readJson(self::FILE)['image_kind'] ?? null) ?? ImageKind::DEFAULT;
+    }
+
+    /** Return the ui-mockup interface theme sentence from the palette, or '' without a usable base. */
+    public static function screenThemeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        $palette = $project->readJson(self::FILE)['palette'] ?? null;
+        if (!is_array($palette)) {
+            return '';
+        }
+        return ImageKind::screenTheme(
+            is_string($palette['base'] ?? null) ? $palette['base'] : null,
+            is_string($palette['accent'] ?? null) ? $palette['accent'] : null,
+        );
+    }
+
+    public static function headingEmphasisFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return HeadingEmphasis::DEFAULT;
+        }
+        return self::normalizeHeadingEmphasis($project->readJson(self::FILE)['heading_emphasis'] ?? null);
+    }
+
+    public static function sectionLabelFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return SectionLabel::DEFAULT;
+        }
+        return self::normalizeSectionLabel($project->readJson(self::FILE)['section_label'] ?? null);
     }
 
     /**

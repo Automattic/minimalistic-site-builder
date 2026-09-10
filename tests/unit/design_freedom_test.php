@@ -17,7 +17,7 @@ function freedom_plan(string $background = 'base'): array
         'type' => 'story',
         'purpose' => 'Read the next chapter.',
         'content_notes' => 'A continuous editorial sequence, using repetition deliberately.',
-        'layout_archetype' => 'centered-stack',
+        'layout_archetype' => 'asymmetric-split',
         'background' => $background,
         'vertical_density' => 'spacious',
         'item_pattern' => null,
@@ -110,6 +110,24 @@ test('design freedom preserves different item presentations and unassigned prose
     assert_eq(array_column($sections, 'content_notes'), array_column($delivered, 'content_notes'));
     assert_eq([], $repairs, 'valid per-section choices are not commitment drift');
     assert_eq([], $warnings);
+});
+
+test('non-card item patterns keep a supported split without contradictory repair notes', function () {
+    foreach (['rule-row', 'spec-table', 'tag-cluster'] as $pattern) {
+        $sections = freedom_plan();
+        foreach ($sections as &$section) {
+            $section['type'] = 'services';
+            $section['item_pattern'] = $pattern;
+        }
+        unset($section);
+        $pages = [['slug' => 'services', 'front' => false, 'sections' => $sections]];
+        $repairs = [];
+        $out = PagePlanStep::withListsOffTheSplit($pages, $repairs);
+        assert_eq($pages, $out);
+        assert_eq([], $repairs);
+        assert_eq($out, PagePlanStep::withListsOffTheSplit($out, $repairs));
+        assert_eq([], $repairs);
+    }
 });
 
 test('design freedom keeps one caption label alongside the hero headline and standfirst', function () {

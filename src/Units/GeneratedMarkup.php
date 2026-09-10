@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
@@ -4253,4 +4254,277 @@ final class GeneratedMarkup
         }
         return $changed ? $document->render() : $markup;
     }
+    /**
+     * Collapse a paragraph or heading whose text is one phrase written three
+     * or more times in a row ("MORE PROJECTS — MORE PROJECTS — MORE
+     * PROJECTS"): a model painting a marquee in copy (frm W8c / PR-8f). The
+     * block keeps the phrase once; a paragraph also takes the `marquee` kit
+     * class so the intent survives as the kit's loop (the motion budget still
+     * decides whether it runs). Only plain-text blocks are touched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function collapseRepeatedPhrase(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['paragraph', 'heading'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<(p|h[1-6])\b[^>]*>)(.*)(<\/\2>\s*)$/su', $own, $shell) !== 1) {
+                continue;
+            }
+            $inner = $shell[3];
+            if ($inner !== strip_tags($inner)) {
+                continue; // inline markup: not ours to rewrite
+            }
+            $text = html_entity_decode($inner, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $separator = '(?:\s*(?:—|–|-|·|•|\||\/|,|→)\s*|\s+)';
+            if (preg_match('/^\s*(\S(?:.{0,78}?\S)?)(?:' . $separator . '\1){2,}' . $separator . '?\s*$/siu', $text, $m) !== 1) {
+                continue;
+            }
+            $phrase = trim($m[1]);
+            if ($phrase === '' || mb_strlen($phrase, 'UTF-8') < 3) {
+                continue;
+            }
+            $escaped = htmlspecialchars($phrase, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $replacementInner = $escaped;
+            $open = $shell[1];
+            if ($name === 'paragraph' && preg_match('/\bmarquee\b/', $open) !== 1) {
+                $open = preg_match('/\sclass="/', $open) === 1
+                    ? preg_replace('/\sclass="/', ' class="marquee ', $open, 1)
+                    : preg_replace('/^(\s*<p)/', '$1 class="marquee"', $open, 1);
+                $attrs = $document->attrs($index) ?? [];
+                $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (!in_array('marquee', $tokens, true)) {
+                    array_unshift($tokens, 'marquee');
+                }
+                $attrs['className'] = implode(' ', $tokens);
+                $document->setAttrs($index, $attrs);
+            }
+            $document->spliceOwnHtml($index, 0, strlen($own), $open . $replacementInner . $shell[4]);
+            $repairs[] = [
+                'part' => $part,
+                'block' => $name,
+                'authored' => $text,
+                'delivered' => $phrase,
+                'note' => "collapsed a phrase repeated in copy to one {$name}"
+                    . ($name === 'paragraph' ? ' and handed it to the marquee kit class' : ''),
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    /**
+     * Mark a figure-only heading or paragraph ("120+", "98%", "$4.2M",
+     * "1,200") with the count-up entrance (frm W8b). The model rarely
+     * reaches for the class on its own; the figure IS the block's point, so
+     * the build commits it when the motion profile runs entrances. A block
+     * that already carries a kit motion class keeps it (one class per
+     * block); a sentence with a number in it is not a figure.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public const FIGURE_PATTERN = '/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:[kKmMbB]|\p{L}{1,2})?\s?(?:%|\+|x|×)?$/u';
+
+    public static function markFigures(string $markup, string $part, string $motionProfile, array &$repairs = []): string
+    {
+        if (!in_array('count-up', Motion::allowedClasses($motionProfile), true)) {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['paragraph', 'heading'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/^(\s*<(p|h[1-6])\b[^>]*>)(.*)(<\/\2>\s*)$/su', $own, $shell) !== 1) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($shell[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match(self::FIGURE_PATTERN, $text) !== 1
+                || mb_strlen($text, 'UTF-8') > 14) {
+                continue;
+            }
+            // A bare year is a date, not a count.
+            if (preg_match('/^(?:18|19|20|21)\d{2}$/', $text) === 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array('custom-motion', $tokens, true)
+                || preg_match('/\bclass="[^"]*(?<![\w-])custom-motion(?![\w-])[^"]*"/', $shell[1]) === 1
+                || in_array('step-numeral', $tokens, true)
+                || preg_match('/\bclass="[^"]*(?<![\w-])step-numeral(?![\w-])[^"]*"/', $shell[1]) === 1) {
+                continue;
+            }
+            $hasKitMotion = false;
+            foreach ($tokens as $token) {
+                if (in_array($token, Motion::kitClasses(), true) && !in_array($token, Motion::HOVER_CLASSES, true)) {
+                    $hasKitMotion = true;
+                }
+            }
+            if ($hasKitMotion) {
+                continue;
+            }
+            $tokens[] = 'count-up';
+            $attrs['className'] = implode(' ', $tokens);
+            $document->setAttrs($index, $attrs);
+            $open = $shell[1];
+            $open = preg_match('/\sclass="/', $open) === 1
+                ? preg_replace('/\sclass="/', ' class="count-up ', $open, 1)
+                : preg_replace('/^(\s*<' . $shell[2] . ')/', '$1 class="count-up"', $open, 1);
+            $document->spliceOwnHtml($index, 0, strlen($own), $open . $shell[3] . $shell[4]);
+            $repairs[] = [
+                'part' => $part,
+                'block' => $name,
+                'authored' => $text,
+                'delivered' => $text,
+                'note' => 'a figure-only block takes the count-up entrance',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    /**
+     * The kit owns the marquee's type (frm PR-8g): an authored fontSize or
+     * fontFamily on a `marquee` paragraph (spector-like4 set caption size)
+     * would fight the kit's display scale through the preset's own
+     * !important, so the boundary drops them and records the repair.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function ownMarqueeScale(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('marquee', $tokens, true)) {
+                continue;
+            }
+            $dropped = [];
+            $classDrops = [];
+            foreach (['fontSize', 'fontFamily'] as $key) {
+                $value = trim((string) ($attrs[$key] ?? ''));
+                if ($value === '') {
+                    continue;
+                }
+                unset($attrs[$key]);
+                $suffix = $key === 'fontSize' ? 'font-size' : 'font-family';
+                $classDrops[] = "has-{$value}-{$suffix}";
+                $dropped[] = "{$key} '{$value}'";
+            }
+            if (isset($attrs['style']['typography'])) {
+                $dropped[] = 'style.typography ' . json_encode($attrs['style']['typography']);
+                unset($attrs['style']['typography']);
+                if ($attrs['style'] === []) {
+                    unset($attrs['style']);
+                }
+            }
+            $own = $document->ownHtml($index);
+            $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $match) use ($classDrops): string {
+                return ' class="' . implode(' ', array_diff(preg_split('/\s+/', trim($match[1])) ?: [], $classDrops)) . '"';
+            }, $own) ?? $own;
+            $clean = preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $match): string {
+                [$css] = \Automattic\SiteBuild\CssChecks::dropDeclarations(
+                    html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                    static fn (array $declaration): bool => in_array(strtolower($declaration['property']), [
+                        'font-size', 'font-family', 'font-weight', 'font-style', 'line-height',
+                        'letter-spacing', 'text-transform', 'text-decoration',
+                    ], true),
+                    true,
+                );
+                return trim($css) === '' ? '' : ' style="' . htmlspecialchars($css, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '"';
+            }, $clean) ?? $clean;
+            if ($clean !== $own) {
+                $document->spliceOwnHtml($index, 0, strlen($own), $clean);
+                $dropped[] = 'inline typography in ' . $own;
+            }
+            if ($dropped === []) {
+                continue;
+            }
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'paragraph.marquee[' . $index . ']',
+                'authored' => implode(', ', $dropped),
+                'delivered' => 'removed',
+                'note' => 'the motion kit sets the marquee scale; an authored size or face would fight it',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+    /** A marquee line longer than this many characters wraps to a wall under reduced motion (frm PR-8n). */
+    public const LONG_MARQUEE_CHARS = 64;
+    public const LONG_MARQUEE_CLASS = 'is-long-line';
+
+    /**
+     * A long marquee line is marked for the static branches (frm PR-8n):
+     * spector-like34's eight client names wrapped to eight display-scale
+     * lines under reduced motion. The kit reads the mark and sets the
+     * static statement at section-title scale; the loop is untouched.
+     *
+     * @param list<array<string,string>> $repairs
+     */
+    public static function markLongMarquee(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $marked = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('marquee', $classes, true) || in_array(self::LONG_MARQUEE_CLASS, $classes, true)) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (mb_strlen($text, 'UTF-8') <= self::LONG_MARQUEE_CHARS) {
+                continue;
+            }
+            $classes[] = self::LONG_MARQUEE_CLASS;
+            $attrs['className'] = implode(' ', $classes);
+            $document->setAttrs($index, $attrs);
+            $own = $document->ownHtml($index);
+            if (preg_match('/<p\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $tokens[] = self::LONG_MARQUEE_CLASS;
+                    return ' class="' . implode(' ', $tokens) . '"';
+                }, $opening, 1) ?? $opening;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $marked++;
+        }
+        if ($marked === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'long-marquee-marked',
+            'part' => $part,
+            'authored' => $marked . ' marquee line(s) over ' . self::LONG_MARQUEE_CHARS . ' characters',
+            'delivered' => 'marked ' . self::LONG_MARQUEE_CLASS . ' for the static branches',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+
 }

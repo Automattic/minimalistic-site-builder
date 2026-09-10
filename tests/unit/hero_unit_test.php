@@ -47,7 +47,7 @@ function hero_unit_contract_input(
     ], [
         'slug' => 'work', 'title' => 'Work', 'path' => '/work/', 'front' => false,
         'sections' => [[
-            'slug' => 'work-opening', 'layout_archetype' => 'centered-stack',
+            'slug' => 'work-opening', 'layout_archetype' => 'bento-grid',
             'background' => 'base', 'primary_action' => null,
         ]],
     ]];
@@ -286,7 +286,7 @@ test('HeroUnit rejects partial blueprints and contradictory portable contract pr
             return $input;
         },
         'plan-projection-drift' => static function (array $input): array {
-            $input['section']['layout_archetype'] = 'centered-stack';
+            $input['section']['layout_archetype'] = 'bento-grid';
             return $input;
         },
     ];

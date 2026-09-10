@@ -7,7 +7,10 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Motion;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\SectionLabel;
+
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -16,8 +19,7 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
- * - card_style: normalized site-wide card construction enforced on delivery;
- *   list-thumb rows also receive their non-stacking and tight-gap invariants
+ * - card_style: the site card treatment.
  * - motion_profile, motion_classes: committed profile and preferred kit classes;
  *   absent profile means none, and an empty palette uses that profile's kit
  * - page: slug/title/path of the page the section belongs to
@@ -211,6 +213,9 @@ final class SectionUnit extends AbstractPageSectionUnit
             $warnings = $repairs = [];
             $key = $this->key($input);
             $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+            $labels = SectionLabel::normalize($markup, 'none', $key, true);
+            $markup = $labels['markup'];
+            array_push($warnings, ...$labels['warnings']);
             foreach (['hero-composition--', 'hero-mobile--'] as $prefix) {
                 $markup = GeneratedMarkup::withRootClassMarker(
                     $markup, $prefix, $prefix . HeroComposition::AUTHORED, $key, $repairs,
@@ -254,10 +259,30 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
         $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
-        $listThumb = ListThumbContract::enforce($markup, $this->key($input));
-        $markup = $listThumb['markup'];
-        array_push($repairs, ...$listThumb['repairs']);
-        array_push($warnings, ...$listThumb['warnings']);
+        $label = SectionLabel::normalize(
+            $markup,
+            is_string($input['section_label'] ?? null) ? $input['section_label'] : null,
+            $this->key($input),
+            (bool) ($input['is_opening'] ?? false),
+        );
+        $markup = $label['markup'];
+        array_push($warnings, ...$label['warnings']);
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markFigures(
+            $markup,
+            $this->key($input),
+            is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
+            $repairs,
+        );
+
+        if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
+            foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+                $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                    . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                    . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+            }
+        }
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,

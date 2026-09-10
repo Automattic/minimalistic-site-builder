@@ -873,6 +873,7 @@ final class ExtractPatternsStep implements Step
         $stagedManifest = $writer->stage($liveManifest, $content);
         $exchanged = false;
         $backupReady = false;
+        $createdLiveDir = false;
         $wroteStaging = false;
         self::$exchangeAttempts = 0;
         self::parkLeftoverStaging($stagingDir, $heldDir, $liveDir, $backupDir);
@@ -891,8 +892,11 @@ final class ExtractPatternsStep implements Step
                 }
             }
             $wroteStaging = true;
-            if (!is_dir($liveDir) && !@mkdir($liveDir, 0775, true) && !is_dir($liveDir)) {
-                throw new \RuntimeException("Could not create live pattern directory: {$liveDir}");
+            if (!is_dir($liveDir)) {
+                $createdLiveDir = @mkdir($liveDir, 0775, true);
+                if (!$createdLiveDir && !is_dir($liveDir)) {
+                    throw new \RuntimeException("Could not create live pattern directory: {$liveDir}");
+                }
             }
             if (self::exchangePaths($liveDir, $stagingDir)) {
                 $exchanged = true;
@@ -905,13 +909,18 @@ final class ExtractPatternsStep implements Step
             $writer->discard($stagedManifest);
             $previousRestored = false;
             try {
-                if ($exchanged && is_dir($stagingDir)) {
+                if ($createdLiveDir) {
+                    // A failed first install restores absence, including on
+                    // platforms that cannot atomically exchange directories.
+                    self::removePath($liveDir);
+                    $previousRestored = true;
+                } elseif ($exchanged && is_dir($stagingDir)) {
                     if (!self::exchangePaths($liveDir, $stagingDir)) {
-                        self::installDirectoryInPlace($liveDir, self::filesIn($stagingDir));
+                        self::installDirectoryInPlace($liveDir, self::filesIn($stagingDir), rollback: true);
                     }
                     $previousRestored = true;
                 } elseif ($backupReady && is_dir($backupDir)) {
-                    self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
+                    self::installDirectoryInPlace($liveDir, self::filesIn($backupDir), rollback: true);
                     $previousRestored = true;
                 }
             } catch (\Throwable) {
@@ -1034,9 +1043,9 @@ final class ExtractPatternsStep implements Step
     }
 
     /** @param array<string,string> $files */
-    private static function installDirectoryInPlace(string $directory, array $files): void
+    private static function installDirectoryInPlace(string $directory, array $files, bool $rollback = false): void
     {
-        if (getenv('MSB_FAIL_ROLLBACK_INSTALL') === '1') {
+        if ($rollback && getenv('MSB_FAIL_ROLLBACK_INSTALL') === '1') {
             throw new \RuntimeException('Forced pattern rollback install failure');
         }
         if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
