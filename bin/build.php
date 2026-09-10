@@ -20,7 +20,7 @@ use Automattic\SiteBuild\TransportUnavailable;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--use-jetpack-maps] [--runner=studio|playground] [--port=9400] [--no-serve]
  *   php bin/build.php --transport
  *   php bin/build.php --list-steps [--html-first|--blocks-first] [--slug=my-slug]
  *
@@ -98,6 +98,12 @@ use Automattic\SiteBuild\TransportUnavailable;
  * default) the build emits no form markup at all, because a form with nothing
  * behind it silently discards whatever visitors type.
  *
+ * --use-jetpack-maps is the same arrangement for maps, and a separate flag
+ * because it is a separate host capability: it says the host can turn an
+ * address into coordinates. With it, a section that shows where the place is
+ * reserves a JP_MAP placeholder carrying the address the site spec stated.
+ * Without it the build emits no map, and never an address it invented.
+ *
  * After a full build it boots the site in WordPress Playground and prints the
  * URL. --no-serve skips that (build only); --until=... also skips it (the build
  * is incomplete). --port chooses the Playground port.
@@ -157,6 +163,7 @@ $args = parse_cli_args($argv, [
     '--list-steps'               => 'bool',
     '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
+    '--use-jetpack-maps'         => 'bool',
     '--multi-page'               => 'bool',
     '--serve'                    => 'toggle',
 ], maxPositionals: 1);
@@ -176,6 +183,7 @@ $transportOnly = $flags['--transport'] ?? false;
 $listSteps = $flags['--list-steps'] ?? false;
 $withImages = $flags['--with-images'] ?? false;
 $formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
+$mapPlaceholders = $flags['--use-jetpack-maps'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
 $pagesArg = $flags['--pages'] ?? null;
 $port = isset($flags['--port']) ? (int) $flags['--port'] : null;
@@ -449,6 +457,7 @@ if ($from !== null) {
             designConstraints: $designConstraints,
             writingDirection: $writingDirection,
             formPlaceholders: $formPlaceholders,
+            mapPlaceholders: $mapPlaceholders,
         );
     } catch (InvalidArgumentException $e) {
         Narrator::write($e->getMessage() . "\n");
@@ -645,6 +654,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--list-steps] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--list-steps] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--use-jetpack-maps] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
     exit(1);
 }

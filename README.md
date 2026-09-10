@@ -71,7 +71,11 @@ the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
 `--use-jetpack-placeholders` is for hosts that own a form backend: a section
 that needs a form reserves its place with a `JP_FORM` placeholder block the
 host substitutes after the build, instead of the default of emitting no form
-markup at all. `--writing-direction=ltr|rtl`
+markup at all. `--use-jetpack-maps` is the same arrangement for hosts that can
+geocode: a section showing where the place is reserves a `JP_MAP` placeholder
+carrying the address the site spec stated, and the host turns it into a real
+map. Both are off by default, and the map one never invents an address.
+`--writing-direction=ltr|rtl`
 is an explicit caller override; otherwise the site language determines logical
 direction. The selected recipe and normalized blueprint are persisted in
 `designDirection.json`, while `aboveFold.json` records the two-phase shared
