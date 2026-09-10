@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+test('site-spec leaves unstated visual style open for design-direction', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/site-spec.md'));
+    assert_true(!str_contains($prompt, 'visual_vibe'));
+    assert_true(!str_contains($prompt, '"visual_style"'), 'no substitute mood field in the factual spec');
+});
+
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ProjectStore;
@@ -8,6 +14,120 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\WritingDirection;
+
+test('site-spec leaves the original style brief available to design-direction', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    try {
+        $original = 'Create a professional business coaching website for inspiring confidence. '
+            . 'I want an organically styled site. The site is called Super Coaching and the tagline '
+            . 'is When your best just is not good enough. The business is located in Plymouth, NH.';
+        $meta = $project->readJson('meta.json');
+        $meta['prompt'] = $original;
+        $project->writeJson('meta.json', $meta);
+        $llm->queueJson(['name' => 'Super Coaching', 'visual_vibe' => '']);
+
+        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $spec = $project->readJson('siteSpec.json');
+        assert_true(!array_key_exists('visual_vibe', $spec));
+        assert_eq('organic', Automattic\SiteBuild\ConceptSeeds::requestedStyle($meta['prompt']));
+        assert_contains($original, $llm->calls[0]['prompt']);
+        assert_eq($meta, $project->readJson('meta.json'), 'style recovery leaves the user brief unchanged');
+        assert_eq(1, count($llm->calls), 'recovery needs no additional model call');
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('user-channel style recovery is explicit, freeform, and preserves constraints', function () {
+    foreach ([
+        'I want a Swiss punk collage styled website.' => 'Swiss punk collage styled',
+        'Please create a hand-drawn-styled website.' => 'hand-drawn-styled',
+        'Visual style: organic and brutalist. A coaching site.' => 'organic and brutalist',
+        'Style: organic; not rustic.' => 'organic; not rustic',
+        'Style: organic. Style: not rustic.' => 'organic; not rustic',
+        'Style: not brutalist.' => 'not brutalist',
+        'Art direction: Bauhaus.' => 'Bauhaus',
+        'I want the design to be bauhaus.' => 'bauhaus',
+        'I want a non-brutalist styled site.' => 'non-brutalist styled',
+        'An organic bakery selling sourdough.' => '',
+        'A portfolio documenting brutalist architecture.' => '',
+        'I do not want an organically styled site.' => '',
+        'I want an organically styled site, but not brutalist.' => '',
+    ] as $brief => $expected) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        try {
+            $project->writeJson('meta.json', ['prompt' => $brief]);
+            $llm->queueJson(['name' => 'Demo']);
+            (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+            assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+            assert_eq($expected, Automattic\SiteBuild\ConceptSeeds::explicitStyleFromPrompt($brief), $brief);
+        } finally {
+            remove_tree($tmp);
+        }
+    }
+});
+
+test('site-spec drops model and host mood without replacing the original style request', function () {
+    foreach ([false, true] as $host) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        try {
+            $spec = ['name' => 'Demo', 'visual_vibe' => 'organic with Swiss typography'];
+            $meta = ['prompt' => 'I want an organically styled site.'];
+            if ($host) {
+                $meta['site_spec'] = $spec;
+            } else {
+                $llm->queueJson($spec);
+            }
+            $project->writeJson('meta.json', $meta);
+            (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+            assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+            assert_eq('organic', Automattic\SiteBuild\ConceptSeeds::requestedStyle($project->readJson('meta.json')['prompt']));
+            assert_eq($host ? 0 : 1, count($llm->calls));
+        } finally {
+            remove_tree($tmp);
+        }
+    }
+});
+
+test('site-spec drops empty host moods and factual specs reach a fixed point', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    try {
+        $meta = ['prompt' => 'I want an organically styled site.'];
+        $project->writeJson('meta.json', $meta);
+        $llm->queueJson(['name' => 'Demo', 'visual_vibe' => '']);
+        $step = new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts')));
+        $step->run($project);
+        $recovered = $project->readJson('siteSpec.json');
+        $meta['site_spec'] = $recovered;
+        $project->writeJson('meta.json', $meta);
+        $step->run($project);
+        assert_eq($recovered, $project->readJson('siteSpec.json'));
+        assert_eq(1, count($llm->calls));
+
+        $meta['site_spec']['visual_vibe'] = '';
+        $project->writeJson('meta.json', $meta);
+        $step->run($project);
+        assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('site-spec passes an unstyled user brief through without inventing a style', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    try {
+        $project->writeJson('meta.json', [
+            'prompt' => 'A coaching business website.',
+        ]);
+        $llm->queueJson(['name' => 'Demo', 'visual_vibe' => '']);
+        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        assert_true(!array_key_exists('visual_vibe', $project->readJson('siteSpec.json')));
+        assert_contains("<user_brief>\nA coaching business website.\n</user_brief>", $llm->calls[0]['prompt']);
+    } finally {
+        remove_tree($tmp);
+    }
+});
 
 test('site-spec normalizes a host-supplied spec without an LLM call', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
@@ -1091,4 +1211,3 @@ test('site-spec keeps camelCase contact facts the prompt stated', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
-

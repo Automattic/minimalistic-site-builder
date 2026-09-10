@@ -86,6 +86,24 @@ function designdir_direction(): array
     ];
 }
 
+test('design direction preserves familiar fonts and a complementary cross-register pairing', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $authored = designdir_direction();
+    $authored['type']['heading']['family'] = 'Playfair Display';
+    $authored['type']['body']['family'] = 'Inter';
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => $authored]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $out = $project->readJson('designDirection.json');
+    foreach (['heading', 'body'] as $slot) {
+        assert_eq($authored['type'][$slot], $out['type'][$slot], 'authored family, weights and axes survive');
+    }
+    $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json')['design-direction'] ?? [] : [];
+    assert_true(!str_contains(implode("\n", $warnings), 'monoculture'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 /** @param list<string> $rows @return list<string> */
 function designdir_card_rows(array $rows): array
 {
@@ -95,12 +113,12 @@ function designdir_card_rows(array $rows): array
     ));
 }
 
-test('design-direction persists and narrates an unexecutable ornament promise', function () {
+test('design-direction retains illustrated art direction without declaring it unbuildable', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
-    $authored['description'] = 'Delicate filigree runs along every band edge.';
+    $authored['description'] = 'Figurative botanical illustrations include delicate filigree within the generated imagery.';
     $authored['device'] = 'none';
     $llm->queueJson(['direction' => $authored]);
 
@@ -112,24 +130,12 @@ test('design-direction persists and narrates an unexecutable ornament promise', 
         Narrator::setStream(null);
     }
 
-    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
-    assert_eq(1, count($warnings), 'one defective sentence writes one durable row');
-    foreach ([
-        "file='designDirection.json'",
-        'path="description"',
-        'filigree',
-        'delivered=not executed',
-        'committed no device',
-    ] as $context) {
-        assert_contains($context, $warnings[0]);
-    }
+    $warnings = $project->exists('warnings.json') ? ($project->readJson('warnings.json')['design-direction'] ?? []) : [];
+    assert_eq([], $warnings, 'artwork nouns do not prove a defect in generated images');
+    assert_eq($authored['description'], $project->readJson('designDirection.json')['description']);
 
     rewind($sink);
-    assert_contains(
-        '[design-direction] warning: delivered through 1 generated-content degradation(s)',
-        (string) stream_get_contents($sink),
-        'the durable warning is also narrated live',
-    );
+    assert_true(!str_contains((string) stream_get_contents($sink), '[design-direction] warning:'));
     fclose($sink);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -2720,22 +2726,20 @@ test('an absent or empty tension and subject anchor normalize silently to their 
     }
 });
 
-test('commitmentWarnings records a blank tension, a blank anchor, and an anchor bound to no palette role', function () {
+test('commitmentWarnings records omitted guidance but accepts subject connections outside the palette', function () {
     $blank = DesignDirectionStep::commitmentWarnings(['tension' => '', 'subject_anchor' => '']);
     $joined = implode("\n", $blank);
     assert_eq(2, count($blank));
     assert_contains('path="tension"', $joined);
-    assert_contains('category default', $joined);
+    assert_contains('composition relationship omitted', $joined);
     assert_contains('path="subject_anchor"', $joined);
-    assert_contains('swap test is unanswered', $joined);
+    assert_contains('subject connection omitted', $joined);
 
     $unbound = DesignDirectionStep::commitmentWarnings([
         'tension'        => 'A against B.',
         'subject_anchor' => 'the striped rind of a watermelon',
     ]);
-    assert_eq(1, count($unbound), 'the committed tension earns no row');
-    assert_contains('path="subject_anchor"', $unbound[0]);
-    assert_contains('names no palette role', $unbound[0]);
+    assert_eq([], $unbound, 'imagery can connect the subject without dictating its palette');
 
     assert_eq([], DesignDirectionStep::commitmentWarnings([
         'tension'        => 'A against B.',
@@ -2761,9 +2765,8 @@ test('design-direction records blank prose commitments once, in warnings.json, a
         $project->readJson('warnings.json')['design-direction'] ?? [],
         static fn (string $row): bool => str_contains($row, 'path="tension"') || str_contains($row, 'path="subject_anchor"'),
     ));
-    assert_eq(2, count($rows), 'one row per lost commitment, no duplicates');
-    assert_contains('category default', implode("\n", $rows));
-    assert_contains('names no palette role', implode("\n", $rows));
+    assert_eq(1, count($rows), 'only the omitted relationship earns a row');
+    assert_contains('composition relationship omitted', implode("\n", $rows));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

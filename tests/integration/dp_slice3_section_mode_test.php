@@ -163,7 +163,13 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
         $llm->queueText('<section id="about-process"><h2>ABOUT-SECOND-MARKER</h2></section>');
 
         $llm->queueJson(dp3_integration_site_spec());
-        $llm->queueJson(['seeds' => ['Measured Folio', 'Studio Ledger', 'Northstar Index', 'Working Proof']]);
+        // Style-compatible seeds keep the judge and downstream responses aligned.
+        $llm->queueJson(['seeds' => [
+            ['text' => 'Measured Folio', 'register' => 'editorial'],
+            ['text' => 'Studio Ledger', 'register' => 'editorial'],
+            ['text' => 'Northstar Index', 'register' => 'editorial'],
+            ['text' => 'Working Proof', 'register' => 'editorial'],
+        ]]);
         $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
         $llm->queueJson(dp3_integration_direction());
         $llm->queueJson(dp3_integration_theme());

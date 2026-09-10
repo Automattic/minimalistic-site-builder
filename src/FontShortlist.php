@@ -153,12 +153,13 @@ final class FontShortlist
         if ($candidates === []) {
             return '';
         }
-        return 'Candidate families inside this tradition, all on Google Fonts: '
+        return 'Candidate display families inside this tradition, all on Google Fonts: '
             . implode(', ', $candidates) . '. '
             . 'Treat the list as a starting shelf, not a fence: pick from it, or go beyond it '
             . 'when you can say what makes another real Google Fonts family in this tradition '
             . 'righter for THIS site. Do not default to the one famous family the tradition is '
-            . 'known by; that reflex is how every generated site ends up set in the same face.';
+            . 'known by; that reflex is how every generated site ends up set in the same face. '
+            . 'The body face may come from another tradition to complement the display choice.';
     }
 
     /**
