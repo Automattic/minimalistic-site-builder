@@ -19,6 +19,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -2369,6 +2370,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        [$theme, $emphasisWarnings] = self::removeEmphasisHookCustomCss($theme);
+        array_push($motionWarnings, ...$emphasisWarnings);
         [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
         [$theme, $fontFaceWarnings] = self::removeForeignFontFaces($theme);
         return [
@@ -2548,6 +2551,44 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return '';
         }
         return $repaired;
+    }
+
+    /**
+     * Every `css` string under `styles`, at any depth, loses the rules that
+     * name the heading emphasis hook (frm PR-5g): the emphasis kit paints
+     * `.emph`, and a model rule there fights it. Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeEmphasisHookCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+        $warnings = [];
+        $hook = HeadingEmphasis::CLASS_NAME;
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings, $hook): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$repaired, $dropped] = CssChecks::dropEmphasisHookDeclarations($value, $hook);
+                    foreach ($dropped as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value($declaration)
+                            . "; delivered removed; disposition removed custom CSS for the emphasis hook .{$hook}"
+                            . ' — the emphasis kit paints it';
+                    }
+                    $node[$key] = $repaired;
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
     }
 
     /**

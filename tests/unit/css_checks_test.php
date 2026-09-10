@@ -875,3 +875,37 @@ test('resourceLoadingProblem ignores comments and string contents but never a re
         assert_true(CssChecks::resourceLoadingProblem($loading) !== null, "loading: {$loading}");
     }
 });
+
+
+test('dropEmphasisHookDeclarations removes only rules that name the emphasis hook and leaves every other byte (frm PR-5g)', function () {
+    $css = '.section-badge{display:inline-flex;gap:.5em}'
+        . ' .emph{position:relative;white-space:nowrap}'
+        . ' h2 .emph{background:none}'
+        . ' .emphasis-note{color:red}'
+        . ' .card:not(.emph){padding:1rem}'
+        . ' .card-style--flush{overflow:hidden}';
+    [$repaired, $dropped] = CssChecks::dropEmphasisHookDeclarations($css);
+    assert_eq(['position:relative', 'white-space:nowrap', 'background:none'], $dropped);
+    assert_eq(
+        '.section-badge{display:inline-flex;gap:.5em}'
+        . ' .emph{}'
+        . ' h2 .emph{}'
+        . ' .emphasis-note{color:red}'
+        . ' .card:not(.emph){padding:1rem}'
+        . ' .card-style--flush{overflow:hidden}',
+        $repaired
+    );
+    [$again, $droppedAgain] = CssChecks::dropEmphasisHookDeclarations($repaired);
+    assert_eq($repaired, $again);
+    assert_eq([], $droppedAgain);
+});
+
+test('emphasis guard preserves attribute text and removes only the actual hook rule', function () {
+    $safe = '.note[data-copy=".emph"] { color: inherit; }';
+    $css = $safe . '@media (max-width: 600px) { .emph { white-space: nowrap; } .sibling { padding: 1rem; } }';
+    [$result, $removed] = CssChecks::dropEmphasisHookDeclarations($css);
+    assert_contains($safe, $result);
+    assert_contains('.sibling { padding: 1rem; }', $result);
+    assert_eq(['white-space: nowrap'], $removed);
+    assert_eq([$result, []], CssChecks::dropEmphasisHookDeclarations($result));
+});

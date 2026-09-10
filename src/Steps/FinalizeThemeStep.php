@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -168,6 +169,8 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $headingEmphasis = DesignDirectionStep::headingEmphasisFor($project);
+        $emphasisShipped = self::writeOverlayKit($project, self::emphasisKit(), HeadingEmphasis::kitCss($headingEmphasis), $headerWarnings);
         $typeTreatmentShipped = self::writeOverlayKit(
             $project,
             self::typeTreatmentKit(),
@@ -175,6 +178,9 @@ final class FinalizeThemeStep implements Step
             $headerWarnings,
         );
         $overlays = [];
+        if ($emphasisShipped) {
+            $overlays[] = self::emphasisKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -298,6 +304,7 @@ final class FinalizeThemeStep implements Step
     public static function overlayKits(): array
     {
         return [
+            self::emphasisKit(),
             self::shapeKit(),
             self::imageTreatmentKit(),
             self::imageCropKit(),
@@ -306,6 +313,11 @@ final class FinalizeThemeStep implements Step
             self::deviceKit(),
             self::typeTreatmentKit(),
         ];
+    }
+
+    public static function emphasisKit(): OverlayKit
+    {
+        return new OverlayKit('emphasis', '// Apply the heading_emphasis token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit

@@ -5,7 +5,9 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
+
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -196,6 +198,14 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
         $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
+
+        if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
+            foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+                $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                    . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                    . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+            }
+        }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);

@@ -339,6 +339,42 @@ final class CssChecks
     }
 
     /**
+     * Drop every declaration in a rule whose selector names the heading
+     * emphasis hook (frm PR-5g). The emphasis kit paints `.emph`; a model
+     * rule on it in theme.json custom CSS fought the kit (cohesion-like16
+     * shipped `.emph{position:relative;white-space:nowrap}` and a long
+     * emphasized phrase clipped the heading at the phone edge).
+     *
+     * @return array{0:string,1:list<string>} repaired css, dropped raw declarations
+     */
+    public static function dropEmphasisHookDeclarations(
+        string $css,
+        string $hook = 'emph',
+        bool $bareDeclarationList = false,
+    ): array {
+        $pattern = '/\\.' . preg_quote($hook, '/') . '(?![\\w-])/';
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static function (array $declaration) use ($pattern): bool {
+                if ($declaration['kind'] !== 'style') {
+                    return false;
+                }
+                foreach ([$declaration['context'], ...$declaration['ancestors']] as $selector) {
+                    if (preg_match($pattern, self::withoutSelectorAttributes(self::withoutExcludedOrRelationalArguments($selector))) === 1) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            $bareDeclarationList,
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
      * Drop every declaration whose own rule, or any rule nesting it, names a
      * motion-kit class.
      *
