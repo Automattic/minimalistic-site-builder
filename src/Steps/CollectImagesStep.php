@@ -505,6 +505,80 @@ final class CollectImagesStep implements Step
         return $images;
     }
 
+    /**
+     * The four fields an AI_IMAGE alt body carries, or null when it is not the
+     * documented form. The three trailing fields pop off the end, so the
+     * subject — the lead, and the only field meant to be rich — may itself
+     * contain pipes. The one place that knows the marker's grammar: the parser
+     * that reads specs out and the rewriter that takes the marker back out
+     * both come here.
+     *
+     * @return array{subject:string,pageContext:string,style:string,aspectRatio:string}|null
+     */
+    private static function splitMarkerFields(string $alt): ?array
+    {
+        $parts = explode('|', $alt);
+        if (count($parts) < 4) {
+            return null;
+        }
+        $aspectRatio = strtolower(trim(array_pop($parts)));
+        $style = strtolower(trim(array_pop($parts)));
+        $pageContext = trim(array_pop($parts));
+
+        return [
+            'subject' => trim(implode('|', $parts)),
+            'pageContext' => $pageContext,
+            'style' => $style,
+            'aspectRatio' => $aspectRatio,
+        ];
+    }
+
+    /**
+     * Replace the collection marker in every alt with the subject it carries.
+     *
+     * The marker is a protocol with this step, and ThemeValidator says as
+     * much: the value "belongs in an img alt until collect-images records it".
+     * Nothing ever took it back out, so delivered sites ship the whole prompt
+     * as alt text — read aloud, indexed as the image's description, handed to
+     * Jetpack as og:image:alt. The subject describes the picture, so the
+     * subject is the alt.
+     *
+     * It goes whatever shape it is in: ThemeValidator scans only url/src
+     * contexts, so a malformed marker in an alt is reported by nobody, and the
+     * text after it is still the model describing the picture.
+     *
+     * Called from generate-images, not from here, because the marker is still
+     * in use after this step: HeaderHeroStep reads its last field for each
+     * image's aspect, and the second pass below treats a theme asset no marker
+     * declares as one nothing will generate — so stripping here would make a
+     * re-run delete every image block on sight.
+     */
+    public static function describeAlts(string $content): string
+    {
+        if (!str_contains($content, 'AI_IMAGE:')) {
+            return $content;
+        }
+
+        // The value is bounded to its own tag. This writes its result back, so
+        // an unbalanced quote must not let the match run on to the next quote
+        // in the file and take every sibling in between with it; a tag too
+        // malformed to match keeps its marker, which is the safe way to fail.
+
+        return (string) preg_replace_callback(
+            '/(<img[^>]+(?<![\w-])alt=)(["\'])AI_IMAGE:\s*([^>]*?)\2/is',
+            static function (array $match): string {
+                $body = html_entity_decode($match[3], ENT_QUOTES | ENT_HTML5);
+                $fields = self::splitMarkerFields($body);
+                $subject = $fields === null ? trim($body) : $fields['subject'];
+
+                return $subject === ''
+                    ? $match[0]
+                    : $match[1] . $match[2] . htmlspecialchars($subject, ENT_QUOTES | ENT_HTML5) . $match[2];
+            },
+            $content
+        );
+    }
+
     /** Where an image is used, read off the part path assemble-pages keys on. */
     private static function pageContextFor(string $source): string
     {
@@ -593,20 +667,12 @@ final class CollectImagesStep implements Step
             $src      = $srcMatch[2];
             $filename = $srcMatch[3];
 
-            // subject | page-context | style | aspect-ratio. We pop the three
-            // trailing fixed fields from the end, so the subject (the lead, the
-            // only field meant to be rich) may itself contain pipes.
-            $parts = explode('|', $alt);
-            if (count($parts) < 4) {
+            $fields = self::splitMarkerFields($alt);
+            if ($fields === null || $fields['subject'] === '') {
                 continue;
             }
-            $aspectRatio = strtolower(trim(array_pop($parts)));
-            $style       = strtolower(trim(array_pop($parts)));
-            $pageContext = trim(array_pop($parts));
-            $subject     = trim(implode('|', $parts));
-            if ($subject === '') {
-                continue;
-            }
+            ['subject' => $subject, 'pageContext' => $pageContext] = $fields;
+            ['style' => $style, 'aspectRatio' => $aspectRatio] = $fields;
 
             $images[] = [
                 'filename'    => $filename,
