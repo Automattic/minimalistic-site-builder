@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\ListThumbTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
 
@@ -16,8 +17,8 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
- * - card_style: normalized site-wide card construction enforced on delivery;
- *   list-thumb rows also receive their non-stacking and tight-gap invariants
+ * - card_style: the site card treatment also sets thumbnail image space and size.
+ *   Thumbnail rows keep horizontal columns and the tight text gap.
  * - motion_profile: committed Motion profile; absent/invalid means static,
  *   matching the delivery gate. Only its permitted instructions are sent.
  * - page: slug/title/path of the page the section belongs to
@@ -109,6 +110,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                     $archetype,
                     $itemPattern,
                     SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
+                    $cardStyle,
                 ),
             ),
         ]);
@@ -176,6 +178,15 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $this->key($input),
                 $repairs
             );
+            if ($archetype === 'list-with-thumbnails') {
+                $markup = GeneratedMarkup::withRootClassMarker(
+                    $markup,
+                    ListThumbTreatment::MARKER_PREFIX,
+                    ListThumbTreatment::marker($cardStyle),
+                    $this->key($input),
+                    $repairs,
+                );
+            }
         }
         if ($itemPattern !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(

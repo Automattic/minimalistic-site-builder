@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ListThumbTreatment;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -50,7 +51,7 @@ final class ScaffoldThemeStep implements Step
 
     public function run(Project $project): void
     {
-        $project->writeText('theme/style.css', self::STYLE_CSS);
+        $project->writeText('theme/style.css', self::STYLE_CSS . ListThumbTreatment::css());
         $project->writeText('theme/readme.txt', self::README);
         self::copyMotionKit($project);
         self::copyHeaderKit($project);

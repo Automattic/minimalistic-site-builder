@@ -325,7 +325,7 @@ test('SectionUnit documents the complete list-thumb delivery contract', function
         'the dense two-column row is kept horizontal at Core\'s mobile breakpoint',
     );
     assert_contains(
-        '`isStackedOnMobile:false` is MANDATORY for BOTH flush and framed rows',
+        '`isStackedOnMobile:false` is MANDATORY for all thumbnail treatments',
         $prompt,
     );
     assert_contains(
@@ -333,7 +333,7 @@ test('SectionUnit documents the complete list-thumb delivery contract', function
         $prompt,
         'the text column owns a tight intra-row rhythm',
     );
-    assert_contains('`"className":"list-thumb-flush"`', $prompt);
+    assert_contains('`list-thumb-treatment--flush`', $prompt);
 });
 
 test('SectionUnit gives standalone requests the authoritative machine card style', function () {

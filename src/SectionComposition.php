@@ -201,7 +201,7 @@ final class SectionComposition
      *
      * @var list<string>
      */
-    public const RECIPE_VARS = ['pin_directive', 'highlight_directive'];
+    public const RECIPE_VARS = ['pin_directive', 'highlight_directive', 'thumbnail_treatment'];
 
     /**
      * How many more images one region may hold than its sibling before the row
@@ -588,11 +588,12 @@ final class SectionComposition
      *
      * @return array<string,string>
      */
-    public static function recipeVars(string $archetype, ?string $itemPattern, bool $statedHighlight = false): array
+    public static function recipeVars(string $archetype, ?string $itemPattern, bool $statedHighlight = false, string $cardStyle = 'flush'): array
     {
         return [
             'pin_directive' => self::pinDirective($archetype, $itemPattern),
             'highlight_directive' => self::highlightDirective($archetype, $statedHighlight),
+            'thumbnail_treatment' => $archetype === 'list-with-thumbnails' ? ListThumbTreatment::instructions($cardStyle) : '',
         ];
     }
 

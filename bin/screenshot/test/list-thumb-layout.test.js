@@ -11,13 +11,13 @@ const root = path.resolve(__dirname, '../../..');
 const executablePath = [process.env.CHROME_PATH, '/usr/bin/google-chrome', chromium.executablePath()]
   .find((file) => file && existsSync(file));
 
-function fixture(variant, nested, direction) {
+function fixture(variant, nested, direction, treatment = '') {
   const row = `<div class="wp-block-columns alignwide is-not-stacked-on-mobile ${variant === 'flush' ? 'list-thumb-flush' : ''}" style="${variant === 'framed' ? 'padding:16px;border:1px solid' : ''}">
     <div class="wp-block-column" style="flex-basis:18%"><figure class="card-media-thumb"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='144' height='144'/%3E"></figure></div>
     <div class="wp-block-column" style="flex-basis:82%;padding:16px"><h3>Menu item</h3><p>A short description identifies the dish and its main ingredients.</p></div>
   </div>`;
   const items = `${row}<hr class="wp-block-separator alignwide">${row}`;
-  return `<html dir="${direction}"><body><section class="wp-block-group alignfull section-composition--list-with-thumbnails is-layout-constrained">
+  return `<html dir="${direction}"><body><section class="wp-block-group alignfull section-composition--list-with-thumbnails ${treatment ? `list-thumb-treatment--${treatment}` : ''} is-layout-constrained">
     <div class="wp-block-group alignwide copy-flush is-layout-constrained"><h2>Signature dishes</h2><p>One short introduction.</p></div>
     ${nested ? `<div class="wp-block-group alignwide is-layout-constrained">${items}</div>` : items}
     </section><section class="control is-layout-constrained"><div class="wp-block-group alignwide copy-flush is-layout-constrained"><h2>Other section</h2><p>Another short introduction.</p></div></section></body></html>`;
@@ -40,7 +40,7 @@ const coreCss = `
 
 test('thumbnail lists stay narrow while introduction containers keep the standard width', { skip: !executablePath }, async () => {
   const css = execFileSync('php', ['-r',
-    'require "src/bootstrap.php"; echo (new ReflectionClass(Automattic\\SiteBuild\\Steps\\ScaffoldThemeStep::class))->getConstant("STYLE_CSS");',
+    'require "src/bootstrap.php"; echo (new ReflectionClass(Automattic\\SiteBuild\\Steps\\ScaffoldThemeStep::class))->getConstant("STYLE_CSS") . Automattic\\SiteBuild\\ListThumbTreatment::css();',
   ], { cwd: root, encoding: 'utf8' });
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   try {
@@ -89,6 +89,80 @@ test('thumbnail lists stay narrow while introduction containers keep the standar
               assert.ok(direction === 'ltr' ? media.right <= copy.left : copy.right <= media.left, label);
             }
             if (width >= 1440) assert.ok(result.intro.width > result.container.width, label);
+          }
+        }
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test('thumbnail treatments control image space and size without a change to the section width', { skip: !executablePath }, async () => {
+  const css = execFileSync('php', ['-r',
+    'require "src/bootstrap.php"; echo (new ReflectionClass(Automattic\\SiteBuild\\Steps\\ScaffoldThemeStep::class))->getConstant("STYLE_CSS") . Automattic\\SiteBuild\\ListThumbTreatment::css();',
+  ], { cwd: root, encoding: 'utf8' });
+  const crops = Object.fromEntries(['mixed', 'portrait', 'landscape'].map((crop) => [crop,
+    execFileSync('php', ['-r', 'require "src/bootstrap.php"; echo Automattic\\SiteBuild\\ImageCrop::kitCss($argv[1]);', crop],
+      { cwd: root, encoding: 'utf8' }),
+  ]));
+  const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    for (const width of [375, 768, 1440, 2560]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const treatment of ['flush', 'framed', 'borderless', 'overlap']) {
+        for (const legacy of ['plain', 'flush']) {
+          for (const direction of ['ltr', 'rtl']) {
+            for (const [crop, cropCss] of Object.entries(crops)) {
+              await page.setContent(fixture(legacy, true, direction, treatment));
+              await page.addStyleTag({ content: css + coreCss + cropCss });
+              const result = await page.evaluate(() => {
+                const section = document.querySelector('.section-composition--list-with-thumbnails');
+                const row = section.querySelector('.wp-block-columns');
+                const media = row.firstElementChild;
+                const copy = row.lastElementChild;
+                const figure = media.firstElementChild;
+                const img = figure.firstElementChild;
+                const rowRect = row.getBoundingClientRect();
+                const mediaRect = media.getBoundingClientRect();
+                const copyRect = copy.getBoundingClientRect();
+                const imageRect = img.getBoundingClientRect();
+                return {
+                  introWidth: section.firstElementChild.getBoundingClientRect().width,
+                  standardWidth: document.querySelector('.control > div').getBoundingClientRect().width,
+                  rowWidth: rowRect.width,
+                  imageWidth: imageRect.width,
+                  imageHeight: imageRect.height,
+                  imageOffset: imageRect.top - mediaRect.top,
+                  mediaHeight: mediaRect.height,
+                  rowPadding: parseFloat(getComputedStyle(row).paddingTop),
+                  textPadding: parseFloat(getComputedStyle(copy).paddingTop),
+                  imageMargin: parseFloat(getComputedStyle(figure).marginBlockStart),
+                  gap: parseFloat(getComputedStyle(row).columnGap),
+                  ratio: getComputedStyle(img).aspectRatio,
+                  separate: mediaRect.right <= copyRect.left || copyRect.right <= mediaRect.left,
+                  imageInside: imageRect.left >= rowRect.left - 1 && imageRect.right <= rowRect.right + 1,
+                  overflow: document.documentElement.scrollWidth > innerWidth,
+                };
+              });
+              const label = `${width}/${treatment}/${legacy}/${direction}/${crop}`;
+              assert.equal(result.introWidth, result.standardWidth, label);
+              assert.ok(result.rowWidth < 850, label);
+              assert.equal(result.overflow, false, label);
+              assert.equal(result.separate, true, label);
+              assert.equal(result.imageInside, true, label);
+              const limit = { flush: 144, framed: 128, borderless: 96, overlap: 128 }[treatment];
+              assert.ok(result.imageWidth <= limit + 1, label);
+              if (width >= 1440) assert.ok(Math.abs(result.imageWidth - limit) < 1, label);
+              assert.equal(result.rowPadding, ['framed', 'overlap'].includes(treatment) ? 16 : 0, label);
+              assert.equal(result.textPadding, treatment === 'flush' ? 16 : 0, label);
+              assert.equal(result.gap, treatment === 'flush' ? 0 : 16, label);
+              assert.equal(result.imageMargin, treatment === 'overlap' ? -8 : 0, label);
+              assert.ok(Math.abs(result.imageOffset - (treatment === 'overlap' ? -8 : 0)) < 1, label);
+              assert.equal(result.ratio, treatment === 'flush' ? 'auto' : { mixed: '1 / 1', portrait: '3 / 4', landscape: '4 / 3' }[crop], label);
+              if (treatment === 'flush') assert.ok(Math.abs(result.imageHeight - result.mediaHeight) < 1, label);
+            }
           }
         }
       }
