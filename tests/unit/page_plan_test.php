@@ -2170,7 +2170,7 @@ test('page-plan and section-composition restrict offset-grid to a broken-grid rh
     $composition = (string) file_get_contents(
         repo_path('prompts/section-compositions/offset-grid.md')
     );
-    $section = (string) file_get_contents(repo_path('prompts/section.md'));
+    $section = (string) file_get_contents(repo_path('prompts/section-compositions/offset-grid.md'));
 
     foreach ([$pagePlan, $composition] as $prompt) {
         assert_contains('offset-grid', $prompt);
@@ -2179,7 +2179,7 @@ test('page-plan and section-composition restrict offset-grid to a broken-grid rh
         assert_true(!str_contains($prompt, 'photography or gallery site'), 'the gate no longer names a kind of site');
         assert_true(!str_contains($prompt, 'photography and gallery sites'), 'the gate no longer names a kind of site');
     }
-    assert_contains('staggered-grid', $section);
+    assert_contains('staggered grid', $section);
     assert_contains('`offset` or `gallery`', $section);
     assert_contains('every SECOND column', $section, 'the staggered construction is still documented for the assigned archetype');
     assert_true(!str_contains($section, 'photography or gallery site'));

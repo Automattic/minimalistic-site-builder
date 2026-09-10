@@ -1397,10 +1397,10 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
         'description' => 'x',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ];
-    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
-            $base + ['depth' => strtoupper($depth)],
+            $base + ['depth' => strtoupper($depth), 'palette' => ['base' => '#101010']],
             'cinematic-safe-zone',
             '',
             warnings: $warnings,
@@ -2818,6 +2818,48 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     assert_eq('', $generic['subject_anchor']);
 });
 
+test('a glass depth on a light ground degrades to the ring it is built on, and stays on a dark one', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'depth' => 'glass',
+    ];
+    foreach ([['#0B0B0F', 'glass', 'dark'], ['#FFFFFF', 'ring', 'light']] as [$hex, $expected, $ground]) {
+        $warnings = [];
+        $repairs = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['palette' => ['base' => $hex, 'contrast' => $hex === '#FFFFFF' ? '#111111' : '#F5F5F5']],
+            'cinematic-safe-zone',
+            '',
+            $repairs,
+            $warnings,
+        );
+        assert_eq($expected, $direction['depth'], "glass on a {$ground} ground");
+        $glassRepairs = array_values(array_filter($warnings, fn (string $r): bool => str_contains($r, 'field depth authored "glass"')));
+        assert_eq($expected === 'ring' ? 1 : 0, count($glassRepairs), "warning recorded only on the {$ground} ground");
+    }
+});
+
+test('glass fallback writes a durable warning and retains the direction', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $authored = designdir_direction();
+    $authored['depth'] = 'glass';
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => $authored]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $delivered = $project->readJson('designDirection.json');
+    assert_eq('ring', $delivered['depth']);
+    assert_eq($authored['description'], $delivered['description']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('designDirection.json: field depth authored "glass"; delivered "ring"', $warnings);
+    assert_contains('disposition', $warnings);
+    $repairs = $secondWarnings = [];
+    $again = DesignDirectionStep::normalize($delivered, $delivered['hero_blueprint']['recipe'], '', $repairs, $secondWarnings);
+    assert_eq('ring', $again['depth']);
+    assert_true(!str_contains(implode("\n", $secondWarnings), 'field depth'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('normalize requires a concept reason for an optional texture', function () {
     foreach ([null, '', '  ', [], 7] as $reason) {
