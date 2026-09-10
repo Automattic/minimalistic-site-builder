@@ -998,6 +998,14 @@ final class DesignDirectionStep implements Step
         $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
+        // Use a ring on a light ground and record the lost glass value.
+        $depthGround = $groundKey
+            ?? (is_string($palette['base'] ?? null) && $palette['base'] !== '' ? GroundKey::classify($palette['base']) : 'light');
+        if ($depth === 'glass' && $depthGround === 'light') {
+            $warnings[] = 'designDirection.json: field depth authored "glass"; delivered "' . Depth::GLASS_LIGHT_FALLBACK
+                . '"; disposition glass is a dark-ground treatment and this direction commits a light ground';
+            $depth = Depth::GLASS_LIGHT_FALLBACK;
+        }
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
             CtaStyle::ALL,
@@ -1829,6 +1837,7 @@ final class DesignDirectionStep implements Step
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
                 'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+                'glass'       => 'the build turns band-coloured cards into frosted panels (a translucent band tint over the blurred page, one light hairline, a deep soft drop); inverted cards stay solid',
             } . '. Full-bleed media stays unelevated; do not add another shadow.';
         }
 
