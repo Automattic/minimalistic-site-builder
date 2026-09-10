@@ -3126,3 +3126,17 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'wp:site-logo'));
     });
 });
+
+test('the new header variants preserve the chrome choice and depth limits', function () {
+    $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
+    $deep = [...$short, ['slug' => 'work', 'sections' => []]];
+    foreach (['floating-pill', 'bar-center-cta', 'spread-nav'] as $archetype) {
+        foreach ([HeaderBehavior::MODE_STACKED, HeaderBehavior::MODE_OVERLAY] as $mode) {
+            $transient = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STATIC : HeaderBehavior::OVERLAY_TRANSIENT;
+            $persistent = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STICKY_SOFT : HeaderBehavior::OVERLAY_TO_SOLID;
+            assert_eq($transient, HeaderBehavior::behaviorFor($short, $mode, $archetype, HeaderChrome::PERSISTENT));
+            assert_eq($transient, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::TRANSIENT));
+            assert_eq($persistent, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::PERSISTENT));
+        }
+    }
+});

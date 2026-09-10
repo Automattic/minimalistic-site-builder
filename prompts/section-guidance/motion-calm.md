@@ -1,0 +1,1 @@
+- `calm`: favor sparse `reveal-fade`/`reveal`/`reveal-blur` entrances and quiet image motion; the kit renders them as soft fades and gentle settles. Use stagger only when the sequence matters.

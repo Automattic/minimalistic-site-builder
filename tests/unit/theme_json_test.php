@@ -3982,3 +3982,45 @@ test('theme-json never ships a font face from a foreign host', function () {
     assert_contains('bundled theme files', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('theme.json custom CSS loses every rule on the emphasis hook at any depth, with a warning per declaration (frm PR-5g)', function () {
+    $theme = ['styles' => [
+        'css' => '.section-badge{gap:.5em} .emph{position:relative;white-space:nowrap}',
+        'blocks' => ['core/heading' => ['css' => '.emph{display:inline-block}']],
+    ]];
+    [$out, $warnings] = ThemeJsonStep::removeEmphasisHookCustomCss($theme);
+    assert_eq('.section-badge{gap:.5em} .emph{}', $out['styles']['css']);
+    assert_eq('.emph{}', $out['styles']['blocks']['core/heading']['css']);
+    assert_eq(3, count($warnings));
+    assert_contains('styles.css: authored declaration', $warnings[0]);
+    assert_contains('white-space:nowrap', $warnings[1]);
+    assert_contains('styles.blocks.core/heading.css', $warnings[2]);
+    assert_contains('the emphasis kit paints it', $warnings[2]);
+    [$same, $none] = ThemeJsonStep::removeEmphasisHookCustomCss(['styles' => ['css' => 'body{margin:0}']]);
+    assert_eq('body{margin:0}', $same['styles']['css']);
+    assert_eq([], $none);
+});
+
+test('theme-json records emphasis CSS removals and preserves sibling CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_emphasis_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+    $payload = valid_theme_payload();
+    $safe = '.note[data-copy=".emph"] { color: inherit; }';
+    $payload['styles']['css'] = $safe . '@media (max-width: 600px) { .emph { white-space: nowrap; } .sibling { padding: 1rem; } }';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $theme = $project->readJson('theme/theme.json');
+    assert_contains($safe, $theme['styles']['css']);
+    assert_contains('.sibling { padding: 1rem; }', $theme['styles']['css']);
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    foreach (['theme/theme.json styles.css', 'white-space: nowrap', 'delivered removed', 'disposition'] as $context) {
+        assert_contains($context, $warnings);
+    }
+    assert_eq([$theme, []], ThemeJsonStep::removeEmphasisHookCustomCss($theme));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

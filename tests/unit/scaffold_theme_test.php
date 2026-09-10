@@ -96,20 +96,19 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
 
-    // Every list-thumb row carries its own bounds at a wide viewport
-    // (BIGR-999). The recipe's 18/82 percentages let a 1560px band run a
-    // paragraph line to about 180 characters and grow the thumbnail to 275px,
-    // so the row caps its own width, the media column caps the thumbnail, and
-    // the text column caps the reading measure. The row keeps the band's
-    // leading edge, because the section heading and lead copy start there and
-    // core's constrained layout writes both auto margins with !important. The
-    // media column grows into what the capped text column leaves, so a
-    // bordered flush row ends where its content ends.
+    // The list keeps its width limit without a limit on the introduction.
+    assert_contains(
+        ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-group:has(> .wp-block-columns > .wp-block-column > figure.card-media-thumb),\n"
+            . ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb),\n"
+            . ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-separator {\n"
+            . "    max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));\n"
+            . "    margin-inline: auto !important;\n"
+            . '}',
+        $css,
+    );
     assert_contains(
         ".wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {\n"
-            . "    max-inline-size: calc(9rem + 52ch + var(--wp--style--block-gap, 2rem));\n"
-            . "    margin-inline-start: 0 !important;\n"
-            . "    margin-inline-end: auto !important;\n"
+            . "    max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));\n"
             . '}',
         $css,
     );
