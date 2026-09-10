@@ -3753,13 +3753,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 if (!is_array($section) || ($front && $position === 0)) {
                     continue;
                 }
-                if ($archetypes[$position] !== 'asymmetric-split') {
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                $authored = $archetypes[$position];
+                $practicalList = $authored === 'list-with-thumbnails'
+                    && in_array($type, ['location', 'location-hours', 'hours', 'contact', 'contact-info', 'address', 'practical-info', 'visit-info'], true);
+                if ($authored !== 'asymmetric-split' && !$practicalList) {
                     continue;
                 }
-                $type = strtolower(trim((string) ($section['type'] ?? '')));
 
                 $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
-                if (!$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
+                if (!$practicalList && !$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
                     continue;
                 }
                 $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
@@ -3768,6 +3771,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $replacement = $neighbourGrid || $grids >= self::MAX_EQUAL_CARD_GRIDS
                     ? 'list-with-thumbnails'
                     : 'equal-card-grid';
+                if ($replacement === $authored) {
+                    continue;
+                }
                 if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
                     continue;
                 }
@@ -3777,9 +3783,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now ' . ($replacement === 'equal-card-grid' ? 'an equal-card-grid, one card per item in a row' : 'a list-with-thumbnails, one row per item with a small picture') . '; this supersedes any layout named earlier in this line.');
                 $repairs[] = self::successfulRepair(
                     self::sectionPath($slug, (int) $key) . '.layout_archetype',
-                    'asymmetric-split',
+                    $authored,
                     $replacement,
-                    "a repeated '{$type}' list under the split stacks every item's picture in one column",
+                    $practicalList
+                        ? "practical '{$type}' details use cards without a required thumbnail per detail"
+                        : "a repeated '{$type}' list under the split stacks every item's picture in one column",
                 );
             }
             $pages[$index]['sections'] = $sections;

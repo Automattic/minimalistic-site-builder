@@ -2622,3 +2622,40 @@ test('a repeated list planned as an asymmetric split takes the card grid or the 
     assert_eq($plain, PagePlanStep::withListsOffTheSplit($plain, $repairs));
     assert_eq([], $repairs);
 });
+
+test('practical thumbnail lists use cards while image indexes retain their layout', function () {
+    $details = plan_section([
+        'slug' => 'location-hours', 'type' => 'location',
+        'layout_archetype' => 'list-with-thumbnails', 'item_pattern' => 'card',
+        'content_notes' => 'Address, hours, and phone.',
+    ]);
+    $pages = [['slug' => 'home', 'front' => true, 'sections' => [
+        plan_section(), $details,
+        plan_section(['slug' => 'closing', 'layout_archetype' => 'cta-panel']),
+    ]]];
+    $repairs = [];
+    $out = PagePlanStep::withListsOffTheSplit($pages, $repairs);
+    assert_eq('equal-card-grid', $out[0]['sections'][1]['layout_archetype']);
+    assert_eq($details['content_notes'], $out[0]['sections'][1]['content_notes']);
+    assert_eq($pages[0]['sections'][0], $out[0]['sections'][0]);
+    assert_eq($pages[0]['sections'][2], $out[0]['sections'][2]);
+    assert_eq(1, count($repairs));
+    assert_contains('authored="list-with-thumbnails"; delivered="equal-card-grid"', $repairs[0]);
+    assert_contains('Build correction: this section is now an equal-card-grid', $out[0]['sections'][1]['handoff']);
+    $againRepairs = [];
+    assert_eq($out, PagePlanStep::withListsOffTheSplit($out, $againRepairs));
+    assert_eq([], $againRepairs);
+
+    foreach (['menu', 'schedule', 'article-index', 'location-guide', 'contact-directory'] as $type) {
+        $pages[0]['sections'][1]['type'] = $type;
+        $repairs = [];
+        assert_eq($pages, PagePlanStep::withListsOffTheSplit($pages, $repairs), $type);
+        assert_eq([], $repairs);
+    }
+
+    $pages[0]['sections'][1] = $details;
+    $pages[0]['sections'][2]['layout_archetype'] = 'equal-card-grid';
+    $repairs = [];
+    assert_eq($pages, PagePlanStep::withListsOffTheSplit($pages, $repairs), 'an adjacent grid prevents a second grid');
+    assert_eq([], $repairs);
+});

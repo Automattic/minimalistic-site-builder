@@ -11,7 +11,8 @@ same construction and the same crop, so the row reads as one system.
   the ASSIGNED CARD STYLE, and put a card's bottom-aligned action, when it has
   one, in a `wp:paragraph` with `"className":"text-action cta-bottom"` holding
   one link — never a button; buttons are the page's planned actions.
-- Copy budget: one heading and one lead line for the band. Each card holds a
+- Copy budget: one heading and at most one short paragraph for the band.
+  Use that paragraph as the lead; do not add a second paragraph below it. Each card holds a
   heading, one short paragraph or a short list, and at most one text-link
   action.
 - Identity: the one top-level group carries the assigned root marker class.
