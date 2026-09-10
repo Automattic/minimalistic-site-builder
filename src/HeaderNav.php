@@ -1724,6 +1724,10 @@ final class HeaderNav
                 unset($attrs['textColor']);
                 $changed[] = "textColor '{$token}'";
             }
+            if ($name === 'navigation' && isset($attrs['customTextColor'])) {
+                unset($attrs['customTextColor']);
+                $changed[] = 'customTextColor';
+            }
             if (is_array($attrs['style']['color'] ?? null) && isset($attrs['style']['color']['text'])) {
                 unset($attrs['style']['color']['text']);
                 if ($attrs['style']['color'] === []) {

@@ -23,6 +23,7 @@
     var adminBarEl = null;
     var CURRENT_SECTION_CLASS = 'is-current-section';
     var sectionObserver = null;
+    var updateSectionNavigation = null;
     var adminBarQueried = false;
     var appliedAdminBarOffset = null;
     var adminBarBodySynced = false;
@@ -117,15 +118,10 @@
         }
     }
 
-    // Active-item pill (frm W1c): on a floating-pill, centered-bar, or spread-nav header
-    // whose navigation links point at sections of this page (#id), the item
-    // whose section crosses the upper part of the viewport is marked
-    // is-current-section (and aria-current="location" on its link) so the
-    // kit can paint it. WordPress page state (aria-current="page") is left
-    // alone; only in-page hash links take part. Fails open: no observer,
-    // nothing marked.
+    // Mark the current section on the pill, centered bar, and spread bar.
+    // Keep the WordPress current-page state on links that already declare it.
     function watchSectionNavigation() {
-        if (typeof window.IntersectionObserver !== 'function' || typeof document.querySelectorAll !== 'function') {
+        if (typeof document.querySelectorAll !== 'function') {
             return;
         }
         var scope = document.querySelector('.header-archetype--floating-pill, .header-archetype--bar-center-cta, .header-archetype--spread-nav');
@@ -136,53 +132,53 @@
         var entries = [];
         var index;
         for (index = 0; index < links.length; index += 1) {
-            var id = links[index].getAttribute('href').slice(1);
+            if (links[index].getAttribute('aria-current') === 'page') {
+                continue;
+            }
+            var id;
+            try {
+                id = decodeURIComponent(links[index].getAttribute('href').slice(1));
+            } catch (error) {
+                continue;
+            }
             var section = id ? document.getElementById(id) : null;
             var item = navigationItemForLink(links[index]);
             if (section && item) {
                 entries.push({ link: links[index], item: item, section: section });
             }
         }
-        if (entries.length < 2) {
+        if (entries.length === 0) {
             return;
         }
-        var mark = function (current) {
+        updateSectionNavigation = function () {
+            var band = (window.innerHeight || root.clientHeight) * 0.35;
+            var current = null;
+            var currentTop = -Infinity;
+            // Select by page position, independent of menu order. Read each
+            // scroll frame so short sections and scroll jumps update the mark.
             for (var i = 0; i < entries.length; i += 1) {
-                var on = entries[i].section === current;
-                entries[i].item.classList.toggle(CURRENT_SECTION_CLASS, on);
+                var top = entries[i].section.getBoundingClientRect().top;
+                if (top <= band && top > currentTop) {
+                    current = entries[i].section;
+                    currentTop = top;
+                }
+            }
+            for (var j = 0; j < entries.length; j += 1) {
+                var on = entries[j].section === current;
+                entries[j].item.classList.toggle(CURRENT_SECTION_CLASS, on);
                 if (on) {
-                    entries[i].link.setAttribute('aria-current', 'location');
-                } else if (entries[i].link.getAttribute('aria-current') === 'location') {
-                    entries[i].link.removeAttribute('aria-current');
+                    entries[j].link.setAttribute('aria-current', 'location');
+                } else if (entries[j].link.getAttribute('aria-current') === 'location') {
+                    entries[j].link.removeAttribute('aria-current');
                 }
             }
         };
-        var visible = [];
-        sectionObserver = new window.IntersectionObserver(function (observed) {
-            for (var i = 0; i < observed.length; i += 1) {
-                var target = observed[i].target;
-                var at = visible.indexOf(target);
-                if (observed[i].isIntersecting && at === -1) {
-                    visible.push(target);
-                } else if (!observed[i].isIntersecting && at !== -1) {
-                    visible.splice(at, 1);
-                }
+        updateSectionNavigation();
+        if (typeof window.IntersectionObserver === 'function') {
+            sectionObserver = new window.IntersectionObserver(updateSectionNavigation, { threshold: 0 });
+            for (index = 0; index < entries.length; index += 1) {
+                sectionObserver.observe(entries[index].section);
             }
-            // The topmost intersecting section wins; when none crosses the
-            // band (a tall gap or the page top), the last mark stays.
-            var current = null;
-            for (var j = 0; j < entries.length; j += 1) {
-                if (visible.indexOf(entries[j].section) !== -1) {
-                    current = entries[j].section;
-                    break;
-                }
-            }
-            if (current) {
-                mark(current);
-            }
-        }, { rootMargin: '-35% 0px -55% 0px', threshold: 0 });
-        for (index = 0; index < entries.length; index += 1) {
-            sectionObserver.observe(entries[index].section);
         }
     }
 
@@ -195,6 +191,9 @@
             root.classList.remove(SCROLLED_CLASS);
         }
         applyAdminBarOffset();
+        if (updateSectionNavigation) {
+            updateSectionNavigation();
+        }
     }
 
     function clearMeasuredHeight() {
@@ -276,6 +275,7 @@
     }
 
     function stop() {
+        updateSectionNavigation = null;
         if (sectionObserver) {
             try {
                 sectionObserver.disconnect();
@@ -342,6 +342,9 @@
         var height = Math.max(0, Math.ceil(rect.height || header.offsetHeight || 0));
         root.style.setProperty('--site-header-height', height + 'px');
         applyAdminBarOffset();
+        if (updateSectionNavigation) {
+            updateSectionNavigation();
+        }
     }
 
     function scheduleMeasurement() {

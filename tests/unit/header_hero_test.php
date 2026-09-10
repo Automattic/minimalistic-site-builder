@@ -2983,27 +2983,16 @@ test('header-hero injects the mark on every non-personal site and not on a perso
     });
 });
 
-test('floating-pill asks for persistent chrome regardless of site depth (frm W1a)', function () {
+test('the new header variants preserve the chrome choice and depth limits', function () {
     $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
-    assert_eq(HeaderBehavior::STATIC, HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED));
-    assert_eq(
-        HeaderBehavior::STICKY_SOFT,
-        HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'floating-pill'),
-    );
-    $resolved = HeaderBehavior::resolve(
-        $short,
-        HeaderBehavior::MODE_STACKED,
-        ['base' => '#FFFFFF', 'contrast' => '#111111'],
-        'floating-pill',
-    );
-    assert_eq(HeaderBehavior::STICKY_SOFT, $resolved['behavior']);
-});
-
-test('bar-center-cta asks for persistent chrome regardless of site depth (frm W1b)', function () {
-    $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
-    assert_eq(HeaderBehavior::STATIC, HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED));
-    assert_eq(
-        HeaderBehavior::STICKY_SOFT,
-        HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'bar-center-cta'),
-    );
+    $deep = [...$short, ['slug' => 'work', 'sections' => []]];
+    foreach (['floating-pill', 'bar-center-cta', 'spread-nav'] as $archetype) {
+        foreach ([HeaderBehavior::MODE_STACKED, HeaderBehavior::MODE_OVERLAY] as $mode) {
+            $transient = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STATIC : HeaderBehavior::OVERLAY_TRANSIENT;
+            $persistent = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STICKY_SOFT : HeaderBehavior::OVERLAY_TO_SOLID;
+            assert_eq($transient, HeaderBehavior::behaviorFor($short, $mode, $archetype, HeaderChrome::PERSISTENT));
+            assert_eq($transient, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::TRANSIENT));
+            assert_eq($persistent, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::PERSISTENT));
+        }
+    }
 });

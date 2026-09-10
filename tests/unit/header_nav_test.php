@@ -1213,3 +1213,20 @@ test('HeaderNav restores the header-spread class and fixHeader applies the prove
     assert_contains('header-spread', $fixed['markup']);
     assert_true(!str_contains($fixed['markup'], '"textColor":"secondary"'), 'the spread bar inherits the proven ink');
 });
+
+
+test('the header removes custom navigation ink and retains sibling blocks', function () {
+    $button = '<!-- wp:button {"textColor":"accent"} --><div class="wp-block-button"><a class="wp-block-button__link">Contact</a></div><!-- /wp:button -->';
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:navigation {"customTextColor":"#777777","overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Work","url":"#work"} /--><!-- /wp:navigation -->'
+        . $button . '</div><!-- /wp:group -->';
+    $result = HeaderNav::inheritProvenInk($markup, 'contrast');
+    assert_true(!str_contains($result['markup'], 'customTextColor'));
+    assert_contains('"overlayMenu":"mobile"', $result['markup']);
+    assert_contains($button, $result['markup']);
+    assert_contains('customTextColor', implode(' ', $result['notes']));
+    $again = HeaderNav::inheritProvenInk($result['markup'], 'contrast');
+    assert_eq($result['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+});

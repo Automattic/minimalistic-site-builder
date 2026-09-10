@@ -332,19 +332,19 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill,
  * sits inside the pill, so the proof holds. An earned clear resting state
  * still keeps the scrim on the pill: a clear pill is not a pill. The rail's
  * own blur band is dropped; the pill blurs behind itself instead. */
-.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill,
+.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill,
 html.header-state-js
     .site-header-shell
-    .header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent
+    .header-archetype--floating-pill.header-behavior-overlay.header-top-transparent
     .header-pill {
     --header-pill-surface: var(--header-start-surface, var(--header-overlay-scrim));
 }
 html.header-state-js
     .site-header-shell
-    .header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent {
+    .header-archetype--floating-pill.header-behavior-overlay.header-top-transparent {
     --header-start-surface: var(--header-overlay-scrim);
 }
-html.header-is-scrolled .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill {
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill {
     --header-pill-surface: var(--header-scrolled-surface, var(--header-scrolled-solid));
 }
 
@@ -387,7 +387,7 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
 }
 
 .site-header-shell--force-solid .header-archetype--floating-pill .header-pill {
-    --header-pill-surface: var(--header-scrolled-solid, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+    --header-pill-surface: var(--header-scrolled-solid, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff))) !important;
 }
 
 /* The wordmark yields before the row wraps; the nav collapses on its own. */
@@ -408,15 +408,13 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     padding: 0.35em 0.75em;
 }
 
-/* Active-item pill (frm W1c): header.js marks the navigation item whose
- * section is in view. The item takes a tint of the header ink, so it stays
- * readable in every proven header state without a new colour pair; only the
- * pill and the centered bar mark sections, and only in-page links qualify. */
+/* Mark the current section with an outline. Keep the surface unchanged
+ * because a tint can reduce the verified text contrast. */
 .site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,
 .site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
-    background-color: color-mix(in srgb, currentColor 12%, transparent);
+    box-shadow: inset 0 0 0 1px currentColor;
     border-radius: 999px;
-    transition: background-color var(--header-state-duration) var(--header-state-ease);
+    transition: box-shadow var(--header-state-duration) var(--header-state-ease);
 }
 .site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
     padding: 0.35em 0.75em;
@@ -477,7 +475,7 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     text-overflow: ellipsis;
 }
 
-.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
     justify-self: center;
 }
 
@@ -499,7 +497,7 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
         column-gap: var(--wp--preset--spacing--sm, 0.75rem);
     }
 
-    .site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {
+    .site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
         justify-self: end;
     }
 }
@@ -527,21 +525,25 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
 .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-title,
 .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-logo {
     justify-self: start;
+    min-inline-size: 0;
+    overflow: hidden;
     white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
-.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation {
+.site-header-shell .header-archetype--spread-nav .header-spread > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
     justify-self: stretch;
+    min-inline-size: 0;
 }
 
-.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation .wp-block-navigation__container {
+.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation .wp-block-navigation__container {
     inline-size: 100%;
     justify-content: space-between;
 }
 
-/* The active item on a spread bar is the same ink tint as the pill's. */
+/* The spread bar uses the same outline as the pill. */
 .site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
-    background-color: color-mix(in srgb, currentColor 12%, transparent);
+    box-shadow: inset 0 0 0 1px currentColor;
     border-radius: 999px;
     padding: 0.35em 0.75em;
     margin: -0.35em -0.75em;
@@ -553,7 +555,7 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
         column-gap: var(--wp--preset--spacing--sm, 0.75rem);
     }
 
-    .site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation {
+    .site-header-shell .header-archetype--spread-nav .header-spread > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
         justify-self: end;
     }
 }
@@ -606,13 +608,13 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
 /* Overlay pill (frm PR-1e): the rail never blurs; the pill does, and stops
  * once the scrolled surface is opaque, like the overlay rail it replaces. */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid::before {
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay::before {
         content: none;
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
     }
 
-    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill::before {
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before {
         position: absolute;
         z-index: 0;
         inset: 0;
@@ -623,17 +625,17 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
         backdrop-filter: blur(14px) saturate(115%);
     }
 
-    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill > * {
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill > * {
         position: relative;
         z-index: 1;
     }
 
     html.header-is-scrolled
         .site-header-shell
-        .header-archetype--floating-pill.header-behavior-overlay-to-solid
+        .header-archetype--floating-pill.header-behavior-overlay
         .header-pill::before,
     .site-header-shell--force-solid
-        .header-archetype--floating-pill.header-behavior-overlay-to-solid
+        .header-archetype--floating-pill.header-behavior-overlay
         .header-pill::before {
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
@@ -644,11 +646,18 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     html.header-state-js
         .site-header-shell
         .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
-        .header-pill::before {
+        .header-pill::before,
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before {
         content: none;
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
     }
+}
+
+/* A forced solid surface needs no blur in either state. */
+.site-header-shell.site-header-shell--force-solid .header-archetype--floating-pill .header-pill::before {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -829,7 +838,7 @@ html.header-state-js.header-chrome-persistent {
 }
 
 /* Keep the open navigation above other controls in the pill. */
-.site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-navigation:has(.wp-block-navigation__responsive-container.is-menu-open) {
+.site-header-shell .header-archetype--floating-pill .header-pill > :has(.wp-block-navigation__responsive-container.is-menu-open) {
     z-index: 2;
 }
 

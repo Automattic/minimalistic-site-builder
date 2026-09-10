@@ -324,13 +324,13 @@ test('header CSS paints the floating pill on the inner row and keeps the rail tr
 
 test('header CSS moves the overlay scrim and blur onto the pill in overlay mode (frm PR-1e)', function () {
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
-    $scrim = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill,');
+    $scrim = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill,');
     assert_contains('var(--header-start-surface, var(--header-overlay-scrim))', $scrim);
-    assert_contains('.header-archetype--floating-pill.header-behavior-overlay-to-solid.header-top-transparent', $css, 'an earned clear overlay keeps the scrim on the pill');
-    assert_contains('.header-archetype--floating-pill.header-behavior-overlay-to-solid::before {', $css);
-    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid::before');
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay.header-top-transparent', $css, 'an earned clear overlay keeps the scrim on the pill');
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay::before {', $css);
+    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay::before');
     assert_contains('content: none', $rail, 'the rail never blurs in overlay mode');
-    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay-to-solid .header-pill::before');
+    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before');
     assert_contains('backdrop-filter: blur(14px) saturate(115%)', $pill);
     assert_true(substr_count($css, 'position: fixed') === 1, 'still no fixed positioning of its own');
 });
@@ -343,7 +343,7 @@ test('header CSS lays the centered bar out as a three-column grid and collapses 
     assert_contains('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)', $row, 'equal flanks keep the nav on the center line');
     assert_contains('align-items: center', $row);
 
-    $nav = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {');
+    $nav = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {');
     assert_contains('justify-self: center', $nav);
     $cta = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-buttons {');
     assert_contains('justify-self: end', $cta);
@@ -370,7 +370,8 @@ test('header driver marks the in-view section on pill and centered-bar navigatio
     assert_contains('sectionObserver.disconnect()', $js, 'stop releases the observer');
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
     $rule = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,');
-    assert_contains('color-mix(in srgb, currentColor 12%, transparent)', $rule, 'a tint of the proven ink, no new colour pair');
+    assert_contains('box-shadow: inset 0 0 0 1px currentColor', $rule);
+    assert_true(!str_contains($rule, 'background'), 'the active mark preserves the verified surface');
     assert_contains('border-radius: 999px', $rule);
 });
 
@@ -378,13 +379,13 @@ test('header CSS spreads the navigation across the spread bar and the driver mar
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
     $row = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread {');
     assert_contains('grid-template-columns: auto minmax(0, 1fr)', $row);
-    $list = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-navigation .wp-block-navigation__container {');
+    $list = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation .wp-block-navigation__container {');
     assert_contains('justify-content: space-between', $list);
     assert_contains('inline-size: 100%', $list);
     $full = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {');
     assert_contains('padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem)', $full, 'a full row keeps the page gutter');
     assert_contains('.header-archetype--spread-nav', (string) file_get_contents(repo_path('assets/header/header.js')));
-    assert_eq(\Automattic\SiteBuild\HeaderBehavior::STICKY_SOFT, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
+    assert_eq(\Automattic\SiteBuild\HeaderBehavior::STATIC, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
 });
 
 
@@ -405,6 +406,6 @@ test('header CSS keeps the phone pill on one row: nowrap caption CTA, shrinking 
 
 test('the floating pill places an open navigation above its other controls', function () {
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
-    assert_contains('.header-pill > .wp-block-navigation:has(.wp-block-navigation__responsive-container.is-menu-open)', $css);
+    assert_contains('.header-pill > :has(.wp-block-navigation__responsive-container.is-menu-open)', $css);
     assert_contains('z-index: 2;', $css);
 });
