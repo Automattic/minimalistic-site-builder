@@ -94,6 +94,9 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
             ],
         ],
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
+        // The direction asks for a header that stays; the resolver still
+        // applies its own archetype, depth, and contrast vetoes (BIGR-998).
+        'header_chrome' => 'persistent',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
@@ -125,8 +128,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'text_placement' => 'centered', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'left-column', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'bento-grid', 'background' => 'tinted', 'vertical_density' => 'standard', 'text_placement' => 'centered', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'left-column', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order
@@ -237,10 +240,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 
-    // The two-page composition benefits from persistent navigation, while its
-    // mixed opening treatments make an overlay unsafe. The deterministic
-    // resolver therefore commits a closed sticky-soft contract whose palette
-    // pair remains readable in both visual states.
+    // The direction commits to persistent chrome, the two-page composition
+    // has the depth to support it, and its mixed opening treatments make an
+    // overlay unsafe. The deterministic resolver therefore commits a closed
+    // sticky-soft contract whose palette pair remains readable in both
+    // visual states.
     $headerBehavior = $project->readJson('headerBehavior.json');
     assert_eq([
         'behavior',

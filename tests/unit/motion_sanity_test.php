@@ -243,7 +243,8 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
 });
 
 test('motion vocabulary agrees between the static kit and its isolated authoring prompts', function () {
-    $sectionPrompt = file_get_contents(repo_path('prompts/section.md'));
+    $rules = new \Automattic\SiteBuild\Units\SectionPromptRules(new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+    $sectionPrompt = implode("\n", array_map($rules->motion(...), ['calm', 'energetic', 'dramatic']));
     $heroPrompt = file_get_contents(repo_path('prompts/hero.md'));
     $kitCss = file_get_contents(repo_path('assets/motion/motion.css'));
     foreach (Motion::kitClasses() as $class) {

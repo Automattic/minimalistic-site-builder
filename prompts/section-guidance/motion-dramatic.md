@@ -1,0 +1,1 @@
+- `dramatic`: favor `reveal-wipe`/`reveal-up`/`reveal-blur` and at most one cinematic `ken-burns` or `gradient-shift` focal effect; the kit renders them with vertical masks and a soft-focus reveal.

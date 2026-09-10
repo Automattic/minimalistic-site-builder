@@ -458,7 +458,7 @@ final class AboveFoldPartFacts
             // `header-overlay` hook is stripped by HeaderHeroStep on this
             // path), or HeaderFallback's deliberately behavior-class-free
             // markup, which still marks overlay with the bare token.
-            'mode' => in_array('header-behavior-' . HeaderBehavior::OVERLAY_TO_SOLID, $classes, true)
+            'mode' => in_array('header-behavior-' . HeaderBehavior::OVERLAY_CLASS_FAMILY, $classes, true)
                 || in_array('header-start-' . HeaderBehavior::TRANSPARENT, $classes, true)
                 || in_array('header-overlay', $classes, true)
                 ? 'overlay'

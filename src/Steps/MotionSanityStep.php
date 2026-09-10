@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\SurfaceMarkup;
 
 /**
  * Step (deterministic): enforce the motion-class budget across every rendered
@@ -48,10 +49,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * token is removed from the block's own class="…" HTML (tokenized, so odd
  * whitespace can't shelter one) so the fixer can't resurrect it.
  *
- * HTML-first composition mode skips the legacy motion pass but still runs the
- * device budget: that graph ships the device CSS and its prompts promise the
- * build strips an over-budget or hero-placed device. Mode is injected by
- * StepComposition; stale design artifacts never choose behavior.
+ * HTML-first mode skips the motion pass. Both modes enforce the device and texture budgets.
+ * StepComposition supplies the mode. Old design artifacts do not select it.
  */
 final class MotionSanityStep implements Step
 {
@@ -100,13 +99,25 @@ final class MotionSanityStep implements Step
         $profile = DesignDirectionStep::motionProfileFor($project);
         $deviceClass = Device::className(DesignDirectionStep::deviceFor($project));
         $report = [];
+        $surfaceWarnings = [];
+        $surface = DesignDirectionStep::surfaceFor($project);
 
         foreach (self::fileGroups($project) as $group) {
             $budget = self::newBudget();
+            $surfaceUsed = false;
             foreach ($group['files'] as $rel) {
                 $markup = $project->readText('theme/' . $rel);
-                $result = self::sanitize(
+                $surfaceResult = SurfaceMarkup::sanitize(
                     $markup,
+                    $surface,
+                    $rel !== $group['hero'] && str_starts_with($rel, 'parts/' . SectionsStep::PART_PREFIX),
+                    $surfaceUsed,
+                );
+                foreach ($surfaceResult['warnings'] as $warning) {
+                    $surfaceWarnings[] = "file=theme/{$rel}; {$warning}";
+                }
+                $result = self::sanitize(
+                    $surfaceResult['markup'],
                     $profile,
                     $budget,
                     $rel === $group['hero'],
@@ -127,6 +138,8 @@ final class MotionSanityStep implements Step
         // through; record it durably for the later repair pass. Device drops
         // are named as such: every device note quotes its `device--` token,
         // and no motion note ever carries that prefix.
+        $project->addWarnings($this->id(), $surfaceWarnings);
+
         $isDeviceNote = static fn (string $row): bool => str_contains($row, Device::CLASS_PREFIX);
         $project->addWarnings($this->id(), array_map(
             static fn (string $row): string => $isDeviceNote($row)

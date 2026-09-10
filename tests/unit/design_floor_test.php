@@ -224,7 +224,15 @@ test('section prompt bans kickers above headings', function () {
     assert_contains('Eyebrows are banned', $section);
     assert_contains('no brief earns it back', $section);
     assert_true(!str_contains($section, 'Eyebrows are rationed'));
-    assert_contains('Never put an eyebrow or kicker line above the row heading', $section);
+    // The ban lives in the shared section layer, so every composition request
+    // carries it whatever recipe the plan assigned.
+    $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'zigzag-steps';
+    $request = (new \Automattic\SiteBuild\Units\SectionUnit(
+        new \Automattic\SiteBuild\Tests\FakeLlm(),
+        new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')),
+    ))->request($input);
+    assert_contains('Eyebrows are banned', section_unit_request_text($request));
 });
 
 test('design-direction offers no numeral device and no numbered-index idiom', function () {

@@ -3,7 +3,8 @@
 `frm_sections` starts at trunk commit `e5023c1d`.
 The source experiment is `origin/frm_experiment` at `08c9faf0`.
 
-The extraction expands the section catalog from six compositions to sixteen.
+The extraction expands the section catalog from six compositions to sixteen. Three of those
+(`centered-stack`, `list-with-thumbnails`, `statement-lines`) were removed later; thirteen remain.
 It uses the existing page-plan and section steps. It adds no LLM calls or pipeline steps.
 
 | Composition | Content and structure |
@@ -15,16 +16,14 @@ It uses the existing page-plan and section steps. It adds no LLM calls or pipeli
 | `stat-ledger` | Three or four supplied figures with short labels |
 | `feature-row-hairlines` | Three or four text columns with borders |
 | `zigzag-steps` | Three to five steps with alternate text and image positions |
-| `statement-lines` | Three to six large statement lines |
 | `project-grid-2x2` | Two or four cover tiles with project text |
 | `logo-strip` | Four to eight names as text wordmarks |
 
 The page plan selects compositions from content. A type that names a composition takes that composition.
 An explicit card highlight reaches the relevant section through the plan and section prompt.
-Repeated lists move from asymmetric splits to card grids or thumbnail rows.
+Repeated lists move from asymmetric splits to card grids.
 Recipes without cards release the item pattern. Bento and price recipes keep their card structure under a ruled site pattern.
 
-`centered-stack` serves one short message. Mechanical repairs no longer choose it for content of unknown complexity.
 The extraction also includes the styles, shape scale, image limits, and card text repairs that these recipes require.
 Repairs preserve safe content and report removals in `warnings.json`.
 Project tile color repairs reach a fixed point.

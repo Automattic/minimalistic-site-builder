@@ -2454,8 +2454,8 @@ final class GeneratedMarkup
      * Remove separators from a body section that owns no ruled recipe.
      *
      * prompts/section.md rations lines: a `wp:separator` is justified only
-     * inside the rule-row / spec-table item recipes and the list-with-thumbnails
-     * composition, which draw their own rules. Nothing enforced that, and the
+     * inside the rule-row / spec-table item recipes, which draw their own
+     * rules. Nothing enforced that, and the
      * audited pages arrived with a hairline under headings and between
      * paragraphs (BIGR-978). Removal-only, like the hero pass: a separator
      * carries no copy, but its authored treatment is durable loss and is
@@ -2474,8 +2474,8 @@ final class GeneratedMarkup
             $markup,
             $part,
             'the generated section separator was removed at its complete block boundary; prompts/section.md '
-            . 'rations lines to the rule-row, spec-table and list-with-thumbnails recipes and this section '
-            . 'carries none of them',
+            . 'rations lines to the rule-row and spec-table recipes and this section '
+            . 'carries neither of them',
             $warnings,
         );
     }
