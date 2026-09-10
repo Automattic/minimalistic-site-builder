@@ -5,8 +5,10 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
+
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -15,8 +17,9 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
- * - card_style: normalized site-wide card construction enforced on delivery;
- *   list-thumb rows also receive their non-stacking and tight-gap invariants
+ * - card_style: the site card treatment.
+ * - motion_profile: committed Motion profile; absent/invalid means static,
+ *   matching the delivery gate. Only its permitted instructions are sent.
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/item_pattern/text_placement/handoff. The
@@ -48,6 +51,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   theme_json:string|array<mixed>,
      *   design_direction:string,
      *   card_style?:string,
+     *   motion_profile?:string,
      *   outline:string,
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
@@ -109,7 +113,10 @@ final class SectionUnit extends AbstractPageSectionUnit
             ),
         ]);
 
+        $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
+            'card_instructions' => $rules->card($cardStyle),
+            'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'card_style'        => $cardStyle,
             'page_title'        => $this->pageString($input, 'title'),
@@ -179,7 +186,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $repairs,
             );
         }
-        if (!self::ownsRuledSeparators($itemPattern, $archetype)) {
+        if (!self::ownsRuledSeparators($itemPattern)) {
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
@@ -199,10 +206,22 @@ final class SectionUnit extends AbstractPageSectionUnit
         );
         $markup = $label['markup'];
         array_push($warnings, ...$label['warnings']);
-        $listThumb = ListThumbContract::enforce($markup, $this->key($input));
-        $markup = $listThumb['markup'];
-        array_push($repairs, ...$listThumb['repairs']);
-        array_push($warnings, ...$listThumb['warnings']);
+        $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::markFigures(
+            $markup,
+            $this->key($input),
+            is_string($input['motion_profile'] ?? null) ? $input['motion_profile'] : '',
+            $repairs,
+        );
+
+        if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
+            foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+                $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                    . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                    . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+            }
+        }
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,
@@ -254,14 +273,13 @@ final class SectionUnit extends AbstractPageSectionUnit
     }
 
     /**
-     * Whether the assigned recipes draw their own rules, so the section keeps
-     * its `wp:separator` blocks. Every other section is under the line ration
-     * of prompts/section.md (BIGR-978).
+     * Whether the assigned item pattern draws its own rules, so the section
+     * keeps its `wp:separator` blocks. Every other section is under the line
+     * ration of prompts/section.md (BIGR-978).
      */
-    private static function ownsRuledSeparators(?string $itemPattern, ?string $archetype): bool
+    private static function ownsRuledSeparators(?string $itemPattern): bool
     {
-        return in_array($itemPattern, ['rule-row', 'spec-table'], true)
-            || $archetype === 'list-with-thumbnails';
+        return in_array($itemPattern, ['rule-row', 'spec-table'], true);
     }
 
     /**

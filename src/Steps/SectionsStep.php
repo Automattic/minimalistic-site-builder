@@ -506,6 +506,7 @@ final class SectionsStep implements Step
                 'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
+                'register' => DesignDirectionStep::registerFor($project),
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
@@ -1050,6 +1051,7 @@ final class SectionsStep implements Step
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
             'card_style'        => $cardStyle,
+            'motion_profile'    => DesignDirectionStep::motionProfileFor($project),
             'site_pages'        => PagePlanStep::sitePagesList($pages),
             // A host capability, not a site fact: it says whether a real form
             // backend exists to replace the placeholders, so it stays in the
@@ -1076,6 +1078,7 @@ final class SectionsStep implements Step
                 'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
+                'register' => DesignDirectionStep::registerFor($project),
                 // The one text wp:site-tagline will render at runtime — the
                 // contract exposes it so neither above-fold author discovers
                 // it by surprise on the live site (BIGR-773).
@@ -1099,6 +1102,7 @@ final class SectionsStep implements Step
             ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
             (string) $contract['header']['archetype'] ?: null,
             HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
+            chrome: DesignDirectionStep::headerChromeFor($project),
         )['behavior'];
         $jobs = [
             'header' => [
@@ -1141,6 +1145,7 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
+                    'motion_profile' => DesignDirectionStep::motionProfileFor($project),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'is_opening' => $opening,
                     'header_contract' => $opening

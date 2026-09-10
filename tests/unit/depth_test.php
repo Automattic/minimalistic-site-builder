@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\Depth;
 
 test('Depth exposes one canonical preset for every bounded commitment', function () {
@@ -11,6 +12,7 @@ test('Depth exposes one canonical preset for every bounded commitment', function
         'hard-offset' => '0.55rem 0.55rem 0',
         'inset' => 'inset 0 0 0 1px',
         'glow' => '0 0 2rem',
+        'glass' => '0 0 0 1px',
     ];
 
     foreach ($expected as $depth => $shadowStart) {
@@ -48,7 +50,7 @@ test('Depth ring is one hairline with no lift and no inset edge', function () {
     $css = Depth::kitCss('ring');
     assert_contains("Committed 'ring' depth", $css);
     assert_true(!str_contains($css, 'outline-offset'), 'the ring is a box-shadow, not the inset outline');
-    assert_eq(['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'], Depth::ALL);
+    assert_eq(['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'], Depth::ALL);
 });
 
 test('Depth inset remains visible on replaced image content', function () {
@@ -59,4 +61,67 @@ test('Depth inset remains visible on replaced image content', function () {
     assert_contains('.wp-block-cover:not(.alignfull)', $css, 'cover pixels cannot hide the inner edge');
     assert_contains('.wp-block-media-text:not(.alignfull) > .wp-block-media-text__media', $css, 'media-text pixels cannot hide the inner edge');
     assert_true(!str_contains(Depth::kitCss('soft'), 'outline-offset'), 'other modes add no inset edge');
+});
+
+test('Depth glass frosts band-coloured card shells on a blurred page and keeps inverted cards solid', function () {
+    $preset = Depth::preset('glass');
+    assert_eq('Glass', $preset['name']);
+    assert_contains('var(--wp--preset--color--contrast) 16%', $preset['shadow'], 'one light hairline');
+    assert_contains('rgb(0 0 0 / 0.35)', $preset['shadow'], 'one deep soft drop');
+    $css = Depth::kitCss('glass');
+    assert_contains('.has-band-background-color {', $css, 'only band-coloured shells take the fill');
+    assert_contains('background-color: color-mix(in srgb, var(--wp--preset--color--band) 72%, transparent) !important;', $css);
+    assert_contains('backdrop-filter: blur(14px) saturate(1.2)', $css);
+    assert_contains('@media (prefers-reduced-transparency: reduce)', $css);
+    assert_contains('background-color: var(--wp--preset--color--band) !important', $css, 'reduced transparency restores the solid band');
+    assert_true(!str_contains($css, 'has-contrast-background-color'), 'an inverted highlight card stays solid');
+    assert_true(!str_contains(Depth::kitCss('glow'), 'backdrop-filter'), 'only glass blurs');
+    assert_eq('ring', Depth::GLASS_LIGHT_FALLBACK);
+});
+
+test('glass frosts a band-coloured card under every construction, borderless included', function () {
+    $css = Depth::kitCss('glass');
+    // Depth is independent of card_style, so the band panel is the whole test.
+    // A generated page delivered borderless pricing cards painted `band`, and
+    // a construction-gated selector left them solid while the direction
+    // promised frosted panels.
+    assert_eq(3, substr_count($css, Depth::GLASS_CARD_SELECTOR), 'fill, blur and reduced-transparency');
+    foreach (CardStyle::ALL as $style) {
+        assert_contains(".card-style--{$style}", Depth::GLASS_CARD_SELECTOR, "glass reaches {$style} cards");
+    }
+    assert_contains('.card-style--borderless).has-band-background-color', Depth::GLASS_CARD_SELECTOR);
+    // The elevation rules stay construction-gated: a borderless card takes no
+    // shadow, and gaining the frosted fill must not give it one.
+    foreach (['box-shadow: var(--wp--preset--shadow--depth', 'box-shadow: none !important'] as $rule) {
+        $body = substr($css, 0, (int) strpos($css, $rule));
+        $selector = substr($body, (int) strrpos($body, '}'));
+        assert_true(
+            !str_contains($selector, 'card-style--borderless'),
+            'the borderless card keeps no elevation: ' . $rule,
+        );
+    }
+});
+
+test('every bounded depth renders a direction fact, glass included', function () {
+    foreach (Depth::ALL as $depth) {
+        $rendered = \Automattic\SiteBuild\Steps\DesignDirectionStep::format(['description' => 'x', 'depth' => $depth]);
+        assert_contains("**Depth**: {$depth}", $rendered, $depth);
+    }
+    assert_contains('frosted panels', \Automattic\SiteBuild\Steps\DesignDirectionStep::format(['description' => 'x', 'depth' => 'glass']));
+});
+
+test('glass uses a ring when the base is absent or invalid', function () {
+    foreach ([[], ['base' => 'white']] as $palette) {
+        $warnings = [];
+        $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => $palette, 'depth' => 'glass'],
+            'cinematic-safe-zone', warnings: $warnings,
+        );
+        assert_eq('ring', $direction['depth']);
+        assert_contains('field depth authored "glass"; delivered "ring"', implode("\n", $warnings));
+        $again = [];
+        assert_eq('ring', \Automattic\SiteBuild\Steps\DesignDirectionStep::normalize($direction, 'cinematic-safe-zone', warnings: $again)['depth']);
+        assert_true(!str_contains(implode("\n", $again), 'field depth'));
+    }
+    assert_eq(3, substr_count(Depth::kitCss('glass'), '.card-style--overlap > .card-body.overlap-up.has-band-background-color'));
 });

@@ -107,12 +107,9 @@ final class ScaffoldThemeStep implements Step
            aren't mirrored in block attributes, and a class hook survives
            untouched. Aspect ratios, not fixed pixel heights: a fixed crop
            height distorts card media proportions across 2/3/4-column layouts
-           and viewports (BIGR-771); the list thumb's old fixed 110px height
-           letterboxed its square image to whatever ratio the column width
-           produced and left it floating in taller rows (BIGR-777). */
+           and viewports (BIGR-771). */
         .card-media img,
         .card-media-tall img,
-        .card-media-thumb img,
         .feature-media img {
             width: 100%;
             object-fit: cover;
@@ -120,7 +117,6 @@ final class ScaffoldThemeStep implements Step
         }
         .card-media img { aspect-ratio: 3 / 2; height: auto; }
         .card-media-tall img { aspect-ratio: 4 / 5; height: auto; }
-        .card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }
 
         /* Caption readability (ContrastFix opts a figure in via className).
            A figcaption inherits the surrounding text color and the image
@@ -259,54 +255,6 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
-        /* Centered stack (BIGR-952). The archetype's whole composition is one
-           centered column, but its alignment used to live only in prompt
-           prose, so a band could ship with a centered heading and a centered
-           button over start-aligned copy. The rule is owned here for the same
-           reason the pin rule above is: a behavior the archetype requires
-           cannot depend on per-element model choices. `text-align` inherits,
-           so an element that carries its own `has-text-align-*` class still
-           wins. */
-        .section-composition--centered-stack {
-            text-align: center;
-        }
-        /* Exempt scope. Three kinds of content keep their own start alignment
-           inside the centered band, and every rule below names the same scope:
-           - a repeated item row (a centered stack may carry a spec-table item
-             pattern);
-           - a form the host substituted in for a placeholder: its labels sit
-             above input text the browser aligns to the start, so centering
-             them is the same mixed alignment;
-           - the host's form container (`.jetpack-contact-form-container`,
-             from Jetpack's `Contact_Form::get_block_container_classes`),
-             which renders the server-side error block before the form and
-             the no-reload success message as a sibling of it, so those two
-             states follow the form's alignment. */
-        .section-composition--centered-stack :is(.item-pattern__item, form, .jetpack-contact-form-container) {
-            text-align: start;
-        }
-        /* A wp:buttons row is a flex container, so the inherited text-align
-           cannot move it; an unjustified row stays at the start edge. Only a
-           row with no authored justification is centered here. The
-           `:not(<exempt scope> *)` guard (BIGR-952 review follow-up) keeps a
-           nested buttons row out of this rule: a centered buttons row inside
-           a start-aligned exemption would recreate the mixed-alignment
-           defect this block exists to remove. */
-        .section-composition--centered-stack .wp-block-buttons:not(.is-content-justification-left):not(.is-content-justification-right):not(.is-content-justification-space-between):not(:is(.item-pattern__item, form, .jetpack-contact-form-container) *) {
-            justify-content: center;
-        }
-        /* A list centers as a block while its items stay start-aligned,
-           because centered lines under start-anchored markers read as a
-           ragged accident. The same guard keeps a list inside an exemption
-           at the exemption's start edge: without it, the list would still
-           take `margin-inline: auto` and center inside the start-aligned
-           row, form, or error block. */
-        .section-composition--centered-stack :is(ul, ol):not(:is(.item-pattern__item, form, .jetpack-contact-form-container) *) {
-            width: fit-content;
-            margin-inline: auto;
-            text-align: start;
-        }
-
         /* Flush-media cards (sections opt in via className="card-flush" on the
            card wp:group): the media is the card's first child at full width and
            only an inner .card-body group carries padding. Reset the card itself
@@ -322,62 +270,6 @@ final class ScaffoldThemeStep implements Step
            generated image radius from surviving; descendants also cover images
            wrapped in a link. */
         .wp-block-group.card-flush > figure.wp-block-image img {
-            border-radius: 0 !important;
-        }
-
-        /* Flush list-thumb rows (sections opt in via className="list-thumb-flush"
-           on the row wp:columns): the thumbnail bleeds to the row's top/left/
-           bottom edges and stretches to the row height while only the text
-           column carries padding (BIGR-777). Zeroed row padding must beat
-           generated inline padding, exactly like .card-flush, and the row's
-           border radius clips the bleeding image. The column gap is zeroed
-           too: the text column's own left padding is the whole image-to-text
-           distance — left to the default md gap it stacks with that padding
-           and pushes each row's text farther from its own thumb than the md
-           rhythm separating the rows. */
-        .wp-block-columns.list-thumb-flush {
-            overflow: hidden;
-            padding: 0 !important;
-            align-items: stretch;
-            flex-wrap: nowrap !important;
-            gap: 0;
-        }
-        /* Generators drift into verticalAlignment:center on these rows, and
-           core's align-self on the column beats the row's align-items, which
-           would collapse the stretched thumb back to a floating strip. */
-        .wp-block-columns.list-thumb-flush > .wp-block-column {
-            align-self: stretch;
-        }
-        /* The recipe authors isStackedOnMobile:false, but keep the behavior
-           hook safe when generated attributes drift. Core forces both columns
-           to flex-basis:100% at <=781px, so restore this recipe's reviewed
-           media/text proportions with greater specificity and importance. */
-        @media (max-width: 781px) {
-            .wp-block-columns.list-thumb-flush > .wp-block-column:first-child {
-                flex-basis: 18% !important;
-            }
-            .wp-block-columns.list-thumb-flush > .wp-block-column:last-child {
-                flex-basis: 82% !important;
-            }
-        }
-        /* At wide viewports the square thumb can out-measure a short text
-           stack; the row then takes the thumb's height and top-pinned copy
-           would ride the row's upper edge. Centering only spends the extra
-           space — a text-driven row height leaves none. */
-        .wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-        .list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {
-            height: 100%;
-            margin: 0;
-        }
-        /* The text column defines the row height; the thumb follows it instead
-           of imposing the square crop (the reviewed full-height media pattern). */
-        .list-thumb-flush .card-media-thumb img {
-            aspect-ratio: auto;
-            height: 100%;
             border-radius: 0 !important;
         }
 
@@ -650,6 +542,8 @@ final class ScaffoldThemeStep implements Step
             overflow-wrap: normal;
             word-break: normal;
             hyphens: manual;
+            /* Balance the line breaks in the hero heading. */
+            text-wrap: balance;
         }
         .hero-composition__copy .wp-block-heading.headline-hyphenate,
         .hero-composition--layered-poster .wp-block-heading.headline-hyphenate {
@@ -899,27 +793,6 @@ final class ScaffoldThemeStep implements Step
         @media (max-width: 781px) {
             .section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {
                 order: -1;
-            }
-        }
-
-        .section-composition--statement-lines .wp-block-group.statement-lines {
-            gap: 0;
-        }
-        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-            margin: 0;
-            padding-block: var(--wp--preset--spacing--md, 1.5rem);
-            border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-            font-size: var(--wp--preset--font-size--section-title);
-            line-height: 1.1;
-            text-wrap: balance;
-        }
-        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
-            border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-        }
-        @media (max-width: 600px) {
-
-            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-                font-size: min(var(--wp--preset--font-size--section-title), 8vw);
             }
         }
 

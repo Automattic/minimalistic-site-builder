@@ -25,7 +25,7 @@ ASSIGNED ARCHETYPE FRAGMENT (the only archetype recipe visible in this request):
 
 {{composition_recipe}}
 
-Band-width rhythm: match row width to band width. In a `"align":"wide"` or `"align":"full"` band, grid rows (multi-column wp:columns, wp:gallery, wp:media-text) take `"align":"wide"` themselves — a non-aligned row silently caps at the reading measure and floats narrow in the band. Only centered-stack (and genuinely text-led sections) lives at content width — and then the whole band commits to that width, not just some rows.
+Band-width rhythm: match row width to band width. In a `"align":"wide"` or `"align":"full"` band, grid rows (multi-column wp:columns, wp:gallery, wp:media-text) take `"align":"wide"` themselves — a non-aligned row silently caps at the reading measure and floats narrow in the band. Only genuinely text-led sections live at content width — and then the whole band commits to that width, not just some rows.
 
 Execute the assigned background:
 - base — the default page background; no backgroundColor on the section's top-level group.
