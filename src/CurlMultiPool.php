@@ -39,7 +39,7 @@ class CurlMultiPool
      *        classify one completed transfer into an outcome, given the HTTP
      *        status the pool already read for its 429 hold (the one reader of
      *        that status); called while the handle is still open, before the
-     *        pool removes and closes it
+     *        pool detaches it and releases its reference
      * @return array<array-key,array<string,mixed>> outcomes keyed and ordered
      *         as $items
      */
@@ -69,7 +69,6 @@ class CurlMultiPool
             }
             $ch = $buildHandle($key, $item);
             if ($this->addHandle($multi, $ch) !== CURLM_OK) {
-                $this->closeHandle($ch);
                 $queuedOutcomes[$key] = [
                     'ok' => false,
                     'transient' => true,
@@ -94,7 +93,6 @@ class CurlMultiPool
             } finally {
                 unset($inFlight[spl_object_id($ch)]);
                 $this->removeHandle($multi, $ch);
-                $this->closeHandle($ch);
             }
         };
 
@@ -139,10 +137,11 @@ class CurlMultiPool
             return RollingPool::run($items, $start, $await, $cap);
         } finally {
             // Aborting mid-batch (a throwing classify) leaves siblings in
-            // flight; drain and close them before closing the multi handle.
+            // flight; detach them before closing the multi handle. CurlHandle
+            // objects release their resources when the last reference leaves
+            // scope; curl_close() has no effect on the supported PHP versions.
             foreach ($inFlight as [, $ch]) {
                 $this->removeHandle($multi, $ch);
-                $this->closeHandle($ch);
             }
             $this->multiClose($multi);
         }
@@ -193,11 +192,6 @@ class CurlMultiPool
     protected function removeHandle(\CurlMultiHandle $multi, \CurlHandle $ch): void
     {
         curl_multi_remove_handle($multi, $ch);
-    }
-
-    protected function closeHandle(\CurlHandle $ch): void
-    {
-        curl_close($ch);
     }
 
     protected function multiClose(\CurlMultiHandle $multi): void

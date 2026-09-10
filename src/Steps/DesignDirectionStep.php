@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
@@ -463,6 +464,7 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'surface_reason'   => '',
             'device'           => Device::DEFAULT,
+            'heading_emphasis' => HeadingEmphasis::DEFAULT,
             'header_chrome'    => HeaderChrome::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
@@ -1000,6 +1002,14 @@ final class DesignDirectionStep implements Step
         $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
+        // Use a ring on a light ground and record the lost glass value.
+        $depthGround = $groundKey
+            ?? (is_string($palette['base'] ?? null) && $palette['base'] !== '' ? GroundKey::classify($palette['base']) : 'light');
+        if ($depth === 'glass' && $depthGround === 'light') {
+            $warnings[] = 'designDirection.json: field depth authored "glass"; delivered "' . Depth::GLASS_LIGHT_FALLBACK
+                . '"; disposition glass is a dark-ground treatment and this direction commits a light ground';
+            $depth = Depth::GLASS_LIGHT_FALLBACK;
+        }
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
             CtaStyle::ALL,
@@ -1032,6 +1042,7 @@ final class DesignDirectionStep implements Step
             $warnings,
             'unsupported imagery kind replaced by photo',
         );
+        $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $headerChrome = HeaderChrome::normalize($raw['header_chrome'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
@@ -1134,6 +1145,7 @@ final class DesignDirectionStep implements Step
             'surface'          => $surface,
             'surface_reason'   => $surfaceReason,
             'device'           => $device,
+            'heading_emphasis' => $headingEmphasis,
             // Whether the header survives the scroll. HeaderBehavior keeps
             // the archetype, depth, and contrast vetoes on top of it.
             'header_chrome'    => $headerChrome,
@@ -1385,6 +1397,18 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeHeadingEmphasis(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            HeadingEmphasis::ALL,
+            HeadingEmphasis::DEFAULT,
+            'heading_emphasis',
+            $warnings,
+            'unsupported heading emphasis replaced by none',
+        );
+    }
+
     public static function normalizeSurface(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1840,6 +1864,7 @@ final class DesignDirectionStep implements Step
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
                 'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+                'glass'       => 'the build turns band-coloured cards into frosted panels (a translucent band tint over the blurred page, one light hairline, a deep soft drop); inverted cards stay solid',
             } . '. Full-bleed media stays unelevated; do not add another shadow.';
         }
 
@@ -1879,6 +1904,13 @@ final class DesignDirectionStep implements Step
                         . ImageKind::TILT_CLASS . '` to the figure or hero media wrapper of at most ONE screen per page (the hero media or the first'
                         . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
                     : '');
+        }
+
+        $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
+        if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
+            $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
+                . '. Mark at most ONE clause per heading, only in the hero H1 and in section headings, never in'
+                . ' paragraphs, navigation or buttons; never author a colour, face or background on the span.';
         }
 
         $device = Device::explicit($direction['device'] ?? null);
@@ -2277,6 +2309,14 @@ final class DesignDirectionStep implements Step
             is_string($palette['base'] ?? null) ? $palette['base'] : null,
             is_string($palette['accent'] ?? null) ? $palette['accent'] : null,
         );
+    }
+
+    public static function headingEmphasisFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return HeadingEmphasis::DEFAULT;
+        }
+        return self::normalizeHeadingEmphasis($project->readJson(self::FILE)['heading_emphasis'] ?? null);
     }
 
     /**
