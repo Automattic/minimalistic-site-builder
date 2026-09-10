@@ -61,7 +61,7 @@ use Automattic\SiteBuild\Warnings;
  *           kit where appropriate, or a render_block_data adapter that lets
  *           Core apply the one committed duotone preset to content imagery.
  *         - for a non-mixed image-crop commitment, writes and enqueues the
- *           build-owned crop kit that derives card, thumbnail, and feature
+ *           build-owned crop kit that derives card and feature
  *           media proportions from the one site-wide direction.
  *         - for an explicit depth commitment, writes and enqueues the
  *           build-owned depth kit that consumes the matching `depth` shadow
@@ -243,7 +243,7 @@ final class FinalizeThemeStep implements Step
             ? "  device: '{$device}' utility enqueued\n"
             : "  device: {$device} (kit not shipped)\n");
         Narrator::write($typeTreatmentShipped
-            ? "  type treatment: '{$typeTreatment}' statement-lines register enqueued\n"
+            ? "  type treatment: '{$typeTreatment}' display register enqueued\n"
             : '  type treatment: ' . ($typeTreatment ?? 'none committed') . " (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
@@ -342,16 +342,16 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
-     * The statement-lines register: one archetype opts out of an uppercase
-     * site heading case. Only `caps-tight` and `caps-tracked` ship CSS, so
-     * every other treatment prunes the kit.
+     * The display register for an uppercase site heading case. Only
+     * `caps-tight` and `caps-tracked` ship CSS, so every other treatment
+     * prunes the kit.
      */
     public static function typeTreatmentKit(): OverlayKit
     {
         return new OverlayKit(
             'type-treatment',
-            "// Committed statement-lines register: the archetype drops an\n"
-                . '// uppercase site heading case. Loads after generated style.css.',
+            "// Committed display register for an uppercase site heading\n"
+                . '// case. Loads after generated style.css.',
         );
     }
 

@@ -5,7 +5,6 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
-use Automattic\SiteBuild\ListThumbTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
 
@@ -17,8 +16,7 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
- * - card_style: the site card treatment also sets thumbnail image space and size.
- *   Thumbnail rows keep horizontal columns and the tight text gap.
+ * - card_style: the site card treatment.
  * - motion_profile: committed Motion profile; absent/invalid means static,
  *   matching the delivery gate. Only its permitted instructions are sent.
  * - page: slug/title/path of the page the section belongs to
@@ -110,7 +108,6 @@ final class SectionUnit extends AbstractPageSectionUnit
                     $archetype,
                     $itemPattern,
                     SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
-                    $cardStyle,
                 ),
             ),
         ]);
@@ -178,15 +175,6 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $this->key($input),
                 $repairs
             );
-            if ($archetype === 'list-with-thumbnails') {
-                $markup = GeneratedMarkup::withRootClassMarker(
-                    $markup,
-                    ListThumbTreatment::MARKER_PREFIX,
-                    ListThumbTreatment::marker($cardStyle),
-                    $this->key($input),
-                    $repairs,
-                );
-            }
         }
         if ($itemPattern !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
@@ -197,7 +185,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $repairs,
             );
         }
-        if (!self::ownsRuledSeparators($itemPattern, $archetype)) {
+        if (!self::ownsRuledSeparators($itemPattern)) {
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
@@ -217,10 +205,6 @@ final class SectionUnit extends AbstractPageSectionUnit
                     . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
             }
         }
-        $listThumb = ListThumbContract::enforce($markup, $this->key($input));
-        $markup = $listThumb['markup'];
-        array_push($repairs, ...$listThumb['repairs']);
-        array_push($warnings, ...$listThumb['warnings']);
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,
@@ -272,14 +256,13 @@ final class SectionUnit extends AbstractPageSectionUnit
     }
 
     /**
-     * Whether the assigned recipes draw their own rules, so the section keeps
-     * its `wp:separator` blocks. Every other section is under the line ration
-     * of prompts/section.md (BIGR-978).
+     * Whether the assigned item pattern draws its own rules, so the section
+     * keeps its `wp:separator` blocks. Every other section is under the line
+     * ration of prompts/section.md (BIGR-978).
      */
-    private static function ownsRuledSeparators(?string $itemPattern, ?string $archetype): bool
+    private static function ownsRuledSeparators(?string $itemPattern): bool
     {
-        return in_array($itemPattern, ['rule-row', 'spec-table'], true)
-            || $archetype === 'list-with-thumbnails';
+        return in_array($itemPattern, ['rule-row', 'spec-table'], true);
     }
 
     /**

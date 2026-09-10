@@ -1258,20 +1258,11 @@ test('card contract does not infer cards from generic or masonry card-media crop
         card_contract_column($cropped)
         . card_contract_column('<!-- wp:paragraph --><p>Independent split-layout copy.</p><!-- /wp:paragraph -->'),
     );
-    $listThumb = card_contract_ordinary_columns(
-        card_contract_column(str_replace('card-media', 'card-media-thumb', card_contract_image()))
-        . card_contract_column(
-            '<!-- wp:heading --><h3 class="wp-block-heading">Index item</h3><!-- /wp:heading -->'
-            . '<!-- wp:paragraph --><p>Compact list copy.</p><!-- /wp:paragraph -->',
-        ),
-    );
-
     foreach ([
         'generic' => $generic,
         'masonry' => $masonry,
         'ordinary-non-card' => $ordinaryNonCard,
         'ordinary-split' => $ordinarySplit,
-        'list-thumb' => $listThumb,
     ] as $case => $markup) {
         $result = CardStyleContract::enforce($markup, 'flush', "page-home--{$case}");
         assert_eq($markup, $result['markup'], "{$case} crop stays byte-identical");

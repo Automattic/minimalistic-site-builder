@@ -613,7 +613,7 @@ final class CssChecks
         '/\.(?:wp-block-image|wp-block-gallery'
         . '|wp-block-cover(?:__(?:background|image-background|video-background))?'
         . '|wp-block-media-text__media'
-        . '|card-media(?:-tall|-thumb)?)(?![-\w])/i';
+        . '|card-media(?:-tall)?)(?![-\w])/i';
 
     /**
      * Whether a selector's subject is a treatment-owned image surface or one

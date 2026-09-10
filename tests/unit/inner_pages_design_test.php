@@ -27,7 +27,7 @@ foreach (['page', 'section'] as $resumeMode) {
                 $llm->queueJson(['sections' => [[
                     'slug' => 'about-story', 'title' => 'Our story', 'type' => 'content',
                     'purpose' => 'Explain the studio', 'content_notes' => 'Use the site facts.',
-                    'layout_archetype' => 'centered-stack', 'background' => 'base',
+                    'layout_archetype' => 'bento-grid', 'background' => 'base',
                     'vertical_density' => 'standard', 'handoff' => 'Close with the next step.',
                 ]]]);
             }
@@ -237,7 +237,7 @@ test('G4 page and section design prompts render labelled SITE PAGES lists and li
         'type' => 'content',
         'purpose' => 'Tell the studio story',
         'content_notes' => 'Ground the story in the site spec.',
-        'layout_archetype' => 'centered-stack',
+        'layout_archetype' => 'bento-grid',
         'background' => 'base',
         'vertical_density' => 'standard',
         'handoff' => 'Close with the next step.',

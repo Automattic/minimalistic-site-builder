@@ -79,7 +79,7 @@ test('the framed-screen kit ships for ui-mockup only, keys on the image role hoo
     assert_eq(null, ImageKind::kitCss('3d-object'));
     assert_eq(null, ImageKind::kitCss(null));
     $css = (string) ImageKind::kitCss(' UI-Mockup ');
-    assert_contains('.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media', $css);
+    assert_contains('.wp-block-image, .card-media, .card-media-tall, .feature-media, .hero-composition__media', $css);
     assert_contains(':not(.wp-block-cover *)', $css, 'a cover keeps its own treatment');
     assert_contains(':not([class*="avatar"])', $css, 'an avatar is not a screen');
     assert_contains(':has(> img:not([src$=".png"]))', $css, 'a transparent asset is not a screen');

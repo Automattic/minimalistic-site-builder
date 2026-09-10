@@ -734,11 +734,11 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
         $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
@@ -801,15 +801,15 @@ test('the step strips a Home page-list from the footer part', function () {
         $pages = [
             [
                 'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'menu', 'title' => 'Menu', 'path' => '/menu/', 'front' => false,
-                'sections' => [['slug' => 'menu-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'menu-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'visit', 'title' => 'Visit', 'path' => '/visit/', 'front' => false,
-                'sections' => [['slug' => 'visit-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'visit-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
         ];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -848,11 +848,11 @@ test('HTML-first header-hero strips Home from transformed chrome on both header 
         $pages = [
             [
                 'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'about', 'title' => 'About', 'path' => '/about/', 'front' => false,
-                'sections' => [['slug' => 'about-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'about-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
         ];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -908,11 +908,11 @@ test('the step protects a resumed legacy theme with global Group padding', funct
         $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
@@ -954,11 +954,11 @@ test('removing authored sticky behavior from a resolved static header warns acti
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
@@ -1002,7 +1002,7 @@ test('the step warns actionably when an unreadable palette downgrades sticky-sof
         }
         $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]]);
         $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm', 'header_chrome' => 'persistent']);
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -1041,7 +1041,7 @@ test('moving authored root sticky behavior to a sticky outer shell is a warning-
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
         $project->writeJson('theme/theme.json', hh_theme_json());
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm', 'header_chrome' => 'persistent']);
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -1084,9 +1084,9 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]]]);
         hh_above_fold($project, [[
@@ -1098,9 +1098,9 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
@@ -1142,9 +1142,9 @@ test('the step keeps overlay when generated opening markup begins with a real co
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]]]);
         hh_above_fold($project, [[
@@ -1156,9 +1156,9 @@ test('the step keeps overlay when generated opening markup begins with a real co
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
@@ -1249,7 +1249,7 @@ test('the step writes earned sticky treatments into both the header part and the
         // custom page background, so the near-black foreground is provable
         // against everything a transparent start reveals; the scrolled state
         // frosts the soft neutral it lands on.
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -1288,7 +1288,7 @@ test('theme.json page background feeds the transparent-start contrast contract i
     foreach (['base' => '#FFFFFF', 'contrast' => '#111111', 'secondary' => '#3B3B3B'] as $slug => $color) {
         $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
     }
-    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
     $run = static function (?string $background) use ($palette, $section): array {
         return with_project('builder_hh_pagebg_', function ($project) use ($palette, $section, $background): array {
             $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -1693,7 +1693,7 @@ test('the step repairs header and hero parts without promoting successful repair
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $pages = [[
         'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'primary_action' => null]],
+        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'primary_action' => null]],
     ]];
     $project->writeJson('pages.json', ['pages' => $pages]);
     $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
@@ -1921,9 +1921,9 @@ test('a redundant has-background-dim-50 still earns the clear resting state (BIG
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -1977,9 +1977,9 @@ test('competing cover paint keeps a surviving overlay behind its scrim veil (BIG
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -2021,9 +2021,9 @@ test('an unprovable clear resting state keeps the scrim veil and the delivered d
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         // A mid-gray protection token can never bound a white image pixel at
@@ -2274,7 +2274,7 @@ test('the HTML-first hero re-assertion respects a root the design already measur
         return with_project('builder_hh_wide_' . $rootClass . '_', function ($project) use ($rootClass) {
             $pages = [[
                 'slug' => 'home', 'title' => 'Home', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ]];
             $project->writeJson('siteSpec.json', ['name' => 'Demo']);
             $project->writeJson('theme/theme.json', hh_theme_json());
@@ -2338,7 +2338,7 @@ test('header-hero does not restore a planned Add to cart label after storefront 
         // instead of treating the button as a dead control.
         [
             'slug' => 'cart', 'title' => 'Cart', 'path' => '/cart', 'front' => false,
-            'sections' => [['slug' => 'body', 'role' => 'section', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'body', 'role' => 'section', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ],
     ];
     $project->writeJson('pages.json', ['pages' => $pages]);
@@ -3063,7 +3063,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');
@@ -3088,7 +3088,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');
@@ -3113,7 +3113,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');

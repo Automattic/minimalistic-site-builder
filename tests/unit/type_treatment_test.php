@@ -19,18 +19,14 @@ test('type treatment maps every bounded commitment to exact case and tracking le
     }
 });
 
-test('the statement-lines register drops the caps of an uppercase site treatment (BIGR-1002)', function () {
-    // A statement line carries a whole statement, not a label. Under caps it
-    // loses the word shapes a reader recognizes and sets wide enough to wrap,
-    // which breaks the archetype's one-line premise.
-    foreach (['caps-tight' => '-0.02em', 'caps-tracked' => '0.01em'] as $treatment => $tracking) {
+test('the display register tightens the line height of an uppercase site treatment (BIGR-997)', function () {
+    // Uppercase display lines set taller and wider than sentence case, so a
+    // headline that holds one line in sentence case wraps under caps.
+    foreach (['caps-tight', 'caps-tracked'] as $treatment) {
         $css = (string) TypeTreatment::kitCss($treatment);
-        assert_contains(
-            '.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {',
-            $css,
-        );
-        assert_contains('text-transform: none;', $css);
-        assert_contains("letter-spacing: {$tracking};", $css);
+        assert_contains('.wp-block-heading.has-display-font-size {', $css);
+        assert_contains('line-height: 0.92;', $css);
+        assert_contains('text-wrap: balance;', $css);
     }
 
     // Every other treatment ships no kit: lowercase is a deliberate craft

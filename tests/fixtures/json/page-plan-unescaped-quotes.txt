@@ -10,7 +10,7 @@
 "layout_archetype": "full-bleed-cover",
 "background": "image",
 "vertical_density": "compact",
-"handoff": "Site header floats or sits above this full-bleed image hero. Below, a base-background centered-stack section begins the detailed service offerings."
+"handoff": "Site header floats or sits above this full-bleed image hero. Below, a base-background bento-grid section begins the detailed service offerings."
 },
 {
 "slug": "service-offerings",
@@ -18,7 +18,7 @@
 "type": "services",
 "purpose": "Present the specific grooming services Dapper Tusk offers in a clear, detailed hierarchy that builds trust through specificity and professional language.",
 "content_notes": "Centered-stack layout with a short introductory paragraph in warm, confident tone. Follow with 4–5 distinct service offerings (e.g., Tusk Polish & Buffing, Whisker Combing & Conditioning, Hide & Flipper Care, Full-Service Spa Treatment, Seasonal Maintenance). Each service is a short, scannable heading in Playfair Display (smaller weight than page hero) followed by 2–3 sentences in Spectral describing what is involved, why it matters, and the care standard applied. Use the brass hairline-with-lozenge motif once, centered above the service list, as a visual anchor. Generous margins and breathing room between services—this is not dense.",
-"layout_archetype": "centered-stack",
+"layout_archetype": "bento-grid",
 "background": "base",
 "vertical_density": "standard",
 "handoff": "Sits on base background below the full-bleed image hero. Above: the image hero's lower edge. Below: an offset-grid gallery of service detail images."
@@ -32,7 +32,7 @@
 "layout_archetype": "offset-grid",
 "background": "base",
 "vertical_density": "compact",
-"handoff": "Sits on base background below the centered-stack services section. Above: service offerings. Below: a contrast-background section on expertise and credentials."
+"handoff": "Sits on base background below the bento-grid services section. Above: service offerings. Below: a contrast-background section on expertise and credentials."
 },
 {
 "slug": "expertise-credentials",
@@ -51,7 +51,7 @@
 "type": "process",
 "purpose": "Walk the visitor through the step-by-step care process, demonstrating professionalism and setting clear expectations for walrus owners.",
 "content_notes": "Tinted background (soft moss-teal secondary #3D5D57). Centered-stack layout with a short introduction: 'Every walrus receives the same meticulous care.' Follow with a numbered or stacked list of 5–6 process steps (e.g., Initial Assessment & Health Check, Tusk Preparation & Cleaning, Polish & Buffing Phase, Whisker & Hide Conditioning, Final Inspection, Care Instructions & Aftercare Guidance). Each step is a short heading in Playfair Display followed by 1–2 sentences of clear, warm explanation in Spectral. Generous vertical spacing between steps. This section prioritizes clarity and reassurance—no imagery needed.",
-"layout_archetype": "centered-stack",
+"layout_archetype": "bento-grid",
 "background": "tinted",
 "vertical_density": "standard",
 "handoff": "Tinted background sits above a base-background closing CTA section. Above: the contrast expertise band. The softer teal tone provides visual variety and a gentle transition toward closure."

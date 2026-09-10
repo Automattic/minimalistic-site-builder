@@ -1958,11 +1958,11 @@ final class DesignDirectionStep implements Step
         $imageCrop = ImageCrop::explicit($direction['image_crop'] ?? null);
         if ($imageCrop !== null) {
             $facts[] = '- **Image crop**: ' . $imageCrop . ' — ' . match ($imageCrop) {
-                'landscape' => 'the build makes ordinary cards 3:2, dominant cards and thumbs 4:3, and feature media 16:9',
-                'portrait'  => 'the build makes ordinary cards and feature media 4:5, dominant cards 2:3, and thumbs 3:4',
-                'square'    => 'the build makes every card, thumbnail, and feature-media crop 1:1',
-                'panoramic' => 'the build makes ordinary cards and thumbs 16:9, dominant cards 3:2, and feature media 21:9',
-                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2, dominant cards 4:5, and thumbs 1:1',
+                'landscape' => 'the build makes ordinary cards 3:2, dominant cards 4:3, and feature media 16:9',
+                'portrait'  => 'the build makes ordinary cards and feature media 4:5, and dominant cards 2:3',
+                'square'    => 'the build makes every card and feature-media crop 1:1',
+                'panoramic' => 'the build makes ordinary cards 16:9, dominant cards 3:2, and feature media 21:9',
+                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2 and dominant cards 4:5',
             } . '. Full-bleed media remains wide; use the documented crop role classes and do not author an aspect ratio.';
         }
 

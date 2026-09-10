@@ -341,7 +341,7 @@ final class ImageKind
             }
         }
         return <<<CSS
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
+            :is(.wp-block-image, .card-media, .card-media-tall, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
                 position: relative;
                 border-radius: var(--shape-radius-panel, 1rem);
                 overflow: hidden;
@@ -350,7 +350,7 @@ final class ImageKind
                     0 1px 2px rgb(0 0 0 / 0.08),
                     0 2.5rem 5rem -2rem rgb(0 0 0 / 0.4);
             }
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::after {
+            :is(.wp-block-image, .card-media, .card-media-tall, .feature-media, .hero-composition__media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::after {
                 content: "";
                 position: absolute;
                 inset: 0;
@@ -360,7 +360,7 @@ final class ImageKind
                     inset 0 1px 0 rgb(255 255 255 / 0.35);
                 pointer-events: none;
             }
-            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {
+            :is(.wp-block-image, .card-media, .card-media-tall, .feature-media):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {
                 display: block;
                 width: 100%;
                 height: auto;
