@@ -193,7 +193,7 @@ final class ConceptSeeds
      */
     public static function seedPromptVars(string $brief, string $spec): array
     {
-        $style = self::requestedStyle($spec);
+        $style = self::requestedStyle($brief);
         $labels = self::lockedLabelsPrompt($brief);
         if ($style !== '') {
             $labels .= "\nUSER-REQUESTED STYLE (not an industry inference): "
@@ -210,19 +210,44 @@ final class ConceptSeeds
         ];
     }
 
-    /** The spec copies only an explicitly requested style, never a topic default. */
-    public static function requestedStyle(string $spec): string
+    /** Read explicit visual instructions from the user channel, never a factual spec. */
+    public static function requestedStyle(string $brief): string
     {
-        $data = json_decode($spec, true);
-        $style = is_array($data) ? ($data['visual_vibe'] ?? '') : '';
-        return is_string($style) ? self::styleKey($style) : '';
+        return self::styleKey(self::explicitStyleFromPrompt($brief));
+    }
+
+    /**
+     * Recover an omitted style only from unambiguous, standalone instructions.
+     * This is not a style classifier or a general natural-language parser: the
+     * model still handles ordinary prose. In particular, subject adjectives
+     * ("organic bakery") must never become design constraints. Keep freeform,
+     * hybrid and negative wording; do not reduce it to a catalog entry.
+     */
+    public static function explicitStyleFromPrompt(string $prompt): string
+    {
+        $styles = [];
+        // Semicolons can join exclusions to a style; keep those together.
+        foreach (preg_split('/[.!?\r\n]+/u', $prompt) ?: [] as $sentence) {
+            $sentence = trim($sentence);
+            if (preg_match('/^(?:(?:visual\s+)?(?:style|aesthetic)|art\s+direction)\s*:\s*(.+)$/iu', $sentence, $match)
+                || preg_match('/^(?:I|we)\s+(?:want|would\s+like)\s+the\s+(?:design|style|aesthetic)\s+to\s+be\s+(.+)$/iu', $sentence, $match)
+                || preg_match(
+                    '/^(?:(?:I|we)\s+(?:want|would\s+like)|(?:please\s+)?(?:create|build|design|make)'
+                    . '(?:\s+(?:me|us))?)\s+(?:an?|the)\s+(.+?[-\s]styled)\s+(?:site|website)$/iu',
+                    $sentence,
+                    $match,
+                )) {
+                $styles[] = trim($match[1]);
+            }
+        }
+        return implode('; ', array_unique($styles));
     }
 
     /**
      * Compare style names, not verbatim grammatical wrappers. This reads only
-     * the spec's explicit aesthetic, never the business topic or raw brief.
+     * an extracted explicit aesthetic, never the business topic.
      * Preserve freeform, hybrid and negative requests instead of guessing a
-     * single tradition for them. The full wording still travels in the spec.
+     * single tradition for them. The full wording still travels in the user brief.
      */
     public static function styleKey(string $style): string
     {

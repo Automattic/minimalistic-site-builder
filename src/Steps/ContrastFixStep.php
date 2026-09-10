@@ -157,7 +157,7 @@ final class ContrastFixStep implements Step
     }
 
     /**
-     * Overlay-header lint. A `header-behavior-overlay-to-solid` header starts
+     * Overlay-header lint. A `header-behavior-overlay` header starts
      * translucently on EVERY generated page, floating over each page's FIRST
      * section — but the header
      * and the sections are generated concurrently, blind to each other, so
@@ -188,7 +188,7 @@ final class ContrastFixStep implements Step
         }
         $attrs = $header->attrs($top) ?? [];
         $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        if (!in_array('header-behavior-overlay-to-solid', $classes, true)) {
+        if (!in_array('header-behavior-' . HeaderBehavior::OVERLAY_CLASS_FAMILY, $classes, true)) {
             return;
         }
 

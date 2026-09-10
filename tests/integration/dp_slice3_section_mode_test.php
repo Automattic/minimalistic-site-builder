@@ -49,7 +49,6 @@ function dp3_integration_site_spec(): array
         'topic' => 'design practice',
         'area' => 'design',
         'audience' => 'prospective clients',
-        'visual_vibe' => 'crisp editorial',
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'northstar.example',
@@ -145,14 +144,14 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
     putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         assert_eq(
-            'a9b88b42c740046ef24e75c90f813f9a8da0e4a450a9ad0b91dc9601a9879a9c',
+            '601a66d76f34cb8e9fcefd29e1b9d9037a7ed783a00e58ed58507cf6644eb8d7',
             hash_file('sha256', repo_path('src/Steps/TransformSiteStep.php')),
-            'transform-site source stays frozen after one accessor for the footer archetype',
+            'transform-site source stays frozen after the retired-mood filter on regenerated chrome',
         );
         assert_eq(
-            'da340cb5566303c52c3f26667a361e221ca38f1aef7f0aa80deaaaed68de35ef',
+            '7dba6aee066690a529ce8c866eeb0e55e0bb820d05011de54414ad25a529d420',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
-            'assemble-pages source stays frozen after site-logo union and content-row preserve',
+            'assemble-pages source includes the reviewed transient overlay shells',
         );
         $llm = new FakeLlm();
         $llm->queueText(dp3_integration_preview());

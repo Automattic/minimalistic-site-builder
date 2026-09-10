@@ -308,37 +308,44 @@ test('SectionUnit teaches the attribute-light markup contract without sacrificin
     }
 });
 
-test('SectionUnit loads only the selected card construction and keeps its structural hooks', function () {
+test('SectionUnit documents the selected card body and geometry contracts', function () {
     $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     foreach (['flush', 'framed', 'overlap', 'borderless'] as $style) {
         $input = section_unit_input();
+        $input['section']['layout_archetype'] = 'equal-card-grid';
         $input['card_style'] = $style;
         $prompt = section_unit_request_text($unit->request($input));
-        assert_contains('Image-card construction: use `card-style--' . $style . '`', $prompt);
-        assert_contains('card-body', $prompt, 'nested card text keeps the flex hook');
-        foreach (array_diff(['flush', 'framed', 'overlap', 'borderless'], [$style]) as $other) {
-            assert_true(!str_contains($prompt, '- `' . $other . '` ('), 'unused construction is absent');
+        assert_contains('`card-style--' . $style . '`', $prompt);
+        assert_contains('put ALL of that content in ONE such wrapper', $prompt);
+        assert_contains('"className":"card-body"', $prompt);
+        if (in_array($style, ['flush', 'overlap'], true)) {
+            assert_contains('ONE inner `wp:group`', $prompt);
+            assert_contains('a nested `cta-bottom` can align with sibling cards', $prompt);
         }
-        if ($style === 'flush') {
-            assert_contains('ONE inner `wp:group` with `"className":"card-body"`', $prompt);
-        } elseif ($style === 'overlap') {
+        if ($style === 'overlap') {
+            assert_contains('"className":"card-style--overlap card-flush"', $prompt);
             assert_contains('"className":"card-body overlap-up"', $prompt);
-        } elseif ($style === 'framed') {
+        }
+        if ($style === 'framed') {
             assert_contains('ONE uniform literal pixel value for all four padding sides', $prompt);
+            assert_contains('max(R − P, 2px)', $prompt);
         }
     }
 });
 
 
 test('SectionUnit documents the complete list-thumb delivery contract', function () {
+    $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'list-with-thumbnails';
     $request = (new SectionUnit(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
-    ))->request(array_replace_recursive(section_unit_input(), ['section' => ['layout_archetype' => 'list-with-thumbnails']]));
+    ))->request($input);
     $prompt = section_unit_request_text($request);
 
     assert_contains(
-        'One `wp:columns` per row with `"isStackedOnMobile":false`',
+        'one `wp:columns` per row
+  with `"isStackedOnMobile":false`',
         $prompt,
         'the dense two-column row is kept horizontal at Core\'s mobile breakpoint',
     );
@@ -356,6 +363,7 @@ test('SectionUnit documents the complete list-thumb delivery contract', function
 
 test('SectionUnit gives standalone requests the authoritative machine card style', function () {
     $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'equal-card-grid';
     $input['design_direction'] = 'Direction prose with no card-treatment commitment.';
     $input['card_style'] = 'framed';
 
@@ -367,7 +375,7 @@ test('SectionUnit gives standalone requests the authoritative machine card style
 
     assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): framed', $prompt);
     assert_contains(
-        'Image-card construction: use `card-style--framed`',
+        '`card-style--framed`',
         $prompt,
     );
     assert_true(
@@ -431,7 +439,10 @@ test('SectionUnit layered request loses only cache marker separators', function 
             []
         ),
     ]);
+    $rules = new \Automattic\SiteBuild\Units\SectionPromptRules($renderer);
     $rendered = $renderer->render('section.md', [
+        'card_instructions' => $rules->card($input['card_style']),
+        'motion_instructions' => $rules->motion($input['motion_profile'] ?? null) . "\nUse no motion-kit classes.",
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
             'theme_json'       => $input['theme_json'],
@@ -439,8 +450,6 @@ test('SectionUnit layered request loses only cache marker separators', function 
         ]), "\r\n"),
         'language'          => $input['language'],
         'card_style'        => $input['card_style'],
-        'card_instructions' => $renderer->render('card-styles/' . $input['card_style'] . '.md', ['card_style' => $input['card_style']]),
-        'motion_instructions' => $renderer->render('section-motion.md', ['motion_profile' => 'none', 'motion_palette' => 'Use no motion-kit classes.']),
         'outline'           => $input['outline'],
         'site_pages'        => $input['site_pages'],
         'page_title'        => $input['page']['title'],

@@ -19,6 +19,7 @@ use Automattic\SiteBuild\PageOpeningFallback;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -1025,7 +1026,7 @@ final class SectionsStep implements Step
     ): array
     {
         $pages = self::repairedPages($sourcePages ?? self::pages($project), $repairs);
-        $siteSpec = $project->readText('siteSpec.json');
+        $siteSpec = SiteSpecStep::promptText($project);
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $cardStyle = DesignDirectionStep::cardStyleFor($project, $warnings);
@@ -1060,6 +1061,9 @@ final class SectionsStep implements Step
             // backend exists to replace the placeholders, so it stays in the
             // caller-owned meta rather than in the spec the model authors.
             'form_placeholders' => self::formPlaceholders($project),
+            'stated_highlight' => SectionComposition::statedHighlightFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
         ];
 
         // Select the footer first: a singleton hero's lower edge must name the
@@ -1101,6 +1105,7 @@ final class SectionsStep implements Step
             ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
             (string) $contract['header']['archetype'] ?: null,
             HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
+            chrome: DesignDirectionStep::headerChromeFor($project),
         )['behavior'];
         $jobs = [
             'header' => [

@@ -14,6 +14,7 @@ use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontShortlist;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -219,7 +220,7 @@ final class DesignDirectionStep implements Step
             self::definitiveRequestedPageCount($meta),
         );
 
-        $spec = $project->readText('siteSpec.json');
+        $spec = SiteSpecStep::promptText($project);
         $specData = $project->readJson('siteSpec.json');
         // The expansion prompt samples discovery suggestions from the catalog;
         // they do not restrict the authored font pairing.
@@ -378,8 +379,7 @@ final class DesignDirectionStep implements Step
 
         // Carry the user's intent independently of the generated narrative so
         // every downstream author can resolve a conflicting design detail.
-        $direction['requested_style'] = is_string($specData['visual_vibe'] ?? null)
-            ? trim($specData['visual_vibe']) : '';
+        $direction['requested_style'] = ConceptSeeds::explicitStyleFromPrompt($prompt);
 
         if (isset($constraints['hero_canvas']) && $direction['canvas'] !== $constraints['hero_canvas']) {
             $repairs[] = 'designDirection.json: field canvas authored '
@@ -474,7 +474,9 @@ final class DesignDirectionStep implements Step
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
+            'surface_reason'   => '',
             'device'           => Device::DEFAULT,
+            'header_chrome'    => HeaderChrome::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
@@ -517,7 +519,7 @@ final class DesignDirectionStep implements Step
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
-        $requestedStyle = ConceptSeeds::requestedStyle($spec);
+        $requestedStyle = ConceptSeeds::requestedStyle($brief);
 
         $seeds = [];
         try {
@@ -1055,12 +1057,22 @@ final class DesignDirectionStep implements Step
             'invalid CTA construction replaced by deterministic solid fallback',
         );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
+        $surfaceReason = is_string($raw['surface_reason'] ?? null) ? trim($raw['surface_reason']) : '';
+        if ($surface !== 'none' && $surfaceReason === '') {
+            $warnings[] = 'file=designDirection.json; path=surface; authored=' . $surface
+                . '; delivered=none; disposition=the texture has no design reason in surface_reason';
+            $surface = 'none';
+        }
+        if ($surface === 'none') {
+            $surfaceReason = '';
+        }
         $device = self::rationHairlineDevice(
             self::normalizeDevice($raw['device'] ?? null, $warnings),
             $conceptRegister,
             $conceptTypeRegister,
             $warnings,
         );
+        $headerChrome = HeaderChrome::normalize($raw['header_chrome'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1159,7 +1171,11 @@ final class DesignDirectionStep implements Step
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
+            'surface_reason'   => $surfaceReason,
             'device'           => $device,
+            // Whether the header survives the scroll. HeaderBehavior keeps
+            // the archetype, depth, and contrast vetoes on top of it.
+            'header_chrome'    => $headerChrome,
             // The page-level commitments the per-section plan answers to. See
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
@@ -1848,14 +1864,13 @@ final class DesignDirectionStep implements Step
 
         $surface = Surface::explicit($direction['surface'] ?? null);
         if ($surface !== null && $surface !== 'none') {
-            $surfaceMeaning = match ($surface) {
-                'paper'    => 'a paper tooth overlay on the page',
-                'concrete' => 'a concrete grit overlay on the page',
-                'film'     => 'a film grain overlay on the page',
-                'fabric'   => 'a fabric weave overlay on the page',
-                default    => 'the committed surface overlay',
-            };
-            $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
+            $class = Surface::className($surface);
+            $reason = is_string($direction['surface_reason'] ?? null) ? trim($direction['surface_reason']) : '';
+            $facts[] = "- **Surface**: {$surface}. Optional class: {$class}. Design reason: {$reason}. "
+                . 'Use at most one section per page, only where the content supports this reason. '
+                . 'Keep the hero, header, footer, tables, forms, and other sections plain. '
+                . 'A page can use no texture. The build supplies the CSS below section content. '
+                . 'Do not combine a texture with a decorative device.';
         }
 
         $device = Device::explicit($direction['device'] ?? null);
@@ -2232,7 +2247,7 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The committed page surface, or `none` when no direction was persisted
+     * The optional section texture, or `none` when no direction exists
      * or the field is absent.
      */
     public static function surfaceFor(Project $project): string
@@ -2250,6 +2265,15 @@ final class DesignDirectionStep implements Step
             return Device::DEFAULT;
         }
         return self::normalizeDevice($project->readJson(self::FILE)['device'] ?? null);
+    }
+
+    /** The committed header-chrome persistence, or the transient default. */
+    public static function headerChromeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return HeaderChrome::DEFAULT;
+        }
+        return HeaderChrome::normalize($project->readJson(self::FILE)['header_chrome'] ?? null);
     }
 
     /** Parse only an explicit valid corner-language commitment. */

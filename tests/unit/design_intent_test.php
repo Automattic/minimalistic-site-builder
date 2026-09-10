@@ -33,6 +33,34 @@ test('organic style lost by site-spec survives through design selection after re
     }
 });
 
+test('requested art directions survive a mood-free spec without an extra AI call', function () {
+    foreach (['Art Deco', 'Bauhaus', 'Organic', 'Retro-Futurist', 'Synthwave', 'Swiss punk collage'] as $style) {
+        [$project, $llm, $tmp] = make_designdir_fixture();
+        try {
+            $brief = "Create a professional business coaching website for inspiring confidence. "
+                . "The site is called 'Super Coaching' and the tagline is 'When your best just isn't good enough'. "
+                . "The business is located in Plymouth, NH. "
+                . ($style === 'Bauhaus' ? 'I want the design to be Bauhaus.' : 'Art direction: ' . $style . '.');
+            $project->writeJson('meta.json', ['prompt' => $brief, 'multi_page' => true]);
+            // A stale host mood cannot compete with the actual user request.
+            $project->writeJson('siteSpec.json', ['name' => 'Super Coaching', 'visual_vibe' => 'rustic']);
+            $key = ConceptSeeds::styleKey($style);
+            $llm->queueJson(['seeds' => [
+                designdir_seed_obj('Requested interpretation', 'light', $key, 'neutral'),
+                designdir_seed_obj('Conflicting interpretation', 'dark', 'archival', 'earth'),
+            ]]);
+            $llm->queueJson(['direction' => designdir_direction()]);
+            (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+            assert_eq($style, $project->readJson('designDirection.json')['requested_style']);
+            assert_eq('Requested interpretation', $project->readJson('designDirection.json')['concept_seed']);
+            assert_eq(2, count($llm->calls), 'seed selection plus expansion, no style-extraction call');
+            assert_true(!str_contains($llm->calls[0]['prompt'], '"visual_vibe"'));
+        } finally {
+            remove_tree($tmp);
+        }
+    }
+});
+
 test('explicit style filters conflicting seeds without prescribing fonts or colors', function () {
     $seeds = array_map(static fn (array $raw): array => ConceptSeeds::normalize($raw), [
         ['seed' => 'Concrete Clarity', 'register' => 'brutalist', 'ground' => 'light'],
@@ -55,10 +83,10 @@ test('explicit style filters conflicting seeds without prescribing fonts or colo
 });
 
 test('style constraint supports freeform styles and does not infer one from the business topic', function () {
-    assert_eq('swiss punk collage', ConceptSeeds::requestedStyle('{"visual_vibe":"Swiss punk collage"}'));
-    assert_eq('', ConceptSeeds::requestedStyle('{"topic":"organic bakery"}'));
-    assert_eq('', ConceptSeeds::requestedStyle('{"visual_vibe":[]}'));
-    $vars = ConceptSeeds::seedPromptVars('A Swiss punk collage site', '{"visual_vibe":"Swiss punk collage"}');
+    assert_eq('swiss punk collage', ConceptSeeds::requestedStyle('Art direction: Swiss punk collage.'));
+    assert_eq('', ConceptSeeds::requestedStyle('An organic bakery.'));
+    assert_eq('', ConceptSeeds::requestedStyle('A portfolio of brutalist architecture.'));
+    $vars = ConceptSeeds::seedPromptVars('Art direction: Swiss punk collage.', '{"name":"Coaching"}');
     assert_contains('swiss punk collage', $vars['locked_labels']);
     assert_contains('every candidate', $vars['locked_labels']);
     $freeform = ConceptSeeds::normalize(['seed' => 'Punk index', 'register' => 'Swiss punk collage'], [
@@ -74,7 +102,7 @@ test('style eligibility treats grammatical variants as the same requested aesthe
         'organically styled' => 'organic', 'professionally, organically styled' => 'organic',
         'art deco' => 'art-deco', 'Swiss punk collage' => 'swiss punk collage',
         'not brutalist' => 'not brutalist', 'organic and brutalist' => 'organic and brutalist'] as $raw => $canonical) {
-        assert_eq($canonical, ConceptSeeds::requestedStyle(json_encode(['visual_vibe' => $raw])));
+        assert_eq($canonical, ConceptSeeds::requestedStyle('Style: ' . $raw . '.'));
         $seed = ConceptSeeds::normalize(['seed' => 'One defensible interpretation', 'register' => $canonical], ['registers' => [$canonical]]);
         $warnings = [];
         assert_eq([$seed], ConceptSeeds::respectStyle([$seed], $raw, $warnings));
@@ -84,7 +112,7 @@ test('style eligibility treats grammatical variants as the same requested aesthe
 
 test('fleet willow seed regression expands brutalism instead of archival even with a conflicting forced seed', function () {
     [$project, $llm] = make_designdir_fixture();
-    $project->writeJson('meta.json', ['prompt' => 'A brutalist Super Coaching site.']);
+    $project->writeJson('meta.json', ['prompt' => 'A Super Coaching site. I want the design to be brutalist.']);
     $project->writeJson('siteSpec.json', ['name' => 'Super Coaching', 'visual_vibe' => 'brutalist']);
     $llm->queueJson(['seeds' => [
         designdir_seed_obj('Concrete Clarity', 'light', 'brutalist', 'neutral'),
@@ -108,7 +136,7 @@ test('fleet willow seed regression expands brutalism instead of archival even wi
 
 test('all conflicting seeds fall back to the requested style without another model call', function () {
     [$project, $llm] = make_designdir_fixture();
-    $project->writeJson('meta.json', ['prompt' => 'A Swiss punk collage coaching site.']);
+    $project->writeJson('meta.json', ['prompt' => 'A coaching site. Art direction: Swiss punk collage.']);
     $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => 'Swiss punk collage']);
     $llm->queueJson(['seeds' => [designdir_seed_obj('Warm Archive', 'dark', 'archival', 'earth')]]);
     $llm->queueJson(['direction' => designdir_direction()]);
@@ -139,7 +167,8 @@ test('default design model authors hero composition without a fixed recipe', fun
 test('seed judge only sees compatible styles and keeps distinct interpretations of one style', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     try {
-        $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => 'organic']);
+        $project->writeJson('siteSpec.json', ['name' => 'Coaching']);
+        $project->writeJson('meta.json', ['prompt' => 'A coaching site. Style: organic.']);
         $llm->queueJson(['seeds' => [
             designdir_seed_obj('Concrete Grid', 'dark', 'brutalist', 'neutral'),
             designdir_seed_obj('Garden Path', 'light', 'organic', 'earth'),

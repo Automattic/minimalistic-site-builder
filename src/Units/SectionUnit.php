@@ -27,6 +27,7 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  *   and must be one of hero/content/closing. The layout_archetype must be a
  *   `SectionComposition` id: it selects the one prompt fragment this request
  *   sees, and the `section-composition--<id>` root class the part delivers.
+ * - stated_highlight: an optional brief clause that requests one card highlight
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
@@ -110,17 +111,20 @@ final class SectionUnit extends AbstractPageSectionUnit
             // and never reads a word about it.
             'composition_recipe' => $this->renderer->render(
                 SectionComposition::recipeTemplate($archetype),
-                SectionComposition::recipeVars($archetype, $itemPattern),
+                SectionComposition::recipeVars(
+                    $archetype,
+                    $itemPattern,
+                    SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
+                ),
             ),
         ]);
 
+        $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
+            'card_instructions' => $rules->card($cardStyle),
+            'motion_instructions' => $this->motionInstructions($input),
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'card_style'        => $cardStyle,
-            'card_instructions' => $this->renderer->render('card-styles/' . $cardStyle . '.md', [
-                'card_style' => $cardStyle,
-            ]),
-            'motion_instructions' => $this->motionInstructions($input),
             'page_title'        => $this->pageString($input, 'title'),
             'page_path'         => $this->pageString($input, 'path', '/'),
             'section_title'     => $this->sectionString($section, 'title'),
@@ -190,18 +194,15 @@ final class SectionUnit extends AbstractPageSectionUnit
     {
         $profile = $input['motion_profile'] ?? 'none';
         if (!is_string($profile) || !in_array($profile, Motion::PROFILES, true)) {
-            throw new \InvalidArgumentException('unit input motion_profile must name a supported profile');
+            $profile = 'none';
         }
         $classes = Motion::validateNote($input['motion_classes'] ?? [], $profile)['classes'];
         if ($classes === []) {
             $classes = array_values(array_intersect(Motion::allowedClasses($profile), Motion::noteClasses()));
         }
-        return $this->renderer->render('section-motion.md', [
-            'motion_profile' => $profile,
-            'motion_palette' => $classes === []
-                ? 'Use no motion-kit classes.'
-                : 'Choose effects from this site\'s palette: `' . implode('`, `', $classes) . '`.',
-        ]);
+        $palette = $classes === [] ? 'Use no motion-kit classes.'
+            : 'Choose effects from this site\'s palette: `' . implode('`, `', $classes) . '`.';
+        return (new SectionPromptRules($this->renderer))->motion($profile) . "\n" . $palette;
     }
 
     public function finish(string $raw, array $input): MarkupResult
@@ -245,6 +246,14 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $repairs,
             );
         }
+        $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
+        $markup = GeneratedMarkup::stripMediaOffNoImageArchetype($markup, $this->key($input), $archetype, $repairs, $warnings);
+        $markup = GeneratedMarkup::stripMediaOverBudget($markup, $this->key($input), $archetype, $repairs, $warnings);
+        $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
+        $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
+        $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);
@@ -258,6 +267,10 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        $cardText = CardTextContract::enforce($markup, $this->key($input), $input['theme_json'] ?? null);
+        $markup = $cardText['markup'];
+        array_push($repairs, ...$cardText['repairs']);
+        array_push($warnings, ...$cardText['warnings']);
         $section = $this->section($input);
         $band = BandSurfaceContract::enforce(
             $markup,
@@ -267,6 +280,11 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $band->markup;
         array_push($repairs, ...$band->repairs);
         array_push($warnings, ...$band->warnings);
+        if ($archetype === 'cta-panel') {
+            $markup = GeneratedMarkup::stripCtaPanelSiblings($markup, $this->key($input), $repairs, $warnings);
+            $markup = GeneratedMarkup::centerImagelessCtaPanel($markup, $this->key($input), $repairs);
+            $markup = GeneratedMarkup::flushCtaPanelMedia($markup, $this->key($input), $cardStyle, $repairs);
+        }
         // Advisory only: the catalog reports a section that ignored its
         // assignment and the build delivers the safe parseable markup anyway.
         if ($archetype !== null) {
@@ -277,6 +295,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                     $archetype,
                     $this->key($input),
                     $itemPattern,
+                    SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
                 ),
             );
         }

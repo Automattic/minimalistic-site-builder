@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\HeroBlueprint;
 
 /**
@@ -252,6 +253,7 @@ test('an unauthored ink resolves against the surface the design actually chose',
         $header['protection_token'],
         $header['foreground_token'],
         'base',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq($header['protection_token'], $artifact['topSurface']);
     assert_eq($header['foreground_token'], $artifact['foreground']);
@@ -347,6 +349,7 @@ test('an authored header pair below 4.5:1 is vetoed by the existing behavior fal
         'primary',
         'contrast',
         'base',
+        chrome: HeaderChrome::PERSISTENT,
     );
 
     $delivered = ContrastMath::ratio(
@@ -398,6 +401,7 @@ test('a derived stacked surface reaches the header kit through its header-start 
         'primary',
         'base',
         'base',
+        chrome: HeaderChrome::PERSISTENT,
     );
     // No early return: if the behavior ever regresses to `static` the kit
     // stops being shipped at all, and this test must fail rather than pass

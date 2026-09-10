@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\HeaderChrome;
+use Automattic\SiteBuild\Steps\AssemblePagesStep;
 
 test('smooth sticky surface selection never crosses an unreadable midpoint', function () {
     $pages = [
@@ -25,6 +27,7 @@ test('smooth sticky surface selection never crosses an unreadable midpoint', fun
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'primary',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $smooth['behavior']);
     assert_eq('base', $smooth['topSurface']);
@@ -49,6 +52,7 @@ test('smooth sticky surface selection never crosses an unreadable midpoint', fun
         HeaderBehavior::TRANSITION_INSTANT,
         'base',
         'primary',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq('contrast', $instant['scrolledSurface'], 'instant changes have no interpolated midpoint');
 });
@@ -62,7 +66,7 @@ test('sticky-soft downgrades to static when no palette pair reaches readable con
     ];
     assert_eq(
         HeaderBehavior::STICKY_SOFT,
-        HeaderBehavior::behaviorFor($pages, HeaderBehavior::MODE_STACKED),
+        HeaderBehavior::behaviorFor($pages, HeaderBehavior::MODE_STACKED, chrome: HeaderChrome::PERSISTENT),
         'this site shape requests sticky-soft before palette safety runs',
     );
 
@@ -90,6 +94,7 @@ test('sticky-soft downgrades to static when no palette pair reaches readable con
         $midTones,
         null,
         HeaderBehavior::TRANSITION_SMOOTH,
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], 'unsafe palette downgrades sticky-soft to static');
     assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
@@ -116,6 +121,7 @@ test('smooth transition safety preserves readable mixed-channel hue changes', fu
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq('primary', $artifact['scrolledSurface'], 'safe hue transition is retained');
 
@@ -160,6 +166,7 @@ test('a token-backed multi-page site earns a provably safe transparent sticky st
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior']);
     assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment']);
@@ -181,6 +188,7 @@ test('a token-backed multi-page site earns a provably safe transparent sticky st
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $image['behavior']);
     assert_eq(HeaderBehavior::TREATMENT_GLASS, $image['topTreatment'], 'image opening denies only the transparent rung');
@@ -212,6 +220,7 @@ test('the pageBackground parameter joins the transparent-start contrast contract
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $default['topTreatment'], 'base convention proves the start');
 
@@ -224,6 +233,7 @@ test('the pageBackground parameter joins the transparent-start contrast contract
         'base',
         'contrast',
         'secondary',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $darkBody['behavior']);
     assert_eq(
@@ -255,6 +265,7 @@ test('a mid-gray tint fails frosting at 0.80 alpha and falls back to solid paint
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior'], 'solid sticky chrome survives the denial');
     assert_eq(HeaderBehavior::TREATMENT_SOLID, $artifact['topTreatment']);
@@ -278,6 +289,7 @@ test('glass grants for the top and scrolled states are decided independently', f
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq('base', $scrolledOnly['topSurface']);
     assert_eq('secondary', $scrolledOnly['scrolledSurface']);
@@ -296,6 +308,7 @@ test('glass grants for the top and scrolled states are decided independently', f
         HeaderBehavior::TRANSITION_SMOOTH,
         'base',
         'contrast',
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq('base', $topOnly['topSurface']);
     assert_eq('secondary', $topOnly['scrolledSurface']);
@@ -345,9 +358,10 @@ test('treatments ride the artifact across overlay, fallback, and static paths', 
     // treatment); the truly clear start is earned later from delivered
     // opening evidence, never assumed here.
     $overlay = HeaderBehavior::resolve(
-        [['slug' => 'home', 'sections' => [['slug' => 'hero', 'background' => 'image']]]],
+        hb_pages('image', 'image'),
         HeaderBehavior::MODE_OVERLAY,
         $palette,
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $overlay['behavior']);
     assert_eq(HeaderBehavior::TREATMENT_GLASS, $overlay['topTreatment']);
@@ -372,7 +386,7 @@ test('treatments ride the artifact across overlay, fallback, and static paths', 
     // Overlay fallback: white passes the scrim but not its own 'base'
     // openings, and every darker token fails the scrim, so the stacked path
     // takes over — and must still resolve treatments for the sticky result.
-    $fallback = HeaderBehavior::resolve(hb_pages('base', 'base'), HeaderBehavior::MODE_OVERLAY, $palette);
+    $fallback = HeaderBehavior::resolve(hb_pages('base', 'base'), HeaderBehavior::MODE_OVERLAY, $palette, chrome: HeaderChrome::PERSISTENT);
     assert_eq(HeaderBehavior::STICKY_SOFT, $fallback['behavior']);
     assert_eq(HeaderBehavior::MODE_STACKED, $fallback['mode']);
     assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $fallback['topTreatment'], 'token openings still prove the start');
@@ -383,11 +397,200 @@ test('treatments ride the artifact across overlay, fallback, and static paths', 
         [['slug' => 'home', 'sections' => [['slug' => 'hero', 'background' => 'base']]]],
         HeaderBehavior::MODE_STACKED,
         $palette,
+        chrome: HeaderChrome::PERSISTENT,
     );
     assert_eq(HeaderBehavior::STATIC, $static['behavior']);
     assert_eq(HeaderBehavior::TREATMENT_SOLID, $static['topTreatment']);
     assert_eq(HeaderBehavior::TREATMENT_SOLID, $static['scrolledTreatment']);
     assert_eq([], HeaderBehavior::rootClasses($static));
+});
+
+test('the design direction decides persistent header chrome in both modes (BIGR-998)', function () {
+    // The cohort that motivated BIGR-998 held 19 sticky-soft, 17
+    // overlay-to-solid and 0 static headers, because the old rule read only
+    // the site shape. The shape is still an input, but the direction now
+    // chooses, and each mode keeps its own paint family.
+    $deep = hb_pages('base', 'base');
+    $deepImages = hb_pages('image', 'image');
+
+    assert_eq(
+        HeaderBehavior::STICKY_SOFT,
+        HeaderBehavior::behaviorFor($deep, HeaderBehavior::MODE_STACKED, chrome: HeaderChrome::PERSISTENT),
+    );
+    assert_eq(
+        HeaderBehavior::STATIC,
+        HeaderBehavior::behaviorFor($deep, HeaderBehavior::MODE_STACKED, chrome: HeaderChrome::TRANSIENT),
+    );
+    assert_eq(
+        HeaderBehavior::OVERLAY_TO_SOLID,
+        HeaderBehavior::behaviorFor($deepImages, HeaderBehavior::MODE_OVERLAY, chrome: HeaderChrome::PERSISTENT),
+    );
+    assert_eq(
+        HeaderBehavior::OVERLAY_TRANSIENT,
+        HeaderBehavior::behaviorFor($deepImages, HeaderBehavior::MODE_OVERLAY, chrome: HeaderChrome::TRANSIENT),
+    );
+
+    // An absent or unusable commitment delivers the transient default rather
+    // than the persistent chrome every site used to receive.
+    assert_eq(HeaderBehavior::STATIC, HeaderBehavior::behaviorFor($deep, HeaderBehavior::MODE_STACKED));
+    assert_eq(
+        HeaderBehavior::STATIC,
+        HeaderBehavior::behaviorFor($deep, HeaderBehavior::MODE_STACKED, chrome: 'always-on'),
+    );
+    assert_eq(
+        HeaderBehavior::OVERLAY_TRANSIENT,
+        HeaderBehavior::behaviorFor($deepImages, HeaderBehavior::MODE_OVERLAY, chrome: null),
+    );
+});
+
+test('tall archetypes and shallow sites veto persistent chrome the direction asked for (BIGR-998)', function () {
+    $deep = hb_pages('base', 'base');
+    $deepImages = hb_pages('image', 'image');
+
+    // Veto one: a tall composition is not useful chrome, in either mode.
+    foreach (HeaderBehavior::TALL_ARCHETYPES as $tall) {
+        assert_eq(
+            HeaderBehavior::STATIC,
+            HeaderBehavior::behaviorFor($deep, HeaderBehavior::MODE_STACKED, $tall, HeaderChrome::PERSISTENT),
+            "{$tall} is too tall to stay on screen",
+        );
+        assert_eq(
+            HeaderBehavior::OVERLAY_TRANSIENT,
+            HeaderBehavior::behaviorFor($deepImages, HeaderBehavior::MODE_OVERLAY, $tall, HeaderChrome::PERSISTENT),
+        );
+    }
+
+    // Veto two: one page of two bands has nothing for chrome to repay.
+    $shallow = [['slug' => 'home', 'sections' => [
+        ['slug' => 'hero', 'background' => 'image'],
+        ['slug' => 'about', 'background' => 'base'],
+    ]]];
+    assert_true(!HeaderBehavior::depthSupportsChrome($shallow));
+    assert_eq(
+        HeaderBehavior::STATIC,
+        HeaderBehavior::behaviorFor($shallow, HeaderBehavior::MODE_STACKED, null, HeaderChrome::PERSISTENT),
+    );
+    assert_eq(
+        HeaderBehavior::OVERLAY_TRANSIENT,
+        HeaderBehavior::behaviorFor($shallow, HeaderBehavior::MODE_OVERLAY, null, HeaderChrome::PERSISTENT),
+    );
+
+    // The floor lifts at four bands on one page, and at a second page.
+    $fourBands = [['slug' => 'home', 'sections' => [
+        ['slug' => 'hero'], ['slug' => 'about'], ['slug' => 'work'], ['slug' => 'contact'],
+    ]]];
+    assert_true(HeaderBehavior::depthSupportsChrome($fourBands));
+    assert_true(HeaderBehavior::depthSupportsChrome($deep));
+    assert_eq(
+        HeaderBehavior::STICKY_SOFT,
+        HeaderBehavior::behaviorFor($fourBands, HeaderBehavior::MODE_STACKED, null, HeaderChrome::PERSISTENT),
+    );
+});
+
+test('a design choice never overrides the header contrast guarantee (BIGR-998)', function () {
+    $deep = hb_pages('base', 'base');
+    // Every token sits near mid-gray, so no pair reaches 4.5:1 and the two
+    // painted states cannot both stay readable.
+    $midTones = [
+        'base' => '#7F7F7F',
+        'contrast' => '#8A8A8A',
+        'primary' => '#757575',
+        'secondary' => '#808080',
+        'accent' => '#8F8F8F',
+    ];
+    $stacked = HeaderBehavior::resolve(
+        $deep,
+        HeaderBehavior::MODE_STACKED,
+        $midTones,
+        chrome: HeaderChrome::PERSISTENT,
+    );
+    assert_eq(
+        HeaderBehavior::STATIC,
+        $stacked['behavior'],
+        'an unsafe palette still downgrades sticky-soft, whatever the direction asked for',
+    );
+
+    // The overlay palette fallback keeps its shape: an overlay that cannot
+    // prove one foreground re-resolves on the stacked path, and the chrome
+    // commitment rides along to that second decision.
+    $palette = [
+        'base' => '#FFFFFF',
+        'contrast' => '#171717',
+        'primary' => '#274C77',
+        'secondary' => '#E5E7EB',
+        'accent' => '#C2410C',
+    ];
+    $persistentFallback = HeaderBehavior::resolve(
+        $deep,
+        HeaderBehavior::MODE_OVERLAY,
+        $palette,
+        chrome: HeaderChrome::PERSISTENT,
+    );
+    assert_eq(HeaderBehavior::STICKY_SOFT, $persistentFallback['behavior']);
+    assert_eq(HeaderBehavior::MODE_STACKED, $persistentFallback['mode']);
+
+    $transientFallback = HeaderBehavior::resolve(
+        $deep,
+        HeaderBehavior::MODE_OVERLAY,
+        $palette,
+        chrome: HeaderChrome::TRANSIENT,
+    );
+    assert_eq(HeaderBehavior::STATIC, $transientFallback['behavior']);
+    assert_eq(HeaderBehavior::MODE_STACKED, $transientFallback['mode']);
+});
+
+test('overlay-transient carries the overlay contract and claims no fixed shell (BIGR-998)', function () {
+    $palette = [
+        'base' => '#FFFFFF',
+        'contrast' => '#171717',
+        'primary' => '#274C77',
+        'secondary' => '#E5E7EB',
+        'accent' => '#C2410C',
+    ];
+    $artifact = HeaderBehavior::resolve(
+        hb_pages('image', 'image'),
+        HeaderBehavior::MODE_OVERLAY,
+        $palette,
+        chrome: HeaderChrome::TRANSIENT,
+    );
+    assert_eq(HeaderBehavior::OVERLAY_TRANSIENT, $artifact['behavior']);
+    assert_eq(HeaderBehavior::MODE_OVERLAY, $artifact['mode']);
+    assert_eq(HeaderBehavior::TRANSPARENT, $artifact['topSurface']);
+    assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['topTreatment']);
+    assert_eq(HeaderBehavior::TREATMENT_SOLID, $artifact['scrolledTreatment']);
+    assert_true(
+        in_array($artifact['scrolledSurface'], HeaderBehavior::SURFACES, true),
+        'the scrolled pair stays proven for the no-JS and forced-solid shells',
+    );
+
+    // Both overlay behaviors paint through one class family, so the inner
+    // markup is identical and only the outer shell class differs.
+    $persistent = HeaderBehavior::resolve(
+        hb_pages('image', 'image'),
+        HeaderBehavior::MODE_OVERLAY,
+        $palette,
+        chrome: HeaderChrome::PERSISTENT,
+    );
+    assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $persistent['behavior']);
+    assert_eq(HeaderBehavior::rootClasses($persistent), HeaderBehavior::rootClasses($artifact));
+    assert_true(in_array('header-behavior-overlay', HeaderBehavior::rootClasses($artifact), true));
+
+    // The earned clear resting state is available to both.
+    $clear = $artifact;
+    $clear['topTreatment'] = HeaderBehavior::TREATMENT_TRANSPARENT;
+    assert_true(in_array('header-top-transparent', HeaderBehavior::rootClasses($clear), true));
+
+    assert_contains('overlay-transient', HeaderBehavior::promptContract(HeaderBehavior::OVERLAY_TRANSIENT));
+    assert_contains('scrolls away', HeaderBehavior::promptContract(HeaderBehavior::OVERLAY_TRANSIENT));
+    assert_eq(
+        'site-header-shell site-header-shell--overlay-transient',
+        AssemblePagesStep::pageHeaderClassName(HeaderBehavior::OVERLAY_TRANSIENT),
+    );
+    assert_eq(
+        'site-header-shell site-header-shell--force-solid',
+        AssemblePagesStep::indexHeaderClassName(HeaderBehavior::OVERLAY_TRANSIENT),
+        'the blog fallback has no image-led opening to rest on',
+    );
 });
 
 test('validateArtifact closes the treatment vocabulary per behavior', function () {

@@ -226,6 +226,13 @@ test('section prompt bans decorative labels numbers and rules without banning co
     assert_contains('Lines and borders need a structural purpose', $section);
     assert_contains('prices, dates, addresses', $section);
     assert_true(!str_contains($section, 'Optional orientation labels'));
+    $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'list-with-thumbnails';
+    $request = (new \Automattic\SiteBuild\Units\SectionUnit(
+        new \Automattic\SiteBuild\Tests\FakeLlm(),
+        new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')),
+    ))->request($input);
+    assert_contains('Never put an eyebrow or kicker line above the row heading', section_unit_request_text($request));
 });
 
 test('design-direction offers no numeral device and no numbered-index idiom', function () {

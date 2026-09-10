@@ -38,8 +38,10 @@ use Automattic\SiteBuild\Warnings;
  *         logs/header-hero.txt for successful repairs.
  *
  * Objective repairs/contracts:
- *  1. Header behavior — resolve static/sticky-soft/overlay-to-solid from the
- *     final contract relation, the actual palette, and the motion profile,
+ *  1. Header behavior — resolve static, sticky-soft, overlay-to-solid, or
+ *     overlay-transient from the design direction's header_chrome
+ *     commitment, the final contract relation, the actual palette, and the
+ *     motion profile,
  *     then persist the closed six-field headerBehavior.json artifact. The
  *     contract's foreground/protection tokens are the authored color inputs,
  *     so resolved states stay consistent with the persisted relation.
@@ -263,12 +265,16 @@ final class HeaderHeroStep implements Step
         $palette = ContrastFixStep::paletteMap($theme);
         $transition = HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project));
         $pageBackground = self::pageBackgroundSlug($theme);
+        // The design direction owns whether this site keeps its header on
+        // screen (BIGR-998). The resolver still applies the archetype, depth,
+        // and palette vetoes on top of the commitment.
+        $chrome = DesignDirectionStep::headerChromeFor($project);
         $resolveBehavior = static function (
             string $behaviorMode,
             string $behaviorArchetype,
             string $behaviorForeground,
             string $behaviorProtection,
-        ) use ($pages, $palette, $transition, $pageBackground): array {
+        ) use ($pages, $palette, $transition, $pageBackground, $chrome): array {
             return HeaderBehavior::resolve(
                 $pages,
                 $behaviorMode,
@@ -280,6 +286,7 @@ final class HeaderHeroStep implements Step
                     : null,
                 $behaviorForeground !== '' ? $behaviorForeground : null,
                 $pageBackground,
+                $chrome,
             );
         };
 
@@ -315,7 +322,12 @@ final class HeaderHeroStep implements Step
             return $facts;
         };
 
-        $requestedBehavior = HeaderBehavior::behaviorFor($pages, $mode, $archetype !== '' ? $archetype : null);
+        $requestedBehavior = HeaderBehavior::behaviorFor(
+            $pages,
+            $mode,
+            $archetype !== '' ? $archetype : null,
+            $chrome,
+        );
         $behavior = $resolveBehavior($mode, $archetype, $foreground, $protection);
         if ($openingProblems === []
             && ($behavior['behavior'] !== $requestedBehavior || $behavior['mode'] !== $mode)) {
@@ -575,7 +587,7 @@ final class HeaderHeroStep implements Step
         // opening keeps the scrim veil. The clear treatment snaps its
         // background paint on scroll (while its shadow may still transition),
         // because a fixed header's underlay can change between frames.
-        if ($behavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
+        if (in_array($behavior['behavior'], HeaderBehavior::OVERLAY_BEHAVIORS, true)
             && ($final['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY
             && self::grantClearOverlayTop($project, $final, $behavior, $palette, $writes, $report)
         ) {
@@ -885,7 +897,7 @@ final class HeaderHeroStep implements Step
             if ($pageSlug === '' || $sectionSlug === '') {
                 $problems[] = [
                     'file' => HeaderBehavior::FILE,
-                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'authored' => "overlay header for page '{$pageSlug}'",
                     'reason' => 'has no locatable first section',
                 ];
                 continue;
@@ -894,7 +906,7 @@ final class HeaderHeroStep implements Step
             if (!$project->exists($rel)) {
                 $problems[] = [
                     'file' => $rel,
-                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'authored' => "overlay header for page '{$pageSlug}'",
                     'reason' => 'part is missing',
                 ];
                 continue;
@@ -903,7 +915,7 @@ final class HeaderHeroStep implements Step
             if ($evidence === null) {
                 $problems[] = [
                     'file' => $rel,
-                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'authored' => "overlay header for page '{$pageSlug}'",
                     'reason' => 'does not begin with an image-backed cover or a protection-token surface',
                 ];
             }
@@ -1667,6 +1679,9 @@ final class HeaderHeroStep implements Step
         return match ($behavior['behavior']) {
             HeaderBehavior::STICKY_SOFT => in_array($position['type'], ['sticky', 'fixed'], true),
             HeaderBehavior::OVERLAY_TO_SOLID => in_array($position['type'], ['absolute', 'sticky', 'fixed'], true),
+            // A transient overlay is absolute in every scope, so only an
+            // authored absolute position is preserved by the trusted shell.
+            HeaderBehavior::OVERLAY_TRANSIENT => $position['type'] === 'absolute',
             default => false,
         };
     }

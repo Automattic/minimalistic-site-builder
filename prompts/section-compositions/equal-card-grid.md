@@ -4,7 +4,7 @@ Build one row of equal-weight cards for a flat hierarchy — pricing tiers, a
 trio of services, a set of equally weighted features. Every card carries the
 same construction and the same crop, so the row reads as one system.
 
-- Structure: follow the `equal-grid` construction below. Use `wp:columns` with
+- Structure: use `wp:columns` with
   `"className":"equal-cards"`, each `wp:column` at
   `"verticalAlignment":"stretch"` and `"width":"X%"` where X is 100 divided by
   the card count. The widths sum to exactly 100%. Build every card group with
@@ -20,6 +20,7 @@ same construction and the same crop, so the row reads as one system.
   paragraph, list, and buttons.
 - Surface/width: the band runs wide or full, and the `wp:columns` row takes
   `"align":"wide"` itself.
+{{highlight_directive}}
 - Objective failure: unequal card widths, widths that do not sum to 100%, one
   card built differently from its siblings, or mixed image crops in one row.
 

@@ -5,6 +5,7 @@ use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
@@ -25,7 +26,7 @@ function make_designdir_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_designdir_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
-    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'visual_vibe' => '']);
+    $project->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb', 'topic' => 'artisan bread']);
     return [$project, new FakeLlm(), $tmp];
 }
 
@@ -2302,6 +2303,7 @@ test('normalize commits a catalog surface and falls unknown textures back to non
     $direction = DesignDirectionStep::normalize([
         'description' => 'Paper ground.',
         'surface' => 'Paper',
+        'surface_reason' => 'The process section presents a paper recipe journal.',
     ], 'cinematic-safe-zone');
     assert_eq('paper', $direction['surface']);
     assert_contains('**Surface**: paper', DesignDirectionStep::format($direction));
@@ -2377,6 +2379,49 @@ test('normalize commits a catalog device', function () {
     $warnings = [];
     assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
     assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('header chrome normalizes actionably and the accessor falls back to transient (BIGR-998)', function () {
+    // Persistent chrome is an explicit commitment. An absent field says
+    // nothing and delivers the transient default without a warning; a value
+    // outside the vocabulary lost authored intent and is durable-warning
+    // material, exactly like the sibling bounded axes.
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A header that stays.',
+        'header_chrome' => 'Persistent',
+    ], 'cinematic-safe-zone');
+    assert_eq('persistent', $direction['header_chrome']);
+
+    $absent = DesignDirectionStep::normalize([
+        'description' => 'Nothing committed.',
+    ], 'cinematic-safe-zone');
+    assert_eq(HeaderChrome::TRANSIENT, $absent['header_chrome']);
+
+    $warnings = [];
+    assert_eq('transient', HeaderChrome::normalize('always-on', $warnings));
+    assert_eq(1, count($warnings));
+    foreach (['field header_chrome', 'always-on', 'delivered "transient"', 'invalid header chrome'] as $part) {
+        assert_contains($part, $warnings[0]);
+    }
+
+    $blank = [];
+    assert_eq('transient', HeaderChrome::normalize('', $blank));
+    assert_eq([], $blank, 'an empty commitment is the documented default, not a defect');
+
+    assert_eq('persistent', HeaderChrome::explicit(' PERSISTENT '));
+    assert_eq(null, HeaderChrome::explicit(['persistent']));
+    assert_true(HeaderChrome::isPersistent('persistent'));
+    assert_true(!HeaderChrome::isPersistent('transient'));
+    assert_true(!HeaderChrome::isPersistent(null), 'an uncommitted axis never asks for chrome');
+
+    $tmp = sys_get_temp_dir() . '/builder_header_chrome_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project), 'a missing artifact commits nothing');
+    $project->writeJson('designDirection.json', ['header_chrome' => ['persistent']]);
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project));
+    $project->writeJson('designDirection.json', ['header_chrome' => ' Persistent ']);
+    assert_eq('persistent', DesignDirectionStep::headerChromeFor($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('the direction description is never edited to remove motif words', function () {
@@ -2784,4 +2829,19 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_eq('', $generic['tension']);
     assert_eq('', $generic['subject_anchor']);
+});
+
+
+test('normalize requires a concept reason for an optional texture', function () {
+    foreach ([null, '', '  ', [], 7] as $reason) {
+        $warnings = [];
+        $repairs = [];
+        $out = DesignDirectionStep::normalize(
+            ['description' => 'A plain site.', 'surface' => 'film', 'surface_reason' => $reason],
+            'cinematic-safe-zone', '', $repairs, $warnings,
+        );
+        assert_eq('none', $out['surface']);
+        assert_eq('', $out['surface_reason']);
+        assert_contains('path=surface; authored=film; delivered=none', implode(' ', $warnings));
+    }
 });
