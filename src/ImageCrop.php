@@ -10,30 +10,26 @@ final class ImageCrop
 
     public const DEFAULT = 'mixed';
 
-    /** @var array<string,array{card:string,tall:string,thumb:string,feature:string}> */
+    /** @var array<string,array{card:string,tall:string,feature:string}> */
     private const CSS_RATIOS = [
         'landscape' => [
             'card' => '3 / 2',
             'tall' => '4 / 3',
-            'thumb' => '4 / 3',
             'feature' => '16 / 9',
         ],
         'portrait' => [
             'card' => '4 / 5',
             'tall' => '2 / 3',
-            'thumb' => '3 / 4',
             'feature' => '4 / 5',
         ],
         'square' => [
             'card' => '1 / 1',
             'tall' => '1 / 1',
-            'thumb' => '1 / 1',
             'feature' => '1 / 1',
         ],
         'panoramic' => [
             'card' => '16 / 9',
             'tall' => '3 / 2',
-            'thumb' => '16 / 9',
             'feature' => '21 / 9',
         ],
     ];
@@ -43,11 +39,7 @@ final class ImageCrop
         return BoundedChoice::explicit($raw, self::ALL);
     }
 
-    /**
-     * Override the scaffold's mixed per-role ratios for one committed system.
-     * The list-thumb flush recipe deliberately keeps its more-specific
-     * full-height crop: there the text column, not a ratio, owns row height.
-     */
+    /** Override the scaffold's mixed per-role ratios for one committed system. */
     public static function kitCss(mixed $raw): ?string
     {
         $crop = self::explicit($raw);
@@ -60,8 +52,6 @@ final class ImageCrop
                section generation; the build owns their delivered proportions. */
             .card-media img { aspect-ratio: {$ratio['card']} !important; height: auto; }
             .card-media-tall img { aspect-ratio: {$ratio['tall']} !important; height: auto; }
-            .card-media-thumb img { aspect-ratio: {$ratio['thumb']} !important; height: auto; }
-            .card-media-thumb { --list-thumb-image-ratio: {$ratio['thumb']}; }
             .feature-media img {
                 width: 100%;
                 aspect-ratio: {$ratio['feature']} !important;
@@ -69,13 +59,6 @@ final class ImageCrop
                 object-fit: cover;
                 display: block;
             }
-            /* Flush list rows are the reviewed exception: their text column
-               owns row height and the thumbnail stretches to that live box. */
-            .list-thumb-flush .card-media-thumb img {
-                aspect-ratio: auto !important;
-                height: 100%;
-            }
-
             CSS;
     }
 

@@ -641,7 +641,7 @@ test('finalize-theme ships the device kit and prunes it for none', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme ships the statement-lines register for caps and prunes it otherwise (BIGR-1002)', function () {
+test('finalize-theme ships the display register for caps and prunes it otherwise (BIGR-997)', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'caps-tight']);
@@ -650,8 +650,8 @@ test('finalize-theme ships the statement-lines register for caps and prunes it o
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/type-treatment/type-treatment.css');
-    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
-    assert_contains('text-transform: none;', $css);
+    assert_contains('.wp-block-heading.has-display-font-size {', $css);
+    assert_contains('line-height: 0.92;', $css);
     $php = $project->readText('theme/functions.php');
     assert_contains(
         "wp_enqueue_style('forno-vero-type-treatment', get_theme_file_uri('assets/type-treatment/type-treatment.css'), "
@@ -665,7 +665,7 @@ test('finalize-theme ships the statement-lines register for caps and prunes it o
     quietly(fn () => (new FinalizeThemeStep())->run($project));
     assert_true(
         !$project->exists('theme/assets/type-treatment/type-treatment.css'),
-        'stale statement-lines register pruned',
+        'stale display register pruned',
     );
     $php = $project->readText('theme/functions.php');
     assert_true(!str_contains($php, 'forno-vero-type-treatment'), 'stale register enqueue pruned');

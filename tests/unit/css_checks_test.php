@@ -787,7 +787,6 @@ test('image treatment ownership covers owned surfaces and their image/pseudo lay
         '.card-media::after',
         '.wp-block-cover > .wp-block-cover__background::after',
         '.card-media-tall picture',
-        '.feature-strip .card-media-thumb img',
         ':is(.card-media, .panel)',
     ] as $selector) {
         assert_true(CssChecks::selectorTargetsImageTreatment($selector), "owned: {$selector}");

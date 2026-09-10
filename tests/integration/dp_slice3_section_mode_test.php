@@ -168,7 +168,7 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
         $llm->queueJson(dp3_integration_direction());
         $llm->queueJson(dp3_integration_theme());
         $llm->queueJson(['sections' => [
-            dp3_integration_section('about-intro', 'About intro', 'centered-stack'),
+            dp3_integration_section('about-intro', 'About intro', 'bento-grid'),
             dp3_integration_section('about-process', 'About process', 'asymmetric-split'),
         ]]);
 

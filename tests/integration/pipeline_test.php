@@ -128,8 +128,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'text_placement' => 'centered', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'left-column', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'bento-grid', 'background' => 'tinted', 'vertical_density' => 'standard', 'text_placement' => 'centered', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'left-column', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order

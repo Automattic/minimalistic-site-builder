@@ -37,45 +37,30 @@ final class TypeTreatment
     }
 
     /**
-     * Tracking for the statement-lines register, per uppercase treatment. The
-     * site value is tuned for caps; sentence case at the same value sets too
-     * tight under `caps-tight` and far too open under `caps-tracked`.
-     *
-     * @var array<string,string>
-     */
-    private const STATEMENT_LINE_TRACKING = [
-        'caps-tight'   => '-0.02em',
-        'caps-tracked' => '0.01em',
-    ];
-
-    /**
-     * The statement-lines register: an opt-out from the site heading case for
-     * one archetype.
-     *
-     * A statement line carries a whole statement, not a label. Under an
-     * uppercase site treatment five stacked statements lose the word shapes a
-     * reader recognizes, and each line sets wider, so a statement that fits
-     * one line in sentence case wraps to two. That breaks the archetype's own
-     * premise. Under `caps-tight` and `caps-tracked` these lines keep the
-     * heading family and drop the caps.
+     * The uppercase treatments that ship a display kit.
      *
      * Every other treatment ships no kit: `lowercase` is a deliberate craft
      * voice on long lines, and `sentence`, `tight` and `title` never set caps.
+     *
+     * @var list<string>
+     */
+    private const CAPS_TREATMENTS = ['caps-tight', 'caps-tracked'];
+
+    /**
+     * The display register for an uppercase site heading case.
+     *
+     * Uppercase display lines set wider and taller than sentence case, so a
+     * headline that holds one line in sentence case wraps under caps. The kit
+     * tightens the display line height and balances the wrap.
      */
     public static function kitCss(mixed $treatment): ?string
     {
         $treatment = self::explicit($treatment);
-        if ($treatment === null || !isset(self::STATEMENT_LINE_TRACKING[$treatment])) {
+        if ($treatment === null || !in_array($treatment, self::CAPS_TREATMENTS, true)) {
             return null;
         }
-        $tracking = self::STATEMENT_LINE_TRACKING[$treatment];
 
         return <<<CSS
-
-            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
-                text-transform: none;
-                letter-spacing: {$tracking};
-            }
 
             /* The build sets the '{$treatment}' display line height. */
             .hero-composition__copy .wp-block-heading:is(h1, .has-display-font-size),
