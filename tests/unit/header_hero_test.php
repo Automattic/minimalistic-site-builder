@@ -449,16 +449,45 @@ test('reserveOverlayClearance marks only an opening that states no height', func
     // The shape that shipped the bug: a qualifying full-bleed opening cover
     // that is only as tall as its content, so its first line starts at the
     // band's own top padding — under the overlay header.
-    $unsized = str_replace(',"minHeight":92,"minHeightUnit":"vh"', '', hh_cover('92'));
-    $result = HeaderHeroStep::reserveOverlayClearance($unsized);
+    $result = HeaderHeroStep::reserveOverlayClearance(hh_protected_cover(null));
     assert_contains(HeaderHeroStep::OVERLAY_CLEARANCE_CLASS, $result['markup']);
     assert_eq(1, count($result['notes']));
 
     // A band that states its own height already seats its content clear of
     // the header, so every reviewed image-led opening is left as composed.
-    $sized = hh_cover('92');
+    $sized = hh_protected_cover('92');
     assert_eq($sized, HeaderHeroStep::reserveOverlayClearance($sized)['markup']);
     assert_eq([], HeaderHeroStep::reserveOverlayClearance($sized)['notes']);
+
+    // A height that survives only in the saved HTML still governs the render,
+    // so the delivered bytes decide, not the attributes alone.
+    $inlineOnly = str_replace(',"minHeight":92,"minHeightUnit":"vh"', '', hh_protected_cover('92'));
+    assert_contains('style="min-height:92vh"', $inlineOnly);
+    assert_eq($inlineOnly, HeaderHeroStep::reserveOverlayClearance($inlineOnly)['markup']);
+
+    // Every other band states its height under style.dimensions.
+    $stated = '<!-- wp:group {"backgroundColor":"contrast","style":{"dimensions":{"minHeight":"70vh"}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($stated, HeaderHeroStep::reserveOverlayClearance($stated)['markup']);
+});
+
+test('reserveOverlayClearance leaves a band whose row the reservation would break', function () {
+    // The kit reserves the zone inside a cover or above a flow group's first
+    // child. A flex or grid band would take that as one more item in the row
+    // and misalign the rest, so it is left alone rather than damaged.
+    $columns = '<!-- wp:columns {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-columns has-contrast-background-color has-background">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:columns -->';
+    assert_eq($columns, HeaderHeroStep::reserveOverlayClearance($columns)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($columns)['notes']);
+
+    $flex = '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"flex"}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($flex, HeaderHeroStep::reserveOverlayClearance($flex)['markup']);
 });
 
 test('reserveOverlayClearance reaches a protection-token surface and is idempotent', function () {
