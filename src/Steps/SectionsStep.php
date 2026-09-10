@@ -1382,13 +1382,9 @@ final class SectionsStep implements Step
     /**
      * Whether this build's host can turn an address into a real map.
      *
-     * Set by the caller at createProject time (CLI: --use-jetpack-maps). True
-     * adds prompts/jetpack-map.md to every section; false says nothing about
-     * maps, which leaves the system preamble's rule standing on its own.
-     *
-     * Deliberately separate from formPlaceholders(): owning a form backend and
-     * being able to geocode are different capabilities, and keeping them apart
-     * is what lets this contract ship to a host that has only the first one.
+     * Set by the caller at createProject time (CLI: --use-jetpack-maps). Its
+     * own key rather than formPlaceholders': a host can own a form backend and
+     * not be able to geocode, which is the state this ships into.
      */
     public static function mapPlaceholders(Project $project): bool
     {

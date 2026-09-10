@@ -18,18 +18,18 @@ class, whose only text is the map spec:
 
 ```html
 <!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->
-<p class="jetpack-map-placeholder">JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli | street</p>
+<p class="jetpack-map-placeholder">JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli</p>
 <!-- /wp:paragraph -->
 ```
 
 ### Spec Format
 
 ```
-JP_MAP: address | marker-title | scope
+JP_MAP: address | marker-title
 ```
 
 - `JP_MAP:` — Required prefix marker (exactly as written)
-- `|` — Pipe character used as the separator between the three values
+- `|` — Pipe character used as the separator between the two values
 - `address` — The address as SITE SPEC states it, copied rather than rewritten.
   The host geocodes this string, so keep whatever the spec gives — street,
   city, postcode, country — and add nothing it does not say. An address may
@@ -37,11 +37,6 @@ JP_MAP: address | marker-title | scope
 - `marker-title` — What the pin is called: the business or place name, written
   in the site's language. A visitor reads it, so it is a name, not a
   description. It may not contain `|`.
-- `scope` — How close the map sits. One of:
-  - `street` — a visitor needs the front door: one shop, studio, restaurant
-  - `neighborhood` — the surrounding blocks matter: a walkable area, a market
-  - `city` — the place is a city-wide presence rather than an address
-  - `region` — a service area rather than a place to visit
 
 ### Rules
 
@@ -71,6 +66,6 @@ JP_MAP: address | marker-title | scope
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->
-<p class="jetpack-map-placeholder">JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli | street</p>
+<p class="jetpack-map-placeholder">JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli</p>
 <!-- /wp:paragraph -->
 ```

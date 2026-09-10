@@ -60,7 +60,7 @@ test('by default a section is told nothing about maps at all', function () {
 test('--use-jetpack-maps swaps in the JP_MAP contract', function () {
     $prompt = jp_map_request_text(true);
 
-    assert_contains('JP_MAP: address | marker-title | scope', $prompt, 'the spec format is stated');
+    assert_contains('JP_MAP: address | marker-title', $prompt, 'the spec format is stated');
     assert_contains('jetpack-map-placeholder', $prompt, 'the placeholder block carries a locatable class');
 });
 
@@ -101,15 +101,12 @@ test('the map contract never asks the model for real map markup', function () {
 test('the map spec grammar is unambiguous enough to parse', function () {
     $contract = jp_map_contract();
 
-    assert_contains('JP_MAP: address | marker-title | scope', $contract, 'the spec format is stated');
+    assert_contains('JP_MAP: address | marker-title', $contract, 'the spec format is stated');
     // The host splits on this separator, so a value carrying one would make
     // the spec unparseable. The contract has to say so, for both free-text
     // values.
     assert_contains('An address may not contain `|`', $contract, 'the address separator is reserved');
     assert_contains('It may not contain `|`', $contract, 'the title separator is reserved too');
-    foreach (array_keys(MapPlaceholder::SCOPES) as $scope) {
-        assert_contains("`{$scope}`", $contract, "the {$scope} scope is documented");
-    }
 });
 
 test('map instructions stay inside the cached build layer of the section prompt', function () {
@@ -153,7 +150,7 @@ test('the map capability travels from createProject to the sections step', funct
 
 test('a well-formed map spec parses into what a host needs', function () {
     $found = MapPlaceholder::find(
-        jp_map_page('JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli | street'),
+        jp_map_page('JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli'),
     );
     assert_eq(1, count($found));
 
@@ -161,43 +158,28 @@ test('a well-formed map spec parses into what a host needs', function () {
     assert_true(is_array($parsed));
     assert_eq('14 Rue de Rivoli, 75004 Paris, France', $parsed['address'], 'commas in an address survive');
     assert_eq('Atelier Rivoli', $parsed['title']);
-    assert_eq('street', $parsed['scope']);
-    assert_eq(MapPlaceholder::SCOPES['street'], $parsed['zoom'], 'the scope word carries the zoom');
-});
-
-test('every scope resolves to a zoom level, in the order the words imply', function () {
-    $zooms = [];
-    foreach (array_keys(MapPlaceholder::SCOPES) as $scope) {
-        $parsed = MapPlaceholder::parse("JP_MAP: 1 Main St | Somewhere | {$scope}");
-        assert_true(is_array($parsed), "{$scope} is a scope the parser accepts");
-        $zooms[] = $parsed['zoom'];
-    }
-    $descending = $zooms;
-    rsort($descending);
-    assert_eq($descending, $zooms, 'closer scopes zoom in further');
 });
 
 test('a spec a host could not parse is caught instead of shipping as body text', function () {
     // Dashes where the contract says pipes: still a paragraph, so nothing else
     // in the pipeline would ever notice.
-    $joined = jp_map_validate('JP_MAP: 1 Main St - Somewhere - street', true);
+    $joined = jp_map_validate('JP_MAP: 1 Main St - Somewhere', true);
     assert_contains('unparseable map spec', $joined);
     assert_contains('pipe-separated parts', $joined);
 
-    assert_contains('unknown scope', jp_map_validate('JP_MAP: 1 Main St | Somewhere | close', true));
-    assert_contains('empty address', jp_map_validate('JP_MAP:  | Somewhere | street', true));
-    assert_contains('empty marker title', jp_map_validate('JP_MAP: 1 Main St |  | street', true));
+    assert_contains('empty address', jp_map_validate('JP_MAP:  | Somewhere', true));
+    assert_contains('empty marker title', jp_map_validate('JP_MAP: 1 Main St | ', true));
 });
 
 test('a clean map spec passes validation', function () {
-    $joined = jp_map_validate('JP_MAP: 1 Main St, Springfield | The Shop | street', true);
+    $joined = jp_map_validate('JP_MAP: 1 Main St, Springfield | The Shop', true);
 
     assert_true(!str_contains($joined, 'map spec'), "clean spec was flagged: {$joined}");
     assert_true(!str_contains($joined, 'map marker'), "clean spec was flagged: {$joined}");
 });
 
 test('a map marker in a build with no host to substitute it is a problem', function () {
-    $joined = jp_map_validate('JP_MAP: 1 Main St | The Shop | street', false);
+    $joined = jp_map_validate('JP_MAP: 1 Main St | The Shop', false);
 
     assert_contains('no map host', $joined);
 });
@@ -207,7 +189,7 @@ test('a map marker loose in the markup is caught, since the host only reads the 
     $project->writeJson('meta.json', ['prompt' => 'x', 'map_placeholders' => true]);
     $project->writeText(
         'plugin/pages/visit.html',
-        jp_map_page('JP_MAP: 1 Main St | The Shop | street')
+        jp_map_page('JP_MAP: 1 Main St | The Shop')
         . '<!-- wp:paragraph --><p>JP_MAP: elsewhere</p><!-- /wp:paragraph -->',
     );
     $joined = implode(' ', ThemeValidator::validate($project));
@@ -220,7 +202,7 @@ test('one contract never sees the other contract markers', function () {
     // Both counts are substring counts over the same page, so a page carrying
     // both placeholders must still report one of each rather than two of
     // either — otherwise the loose-marker arithmetic invents problems.
-    $page = jp_map_page('JP_MAP: 1 Main St | The Shop | street')
+    $page = jp_map_page('JP_MAP: 1 Main St | The Shop')
         . '<!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->'
         . '<p class="jetpack-form-placeholder">JP_FORM: contact | Email:email:required | Send</p>'
         . '<!-- /wp:paragraph -->';
@@ -234,7 +216,7 @@ test('one contract never sees the other contract markers', function () {
 test('stripping loose map markers keeps the placeholder and drops the rest', function () {
     $warnings = [];
     $files = [
-        'parts/page-visit--find.html' => jp_map_page('JP_MAP: 1 Main St | The Shop | street')
+        'parts/page-visit--find.html' => jp_map_page('JP_MAP: 1 Main St | The Shop')
             . '<!-- wp:paragraph --><p>JP_MAP</p><!-- /wp:paragraph -->',
     ];
 
@@ -250,7 +232,7 @@ test('the map placeholder block survives the passes that rewrite generated marku
     // The whole design rests on this: the marker has to still be there when
     // the host looks for it. Pin the two passes that rewrite section markup
     // before delivery, and the re-serializer fix-blocks runs it through.
-    $spec = 'JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli | street';
+    $spec = 'JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli';
     $markup = '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->' . "\n"
         . '<p class="jetpack-map-placeholder">' . $spec . '</p>' . "\n"
         . '<!-- /wp:paragraph -->';
@@ -274,7 +256,7 @@ test('a placeholder whose class lives only in the block comment still counts', f
     // pass that deletes markers no placeholder claims. Reading only the <p>
     // would throw this block away one step before it was repaired — and a map
     // has no injected fallback to bring it back.
-    $spec = 'JP_MAP: 1 Main St | The Shop | street';
+    $spec = 'JP_MAP: 1 Main St | The Shop';
     $markup = '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
         . '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
         . '<p>' . $spec . '</p><!-- /wp:paragraph -->';
@@ -298,7 +280,7 @@ test('a marker in a paragraph that claims no placeholder class is still loose', 
     // The widening above must not swallow the case it was never about: a bare
     // marker with no class anywhere is body copy the host never reads.
     $markup = '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
-        . '<!-- wp:paragraph --><p>JP_MAP: 1 Main St | The Shop | street</p><!-- /wp:paragraph -->';
+        . '<!-- wp:paragraph --><p>JP_MAP: 1 Main St | The Shop</p><!-- /wp:paragraph -->';
 
     assert_eq([], MapPlaceholder::find($markup), 'no class, no placeholder');
 
@@ -306,4 +288,97 @@ test('a marker in a paragraph that claims no placeholder class is still loose', 
     $out = SectionsStep::stripLooseMapMarkers(['parts/x.html' => $markup], $warnings);
     assert_eq(0, MapPlaceholder::markerCount($out['parts/x.html']), 'and the strip removes it');
     assert_contains('outside a jetpack-map-placeholder block', implode(' ', $warnings));
+});
+
+test('locating a placeholder uses the block parser, not a hand-rolled pattern', function () {
+    // Each of these was wrong while find() matched with its own regex. They
+    // are pinned here because the failure they cause is silent by design: the
+    // library accepts a spec the host cannot read, or hands the host a span
+    // that is not the block.
+    $spec = 'JP_MAP: 1 Main St | The Shop';
+    $tail = '<p class="jetpack-map-placeholder">' . $spec . '</p><!-- /wp:paragraph -->';
+
+    // A `>` inside the comment JSON is not the end of the comment.
+    assert_eq(1, count(MapPlaceholder::find(
+        '<!-- wp:paragraph {"className":"jetpack-map-placeholder","metadata":{"name":"Visit > Map"}} -->' . $tail,
+    )), 'a > in the block attributes');
+
+    // Nor inside a wrapper attribute.
+    assert_eq(1, count(MapPlaceholder::find(
+        '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
+        . '<p class="jetpack-map-placeholder" title="A > B">' . $spec . '</p><!-- /wp:paragraph -->',
+    )), 'a > in a wrapper attribute');
+
+    // A class is a token, and `-` does not end one.
+    assert_eq([], MapPlaceholder::find(
+        '<!-- wp:paragraph --><p class="wp-block-jetpack-map-placeholder-legacy">'
+        . $spec . '</p><!-- /wp:paragraph -->',
+    ), 'a longer hyphenated class is a different class');
+
+    // Either quote style is the same class.
+    assert_eq(1, count(MapPlaceholder::find(
+        "<!-- wp:paragraph --><p class='jetpack-map-placeholder'>" . $spec . "</p><!-- /wp:paragraph -->",
+    )), 'single-quoted class');
+});
+
+test('a placeholder with no closing delimiter is skipped, not guessed at', function () {
+    // The host substr_replaces the `block` string. A span that ran past the
+    // dropped closer would take the following blocks out with it.
+    $markup = '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
+        . '<p class="jetpack-map-placeholder">JP_MAP: 1 Main St | The Shop</p>'
+        . '<!-- wp:paragraph --><p>Open daily</p><!-- /wp:paragraph -->';
+
+    assert_eq([], MapPlaceholder::find($markup), 'no safe end offset, no placeholder');
+});
+
+test('the block a host substitutes is exactly the block, nested or not', function () {
+    $spec = 'JP_MAP: 1 Main St | The Shop';
+    $placeholder = '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
+        . '<p class="jetpack-map-placeholder">' . $spec . '</p><!-- /wp:paragraph -->';
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . $placeholder
+        . '</div><!-- /wp:group -->';
+
+    $found = MapPlaceholder::find($markup);
+    assert_eq(1, count($found));
+    assert_eq($placeholder, $found[0]['block'], 'the span is the block and nothing around it');
+
+    // What the host then does with it must leave the siblings alone.
+    $substituted = str_replace($found[0]['block'], '<!-- wp:jetpack/map /-->', $markup);
+    assert_contains('<h2>Find us</h2>', $substituted);
+    assert_true(!str_contains($substituted, $spec), 'and the spec is gone');
+});
+
+test('the strip and the lookup agree on what a placeholder is', function () {
+    // They did not while one parsed and the other matched with its own
+    // pattern: a block find() skipped as structurally unsafe was one the
+    // strip deleted, taking a real placeholder with it and reporting the
+    // removal as machine text no host would have read.
+    $markup = '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
+        . '<p class="jetpack-map-placeholder">JP_MAP: 1 Main St <!-- wp:foo {bad --> | The Shop</p>'
+        . '<!-- /wp:paragraph -->';
+
+    $warnings = [];
+    $out = SectionsStep::stripLooseMapMarkers(['parts/x.html' => $markup], $warnings);
+
+    assert_eq([], MapPlaceholder::find($markup), 'the lookup will not touch it');
+    assert_contains('JP_MAP', $out['parts/x.html'], 'so the strip must not either');
+    assert_eq([], $warnings);
+});
+
+test('several loose markers in one file all go, and the siblings stay put', function () {
+    $markup = '<!-- wp:paragraph --><p>JP_MAP: one</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>JP_MAP: two</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Open daily</p><!-- /wp:paragraph -->';
+
+    $warnings = [];
+    $out = SectionsStep::stripLooseMapMarkers(['parts/x.html' => $markup], $warnings);
+
+    assert_eq(0, MapPlaceholder::markerCount($out['parts/x.html']));
+    assert_contains('<h2>Find us</h2>', $out['parts/x.html'], 'the heading between them survives');
+    assert_contains('Open daily', $out['parts/x.html'], 'and so does the paragraph after them');
+    assert_contains('authored=2 JP_MAP marker(s)', implode(' ', $warnings));
 });

@@ -148,18 +148,11 @@ final class SectionUnit extends AbstractPageSectionUnit
                 ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
                 [],
             ),
-            // Maps have no off-mode counterpart to no-forms.md. The system
-            // preamble already tells every unit that a brief asking for a map
-            // states a content need the build decides how to ship, and that is
-            // the whole default: a build with no map host says nothing further
-            // about maps than it did before this contract existed.
-            //
-            // It is not a guarantee that no map ships. MarkupSanitizer drops
-            // an `<iframe>`, but a `wp:embed` block serializes to a figure and
-            // a bare URL, which it keeps — so an off-flag build can still
-            // deliver a third-party map embed. That predates this contract and
-            // is not what the flag is for; closing it means a real off-mode
-            // prompt and a validator check, on every default build.
+            // No off-mode counterpart to no-forms.md: the system preamble
+            // already covers a brief that asks for a map. That is not a
+            // guarantee none ships — MarkupSanitizer drops an `<iframe>` but
+            // keeps a `wp:embed`, so an off-flag build can still deliver a
+            // third-party map embed, as it could before this contract existed.
             'map_instructions'   => ($input['map_placeholders'] ?? false)
                 ? $this->renderer->render('jetpack-map.md', [])
                 : '',

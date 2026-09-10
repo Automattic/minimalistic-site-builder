@@ -99,19 +99,9 @@ final class ThemeValidator
         // grammars, so the library checks them: a malformed one is invisible
         // to every downstream step and ships as literal grey body text on the
         // page. Off the flag, the marker must not appear at all.
-        //
-        // Both capabilities are read once, not once per file: readJson does no
-        // caching and throws on malformed JSON, so resolving them inside the
-        // loop would re-decode meta.json for every delivered file and turn a
-        // corrupt one into a validator that throws on every build rather than
-        // only on a build that actually carries a marker.
-        $hosts = [
-            'form' => Steps\SectionsStep::formPlaceholders($project),
-            'map'  => Steps\SectionsStep::mapPlaceholders($project),
-        ];
         foreach ($checked as $rel) {
             if ($project->exists($rel)) {
-                foreach (self::placeholderProblems($project->readText($rel), $rel, $hosts) as $problem) {
+                foreach (self::placeholderProblems($project, $rel) as $problem) {
                     $problems[] = $problem;
                 }
             }
@@ -725,74 +715,58 @@ final class ThemeValidator
      * paragraph text, so a spec no host can read reaches the visitor as
      * literal grey body copy with nothing else in the pipeline noticing.
      *
-     * @param array{form:bool, map:bool} $hosts which capabilities this build's host has
      * @return list<string>
      */
-    private static function placeholderProblems(string $markup, string $rel, array $hosts): array
+    private static function placeholderProblems(Project $project, string $rel): array
     {
-        return array_merge(
-            self::specProblems(
-                $rel,
-                $markup,
-                $hosts['form'],
-                'form',
+        $markup = $project->readText($rel);
+        $contracts = [
+            'form' => [
                 FormPlaceholder::MARKER_NAME,
                 FormPlaceholder::CLASS_NAME,
                 FormPlaceholder::parse(...),
-            ),
-            self::specProblems(
-                $rel,
-                $markup,
-                $hosts['map'],
-                'map',
+                Steps\SectionsStep::formPlaceholders(...),
+            ],
+            'map' => [
                 MapPlaceholder::MARKER_NAME,
                 MapPlaceholder::CLASS_NAME,
                 MapPlaceholder::parse(...),
-            ),
-        );
-    }
-
-    /**
-     * One contract's placeholders in one file.
-     *
-     * @param callable(string):(array<mixed>|string) $parse the contract's own parser
-     * @return list<string>
-     */
-    private static function specProblems(
-        string $rel,
-        string $markup,
-        bool $enabled,
-        string $noun,
-        string $markerName,
-        string $className,
-        callable $parse,
-    ): array {
-        $markers = HostPlaceholder::markerCount($markup, $markerName);
-        if ($markers === 0) {
-            return [];
-        }
-
-        if (!$enabled) {
-            return ["{$rel}: contains a {$markerName}: marker but this build has no"
-                . " {$noun} host — disposition: rebuild the section, or enable {$noun} placeholders"];
-        }
+                Steps\SectionsStep::mapPlaceholders(...),
+            ],
+        ];
 
         $problems = [];
-        $placeholders = HostPlaceholder::find($markup, $markerName, $className);
-        foreach ($placeholders as $placeholder) {
-            $parsed = $parse($placeholder['spec']);
-            if (is_string($parsed)) {
-                $problems[] = "{$rel}: unparseable {$noun} spec \"{$placeholder['spec']}\" ({$parsed})"
-                    . ' — disposition: no host can substitute this; regenerate the section';
+        foreach ($contracts as $noun => [$markerName, $className, $parse, $host]) {
+            $markers = HostPlaceholder::markerCount($markup, $markerName);
+            // The capability is read only past this gate. readJson throws on
+            // malformed JSON, so a corrupt meta.json should fail the builds
+            // that carry a marker, not every build in the repo.
+            if ($markers === 0) {
+                continue;
             }
-        }
 
-        // A marker outside a placeholder block is text the host never reads.
-        $loose = $markers - count($placeholders);
-        if ($loose > 0) {
-            $problems[] = "{$rel}: {$loose} {$noun} marker(s) outside a {$className} block"
-                . ' — disposition: the host only substitutes markers inside that block,'
-                . ' so these would ship as visible text';
+            if (!$host($project)) {
+                $problems[] = "{$rel}: contains a {$markerName}: marker but this build has no"
+                    . " {$noun} host — disposition: rebuild the section, or enable {$noun} placeholders";
+                continue;
+            }
+
+            $placeholders = HostPlaceholder::find($markup, $markerName, $className);
+            foreach ($placeholders as $placeholder) {
+                $parsed = $parse($placeholder['spec']);
+                if (is_string($parsed)) {
+                    $problems[] = "{$rel}: unparseable {$noun} spec \"{$placeholder['spec']}\" ({$parsed})"
+                        . ' — disposition: no host can substitute this; regenerate the section';
+                }
+            }
+
+            // A marker outside a placeholder block is text the host never reads.
+            $loose = $markers - count($placeholders);
+            if ($loose > 0) {
+                $problems[] = "{$rel}: {$loose} {$noun} marker(s) outside a {$className} block"
+                    . ' — disposition: the host only substitutes markers inside that block,'
+                    . ' so these would ship as visible text';
+            }
         }
 
         return $problems;
