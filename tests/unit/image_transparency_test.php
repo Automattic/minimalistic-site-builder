@@ -287,3 +287,48 @@ test('isKeyed treats near-transparent corners as keyed', function () {
     }
     assert_true(ImageTransparency::isKeyed($bytes), 'PNG quantisation dust must not drop a keyed mark');
 });
+
+
+test('keyOutBackground keeps a solid object\'s pale highlight opaque when unmatting is off', function () {
+    if (!ImageTransparency::canUnmatteEdges()) {
+        skip_test('edge unmatting needs ImageMagick 7');
+    }
+    // A clay sphere: a red disc with a pale pink highlight, on flat white.
+    $make = static function (): string {
+        $im = new Imagick();
+        $im->newImage(80, 80, new ImagickPixel('white'));
+        $draw = new ImagickDraw();
+        $draw->setFillColor(new ImagickPixel('red'));
+        $draw->circle(40, 40, 40, 62);
+        $draw->setFillColor(new ImagickPixel('rgb(255,210,220)')); // the highlight: mostly white
+        $draw->circle(32, 32, 32, 38);
+        $im->drawImage($draw);
+        $im->setImageFormat('png');
+        return $im->getImageBlob();
+    };
+    $probe = static function (string $png): array {
+        $px = new Imagick();
+        $px->readImageBlob($png);
+        $w = $px->getImageWidth();
+        $h = $px->getImageHeight();
+        $corner = $px->getImagePixelColor(0, 0)->getColorValue(Imagick::COLOR_ALPHA);
+        $minAlpha = 1.0;
+        for ($y = 0; $y < $h; $y += 2) {
+            for ($x = 0; $x < $w; $x += 2) {
+                $p = $px->getImagePixelColor($x, $y);
+                $a = $p->getColorValue(Imagick::COLOR_ALPHA);
+                // inside the sphere: any pixel with real red
+                if ($a > 0.02 && $p->getColorValue(Imagick::COLOR_RED) > 0.9) {
+                    $minAlpha = min($minAlpha, $a);
+                }
+            }
+        }
+        return ['corner' => $corner, 'minAlpha' => $minAlpha];
+    };
+
+    $unmatted = $probe(ImageTransparency::keyOutBackground($make()));
+    $solid = $probe(ImageTransparency::keyOutBackground($make(), false));
+    assert_true($unmatted['corner'] < 0.02 && $solid['corner'] < 0.02, 'the white backdrop is keyed either way');
+    assert_true($unmatted['minAlpha'] < 0.6, 'unmatting reads the pale highlight as anti-aliasing and thins it');
+    assert_true($solid['minAlpha'] > 0.98, 'a solid cutout keeps its highlight fully opaque');
+});

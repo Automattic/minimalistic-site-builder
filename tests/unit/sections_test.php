@@ -174,11 +174,11 @@ test('sections fans out across every page and gives each section its own page co
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
-            ['slug' => 'home-details', 'title' => 'Home Details', 'role' => 'closing', 'type' => 'details', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the hero above and the footer below.'],
+            ['slug' => 'home-details', 'title' => 'Home Details', 'role' => 'closing', 'type' => 'details', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the hero above and the footer below.'],
         ]),
         sections_page('menu', [
-            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the bread list below.'],
-            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the tinted hero above and the footer below.'],
+            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'bento-grid', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the bread list below.'],
+            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the tinted hero above and the footer below.'],
         ], ['purpose' => 'What we bake']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -233,7 +233,7 @@ test('sections passes the design direction and the front-page edge briefs to chr
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-introduction', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header and about section.'],
-            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'spacious', 'handoff' => 'Between the hero and footer.'],
+            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'vertical_density' => 'spacious', 'handoff' => 'Between the hero and footer.'],
         ]),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -244,7 +244,7 @@ test('sections passes the design direction and the front-page edge briefs to chr
     assert_contains('Full-viewport cover photo.', $reqs['header']['prompt']);
     assert_contains('Title: About', $reqs['footer']['prompt']);
     assert_contains('Role: closing', $reqs['footer']['prompt']);
-    assert_contains('Layout archetype: centered-stack', $reqs['footer']['prompt']);
+    assert_contains('Layout archetype: bento-grid', $reqs['footer']['prompt']);
     assert_contains('Background: base', $reqs['footer']['prompt']);
     assert_true(
         !str_contains($reqs['footer']['prompt'], 'Full-viewport cover photo.'),
@@ -490,61 +490,6 @@ test('sections persists the deterministic plan repairs back into pages.json', fu
     $report = $project->readText('logs/sections.txt');
     assert_contains("role '' corrected to 'hero'", $report);
     assert_contains("missing semantic type; defaulted to 'content'", $report);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('sections persists ambiguous list-thumb warnings and delivers that row unchanged', function () {
-    [$project, $tmp] = sections_fixture();
-    $ambiguousRow = trim(<<<'HTML'
-<!-- wp:columns {"className":"list-thumb-flush"} -->
-<div class="wp-block-columns list-thumb-flush">
-<!-- wp:column {"width":"18%"} -->
-<div class="wp-block-column" style="flex-basis:18%">
-<!-- wp:image {"className":"card-media-thumb"} -->
-<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>
-<!-- /wp:image -->
-</div>
-<!-- /wp:column -->
-<!-- wp:column {"width":"72%"} -->
-<div class="wp-block-column" style="flex-basis:72%">
-<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Row title</h3><!-- /wp:heading -->
-<!-- wp:paragraph --><p>One concise line.</p><!-- /wp:paragraph -->
-</div>
-<!-- /wp:column -->
-<!-- wp:column {"width":"10%"} -->
-<div class="wp-block-column" style="flex-basis:10%">
-<!-- wp:paragraph --><p>Unexpected.</p><!-- /wp:paragraph -->
-</div>
-<!-- /wp:column -->
-</div>
-<!-- /wp:columns -->
-HTML);
-
-    $llm = new FakeLlm();
-    $llm->queueText('OK');
-    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
-    $llm->queueText($ambiguousRow);
-
-    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-
-    assert_eq(
-        $ambiguousRow . "\n",
-        $project->readText('theme/parts/page-home--about.html'),
-        'the ambiguous row is delivered byte-for-byte apart from the project file terminator',
-    );
-    assert_contains('<h2>Hero</h2>', $project->readText('theme/parts/page-home--hero.html'));
-    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
-    foreach ([
-        "file='theme/parts/page-home--about.html'",
-        "block='wp:columns[0]'",
-        '3 direct columns and 3 direct blocks instead of exactly two columns',
-        'delivered=unchanged',
-        'disposition=',
-    ] as $context) {
-        assert_contains($context, $warnings);
-    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -960,8 +905,8 @@ test('sections replaces a complete but invalid interior opening at its key and p
             ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between hero and footer.'],
         ]),
         sections_page('menu', [
-            ['slug' => 'menu-opening', 'title' => 'Menu Opening', 'role' => 'hero', 'type' => 'opening', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'vertical_density' => 'compact', 'handoff' => 'Between header and breads.'],
-            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between opening and footer.'],
+            ['slug' => 'menu-opening', 'title' => 'Menu Opening', 'role' => 'hero', 'type' => 'opening', 'layout_archetype' => 'bento-grid', 'background' => 'contrast', 'vertical_density' => 'compact', 'handoff' => 'Between header and breads.'],
+            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between opening and footer.'],
         ]),
     ]]);
     $llm = new FakeLlm();
@@ -1121,7 +1066,7 @@ test('chrome nav rules follow the page count: anchors for one page, inner pages 
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
         ]),
         sections_page('menu', [
-            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'bento-grid', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
         ]),
     ]]);
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
@@ -1365,7 +1310,7 @@ test('the floor is not applied to the inner-page design plan', function () {
     $llm = new FakeLlm();
     $llm->queueJson(['sections' => [
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Open the page.', 'content_notes' => 'Real copy for the demo site.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Sits under the header.', 'primary_action' => null],
-        ['slug' => 'closing', 'title' => 'Next Step', 'type' => 'cta', 'purpose' => 'Close the page.', 'content_notes' => 'Real closing copy for the demo site.', 'layout_archetype' => 'centered-stack', 'background' => $surface, 'vertical_density' => 'standard', 'handoff' => "Closes on the {$surface} band before the footer.", 'primary_action' => null],
+        ['slug' => 'closing', 'title' => 'Next Step', 'type' => 'cta', 'purpose' => 'Close the page.', 'content_notes' => 'Real closing copy for the demo site.', 'layout_archetype' => 'bento-grid', 'background' => $surface, 'vertical_density' => 'standard', 'handoff' => "Closes on the {$surface} band before the footer.", 'primary_action' => null],
     ]]);
 
     $planned = (new \Automattic\SiteBuild\Steps\PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))
@@ -1523,18 +1468,56 @@ test('the header nav rule keeps its row shape out of the stacked archetypes (BIG
     assert_contains('this site is ONE page', SectionsStep::navRuleFor(1, 'split-nav'));
 });
 
+test('sections records section-label removals and preserves sibling content', function () {
+    [$project, $tmp] = sections_fixture();
+    $sibling = '<!-- wp:paragraph --><p>Sibling content stays intact.</p><!-- /wp:paragraph -->';
+    $column = static fn (string $content): string => '<!-- wp:column --><div class="wp-block-column">' . $content . '</div><!-- /wp:column -->';
+    $row = static fn (string $content): string => '<!-- wp:columns --><div class="wp-block-columns">' . $content . '</div><!-- /wp:columns -->';
+    $label = static fn (string $text): string => '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">' . $text . '</p><!-- /wp:paragraph -->';
+    $deepContent = '<!-- wp:paragraph --><p>Nested content stays intact.</p><!-- /wp:paragraph -->';
+    $nested = $row($column($label('Outer')) . $column($row($column($label('Inner')) . $column($deepContent))));
+    $raw = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"className":"section-badge"} --><p class="section-badge">1</p><!-- /wp:paragraph -->'
+        . $nested . $sibling . '</div><!-- /wp:group -->';
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText($raw);
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $delivered = $project->readText('theme/parts/page-home--about.html');
+    assert_contains($sibling, $delivered);
+    assert_contains($deepContent . $sibling . '</div><!-- /wp:group -->', $delivered);
+    assert_true(!str_contains($delivered, 'wp:column'));
+    assert_true(!str_contains($delivered, 'class="section-badge"'));
+    assert_true($project->exists('theme/parts/page-home--hero.html'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    foreach (["file='theme/parts/page-home--about.html'", 'paragraph.section-badge', 'authored=', 'delivered=removed', 'disposition='] as $context) {
+        assert_contains($context, $warnings);
+    }
+    foreach (['Outer', 'Inner'] as $text) {
+        assert_contains($text, $warnings);
+    }
+    assert_contains('paragraph.side-label', $warnings);
+    $again = \Automattic\SiteBuild\SectionLabel::normalize($delivered, 'none', 'page-home--about');
+    assert_eq($delivered, $again['markup']);
+    assert_eq([], $again['warnings']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections records a recipe media removal and preserves the other section', function () {
     [$project, $tmp] = sections_fixture();
     try {
         $pages = $project->readJson('pages.json');
-        $pages['pages'][0]['sections'][1]['layout_archetype'] = 'statement-lines';
+        $pages['pages'][0]['sections'][1]['layout_archetype'] = 'feature-row-hairlines';
         $pages['pages'][0]['sections'][] = array_merge($pages['pages'][0]['sections'][1], [
-            'slug' => 'contact', 'layout_archetype' => 'centered-stack', 'type' => 'contact',
+            'slug' => 'contact', 'layout_archetype' => 'bento-grid', 'type' => 'contact',
         ]);
         $project->writeJson('pages.json', $pages);
         $text = '<!-- wp:paragraph --><p>Keep the complete service description.</p><!-- /wp:paragraph -->';
         $image = '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/unplanned.jpg" alt="Unplanned image"/></figure><!-- /wp:image -->';
-        $sibling = '<!-- wp:group {"className":"section-composition--centered-stack","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--centered-stack"><!-- wp:paragraph --><p>Contact the team.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+        $sibling = '<!-- wp:group {"className":"section-composition--bento-grid","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--bento-grid"><!-- wp:paragraph --><p>Contact the team.</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
         $llm = new FakeLlm();
         foreach (['OK', '<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->',
             '<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->',

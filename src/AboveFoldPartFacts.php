@@ -792,6 +792,7 @@ final class AboveFoldPartFacts
             'is-hidden',
             'hidden-by-default',
             'hero-entrance',
+            'word-reveal',
             'reveal',
             'reveal-up',
             'reveal-fade',

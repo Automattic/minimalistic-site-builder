@@ -8,7 +8,72 @@
 (function () {
     var root = document.documentElement;
     var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .reveal-blur, '
-        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *';
+        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *, .count-up';
+    var WORD_CLASS = 'word-reveal__word';
+    var WORD_INLINE = /^(?:A|ABBR|B|EM|I|SPAN|STRONG|SUB|SUP|U|MARK|SMALL)$/;
+
+    // Wrap each word of a `.word-reveal` heading in an indexed span so the
+    // kit can stagger them on load (a word reveal is a hero-entrance, not a
+    // scroll reveal: the observer would mark a first-viewport target static).
+    // Inline emphasis (a `.emph` span, <em>, <a>) is walked into, not
+    // flattened; any other child element makes the heading unsplittable and
+    // it stays whole and visible. Runs before motion-ready so the split
+    // words start their staggered entrance from the first painted frame.
+    function splitWords() {
+        var headings = document.querySelectorAll('.word-reveal:not(.word-reveal--split)');
+        Array.prototype.forEach.call(headings, function (heading) {
+            var index = 0;
+            var splittable = true;
+            var walk = function (node) {
+                var children = Array.prototype.slice.call(node.childNodes);
+                children.forEach(function (child) {
+                    if (child.nodeType === 3) {
+                        var parts = child.nodeValue.split(/(\s+)/);
+                        if (parts.length === 1 && !/\S/.test(parts[0])) {
+                            return;
+                        }
+                        var fragment = document.createDocumentFragment();
+                        parts.forEach(function (part) {
+                            if (part === '') {
+                                return;
+                            }
+                            if (!/\S/.test(part)) {
+                                fragment.appendChild(document.createTextNode(part));
+                                return;
+                            }
+                            var span = document.createElement('span');
+                            span.className = WORD_CLASS;
+                            span.style.setProperty('--word-index', String(index));
+                            span.textContent = part;
+                            index += 1;
+                            fragment.appendChild(span);
+                        });
+                        node.replaceChild(fragment, child);
+                    } else if (child.nodeType === 1) {
+                        if (child.tagName === 'BR') {
+                            return;
+                        }
+                        if (!WORD_INLINE.test(child.tagName)) {
+                            splittable = false;
+                            return;
+                        }
+                        walk(child);
+                    }
+                });
+            };
+            var original = heading.innerHTML;
+            try {
+                walk(heading);
+                if (!splittable || index === 0) {
+                    heading.innerHTML = original;
+                    return;
+                }
+                heading.classList.add('word-reveal--split');
+            } catch (error) {
+                heading.innerHTML = original;
+            }
+        });
+    }
 
     // This callback is replaced after setup so keyboard focus can also
     // unobserve a pending target. Before DOMContentLoaded, the default still
@@ -25,22 +90,168 @@
         var target = event.target;
         while (target && target !== root) {
             if (typeof target.matches === 'function'
-                && (target.matches(ENTRANCE_SELECTOR) || target.matches('.hero-entrance'))) {
+                && (target.matches(ENTRANCE_SELECTOR) || target.matches('.hero-entrance, .word-reveal'))) {
                 revealFocused(target);
             }
             target = target.parentElement;
         }
     }, true);
 
-    if (!('IntersectionObserver' in window)
-        || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!('IntersectionObserver' in window) || motionPreference.matches) {
         return;
     }
     root.classList.add('motion-js');
+    var restoreMarquees = [];
+    var activeCounters = [];
+
+    // Keep this listener after entrance observers finish, and on pages with
+    // only a marquee. CSS can stop animation but cannot undo repeated DOM.
+    function honorReducedMotion() {
+        if (!motionPreference.matches) {
+            return;
+        }
+        restoreMarquees.splice(0).forEach(function (restore) { restore(); });
+        activeCounters.slice().forEach(function (finish) { finish(); });
+    }
+    if (typeof motionPreference.addEventListener === 'function') {
+        motionPreference.addEventListener('change', honorReducedMotion);
+    } else if (typeof motionPreference.addListener === 'function') {
+        motionPreference.addListener(honorReducedMotion);
+    }
+
+
+    // Build each `.marquee` paragraph into a track of two identical groups
+    // of repeated items (frm W8c): the CSS loop translates the track by
+    // half, so the clone makes the seam invisible. The first item keeps the
+    // readable text; every repeat is hidden from assistive tech. Runs before
+    // motion-ready and only under motion-js, so reduced motion and no-JS
+    // keep the plain static line.
+    function buildMarquees() {
+        if (motionPreference.matches) { return; }
+        var marquees = document.querySelectorAll('.marquee:not(.marquee--built)');
+        Array.prototype.forEach.call(marquees, function (marquee) {
+            var text = (marquee.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text === '') {
+                return;
+            }
+            var originalNodes = Array.prototype.slice.call(marquee.childNodes);
+            var addedTabIndex = !marquee.hasAttribute('tabindex');
+            restoreMarquees.push(function () {
+                var focused = document.activeElement;
+                var restoreFocus = focused && focused !== marquee && marquee.contains(focused);
+                marquee.textContent = '';
+                originalNodes.forEach(function (node) { marquee.appendChild(node); });
+                marquee.classList.remove('marquee--built');
+                marquee.classList.add('marquee--static');
+                if (addedTabIndex) { marquee.removeAttribute('tabindex'); }
+                if (restoreFocus) { focused.focus({ preventScroll: true }); }
+            });
+            var group = document.createElement('span');
+            group.className = 'marquee__group';
+            var makeItem = function (hidden) {
+                var item = document.createElement('span');
+                item.className = 'marquee__item';
+                originalNodes.forEach(function (node) {
+                    item.appendChild(hidden ? node.cloneNode(true) : node);
+                });
+                if (hidden) {
+                    item.setAttribute('aria-hidden', 'true');
+                    item.setAttribute('inert', '');
+                    Array.prototype.forEach.call(item.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
+                }
+                return item;
+            };
+            group.appendChild(makeItem(false));
+            marquee.textContent = '';
+            marquee.appendChild(group);
+            var guard = 0;
+            while (group.scrollWidth < marquee.clientWidth && guard < 24) {
+                group.appendChild(makeItem(true));
+                guard++;
+            }
+            var clone = group.cloneNode(true);
+            clone.setAttribute('aria-hidden', 'true');
+            clone.setAttribute('inert', '');
+            Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
+            Array.prototype.forEach.call(clone.querySelectorAll('.marquee__item'), function (item) {
+                item.setAttribute('aria-hidden', 'true');
+            });
+            var track = document.createElement('span');
+            track.className = 'marquee__track';
+            track.appendChild(group);
+            track.appendChild(clone);
+            marquee.appendChild(track);
+            marquee.classList.add('marquee--built');
+            if (addedTabIndex) { marquee.setAttribute('tabindex', '0'); }
+        });
+    }
+
+    // Transparent cards need the same solid surface they were readable on,
+    // not a new palette color that can fight authored or nested text colors.
+    // If that surface is an image or translucent paint, keep the normal layout.
+    function buildStacks() {
+        function transparent(color) {
+            return color === 'transparent' || /^rgba\([^)]*,\s*0\s*\)$/.test(color);
+        }
+        function opaque(color) {
+            return /^rgb\(/.test(color) || /^rgba\([^)]*,\s*1\s*\)$/.test(color);
+        }
+        function backingSurface(card) {
+            var ancestor = card.parentElement;
+            while (ancestor) {
+                var style = window.getComputedStyle(ancestor);
+                if (style.backgroundImage !== 'none') { return null; }
+                if (opaque(style.backgroundColor)) { return style.backgroundColor; }
+                if (!transparent(style.backgroundColor)) { return null; }
+                ancestor = ancestor.parentElement;
+            }
+            return null; // The browser canvas may follow a different color scheme.
+        }
+        Array.prototype.forEach.call(document.querySelectorAll('.sticky-stack'), function (stack) {
+            var backing = [];
+            var cards = Array.prototype.slice.call(stack.children);
+            if (cards.length < 2 || cards.length > 6) { return; }
+            var ready = cards.every(function (card) {
+                var color = window.getComputedStyle(card).backgroundColor;
+                if (opaque(color)) { return true; }
+                if (!transparent(color)) { return false; }
+                var surface = backingSurface(card);
+                if (surface === null) { return false; }
+                backing.push({ card: card, surface: surface });
+                return true;
+            });
+            if (!ready) { return; }
+            backing.forEach(function (entry) {
+                entry.card.style.setProperty('--motion-stack-background', entry.surface);
+                entry.card.classList.add('motion-stack-backed');
+            });
+            stack.classList.add('sticky-stack--ready');
+            // Authored !important paint can still win. Roll back the whole
+            // stack rather than pinning even one transparent card over text.
+            if (!backing.every(function (entry) {
+                return window.getComputedStyle(entry.card).backgroundColor === entry.surface;
+            })) {
+                stack.classList.remove('sticky-stack--ready');
+                backing.forEach(function (entry) {
+                    entry.card.classList.remove('motion-stack-backed');
+                    entry.card.style.removeProperty('--motion-stack-background');
+                });
+            }
+        });
+    }
 
     function reveal() {
+        // The preference can change between script loading and DOM readiness.
+        if (motionPreference.matches) {
+            root.classList.remove('motion-js');
+            return;
+        }
         var targets;
         try {
+            splitWords();
+            buildMarquees();
+            buildStacks();
             targets = Array.prototype.slice.call(document.querySelectorAll(ENTRANCE_SELECTOR));
             targets.forEach(function (target) {
                 target.classList.add('motion-target');
@@ -127,8 +338,88 @@
             });
         }
 
+        // Count a figure up from zero when its block enters (frm W8b). The
+        // authored text stays the source of truth: prefix, thousands
+        // separators, decimals and suffix are preserved, only the digits
+        // move. Static paths (reduced motion, motion-skip, no JS) never call
+        // this, so the final figure is what they show.
+        function startCountUp(target) {
+            if (motionPreference.matches || !target.classList.contains('count-up') || target.classList.contains('motion-skip') || target.getAttribute('data-count-started') === 'true') {
+                return;
+            }
+            target.setAttribute('data-count-started', 'true');
+            var originalNodes = Array.prototype.slice.call(target.childNodes);
+            var original = (target.textContent || '').trim();
+            var match = /^([^0-9]*)([0-9][0-9,.\u00a0 ]*[0-9]|[0-9])(.*)$/.exec(original);
+            if (!match) {
+                return;
+            }
+            var prefix = match[1];
+            var digits = match[2];
+            var suffix = match[3];
+            var separator = /,/.test(digits) ? ',' : '';
+            var decimalMatch = /\.([0-9]+)$/.exec(digits);
+            var decimals = decimalMatch ? decimalMatch[1].length : 0;
+            var finalValue = parseFloat(digits.replace(/[,\u00a0 ]/g, ''));
+            if (isNaN(finalValue)) {
+                return;
+            }
+            var durationText = getComputedStyle(root).getPropertyValue('--motion-count-duration');
+            var duration = parseFloat(durationText) || 1400;
+            if (/s\s*$/.test(durationText) && !/ms\s*$/.test(durationText)) {
+                duration = duration * 1000;
+            }
+            var format = function (value) {
+                var fixed = value.toFixed(decimals);
+                if (separator !== '') {
+                    var parts = fixed.split('.');
+                    parts[0] = parts[0].replace(/\B(?=([0-9]{3})+(?![0-9]))/g, separator);
+                    fixed = parts.join('.');
+                }
+                return prefix + fixed + suffix;
+            };
+            var start = null;
+            var frame = null;
+            var running = true;
+            function finishCount() {
+                if (!running) { return; }
+                running = false;
+                target.removeAttribute('data-count-running');
+                if (frame !== null) { window.cancelAnimationFrame(frame); }
+                target.textContent = '';
+                originalNodes.forEach(function (node) { target.appendChild(node); });
+                var index = activeCounters.indexOf(finishCount);
+                if (index !== -1) { activeCounters.splice(index, 1); }
+            }
+            var step = function (now) {
+                if (!running) { return; }
+                // Check again at the frame boundary even if the media-query
+                // change event has not been delivered yet.
+                if (motionPreference.matches || target.classList.contains('motion-skip')) {
+                    finishCount();
+                    return;
+                }
+                if (start === null) {
+                    start = now;
+                }
+                var progress = Math.min(1, (now - start) / duration);
+                var eased = 1 - Math.pow(1 - progress, 3);
+                if (progress >= 1) {
+                    finishCount();
+                    return;
+                }
+                target.textContent = format(finalValue * eased);
+                frame = window.requestAnimationFrame(step);
+            };
+            activeCounters.push(finishCount);
+            target.setAttribute('data-count-running', 'true');
+            target.textContent = format(0);
+            frame = window.requestAnimationFrame(step);
+        }
+
         function show(target) {
             target.classList.add('is-visible');
+            startCountUp(target);
             if (observer) {
                 try {
                     observer.unobserve(target);

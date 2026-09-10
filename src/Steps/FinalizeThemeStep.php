@@ -6,12 +6,15 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\TypeTreatment;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
-use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -59,7 +62,7 @@ use Automattic\SiteBuild\Warnings;
  *           kit where appropriate, or a render_block_data adapter that lets
  *           Core apply the one committed duotone preset to content imagery.
  *         - for a non-mixed image-crop commitment, writes and enqueues the
- *           build-owned crop kit that derives card, thumbnail, and feature
+ *           build-owned crop kit that derives card and feature
  *           media proportions from the one site-wide direction.
  *         - for an explicit depth commitment, writes and enqueues the
  *           build-owned depth kit that consumes the matching `depth` shadow
@@ -89,6 +92,8 @@ final class FinalizeThemeStep implements Step
             label: $this->label(),
             reads: [
                 'designDirection.json',
+                // Only when it exists: which delivered pictures are not screens.
+                'images.json',
                 'headerBehavior.json',
                 'theme/theme.json',
                 'theme/style.css',
@@ -165,9 +170,19 @@ final class FinalizeThemeStep implements Step
             $headerWarnings,
         );
         $imageCropShipped = self::writeOverlayKit($project, self::imageCropKit(), ImageCrop::kitCss($imageCrop), $headerWarnings);
+        $screenShipped = self::writeOverlayKit(
+            $project,
+            self::screenKit(),
+            ImageKind::kitCss(DesignDirectionStep::imageKindFor($project), self::offKindImageFiles($project)),
+            $headerWarnings,
+        );
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
+        $labelShipped = self::writeOverlayKit($project, self::labelKit(), SectionLabel::kitCss($sectionLabel, $shape), $headerWarnings);
+        $headingEmphasis = DesignDirectionStep::headingEmphasisFor($project);
+        $emphasisShipped = self::writeOverlayKit($project, self::emphasisKit(), HeadingEmphasis::kitCss($headingEmphasis), $headerWarnings);
         $typeTreatmentShipped = self::writeOverlayKit(
             $project,
             self::typeTreatmentKit(),
@@ -175,6 +190,12 @@ final class FinalizeThemeStep implements Step
             $headerWarnings,
         );
         $overlays = [];
+        if ($emphasisShipped) {
+            $overlays[] = self::emphasisKit();
+        }
+        if ($labelShipped) {
+            $overlays[] = self::labelKit();
+        }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
@@ -183,6 +204,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($imageCropShipped) {
             $overlays[] = self::imageCropKit();
+        }
+        if ($screenShipped) {
+            $overlays[] = self::screenKit();
         }
         if ($depthShipped) {
             $overlays[] = self::depthKit();
@@ -225,7 +249,7 @@ final class FinalizeThemeStep implements Step
             ? "  device: '{$device}' utility enqueued\n"
             : "  device: {$device} (kit not shipped)\n");
         Narrator::write($typeTreatmentShipped
-            ? "  type treatment: '{$typeTreatment}' statement-lines register enqueued\n"
+            ? "  type treatment: '{$typeTreatment}' display register enqueued\n"
             : '  type treatment: ' . ($typeTreatment ?? 'none committed') . " (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
@@ -298,14 +322,27 @@ final class FinalizeThemeStep implements Step
     public static function overlayKits(): array
     {
         return [
+            self::labelKit(),
+            self::emphasisKit(),
             self::shapeKit(),
             self::imageTreatmentKit(),
             self::imageCropKit(),
+            self::screenKit(),
             self::depthKit(),
             self::surfaceKit(),
             self::deviceKit(),
             self::typeTreatmentKit(),
         ];
+    }
+
+    public static function emphasisKit(): OverlayKit
+    {
+        return new OverlayKit('emphasis', '// Apply the heading_emphasis token after style.css.');
+    }
+
+    public static function labelKit(): OverlayKit
+    {
+        return new OverlayKit('label', '// Apply the section_label token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit
@@ -317,16 +354,16 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
-     * The statement-lines register: one archetype opts out of an uppercase
-     * site heading case. Only `caps-tight` and `caps-tracked` ship CSS, so
-     * every other treatment prunes the kit.
+     * The display register for an uppercase site heading case. Only
+     * `caps-tight` and `caps-tracked` ship CSS, so every other treatment
+     * prunes the kit.
      */
     public static function typeTreatmentKit(): OverlayKit
     {
         return new OverlayKit(
             'type-treatment',
-            "// Committed statement-lines register: the archetype drops an\n"
-                . '// uppercase site heading case. Loads after generated style.css.',
+            "// Committed display register for an uppercase site heading\n"
+                . '// case. Loads after generated style.css.',
         );
     }
 
@@ -338,11 +375,6 @@ final class FinalizeThemeStep implements Step
         );
     }
 
-    /**
-     * The corner-language kit: contained media surfaces theme.json cannot reach
-     * (the media half of core/media-text, the core/cover canvas). `sharp` and an
-     * absent commitment resolve to no CSS, so the kit is pruned instead.
-     */
     public static function shapeKit(): OverlayKit
     {
         return new OverlayKit(
@@ -363,7 +395,26 @@ final class FinalizeThemeStep implements Step
         );
     }
 
-    /** Site-wide card, thumbnail, and feature-media proportion system. */
+    /** @return list<string> */
+    private static function offKindImageFiles(Project $project): array
+    {
+        if (!$project->exists('images.json')) {
+            return [];
+        }
+        $data = $project->readJson('images.json');
+        return ImageKind::offKindFiles(array_values($data));
+    }
+
+    /** Define the screen frame kit for ui-mockup images. */
+    public static function screenKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'screen',
+            "// Committed ui-mockup imagery: every contained picture is framed as a\n"
+                . '// product screen with no window chrome. Loads after generated style.css.',
+        );
+    }
+
     public static function imageCropKit(): OverlayKit
     {
         return new OverlayKit(

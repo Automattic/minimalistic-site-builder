@@ -60,6 +60,29 @@ function hh_cover(string $height): string
         . '<!-- /wp:group -->';
 }
 
+/**
+ * A page opening that actually earns an overlay: a full-bleed cover carrying
+ * the image and the protection-token dim the contract checks for. Pass null
+ * for the interior shape that states no height of its own.
+ */
+function hh_protected_cover(?string $height): string
+{
+    $sized = $height === null ? '' : ',"minHeight":' . $height . ',"minHeightUnit":"vh"';
+    $style = $height === null ? '' : ' style="min-height:' . $height . 'vh"';
+    return '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":60,"overlayColor":"contrast","align":"full"' . $sized . '} -->'
+        . '<div class="wp-block-cover alignfull"' . $style . '>'
+        . '<img class="wp-block-cover__image-background" alt="" src="x.jpg" data-object-fit="cover"/>'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-contrast-background-color '
+        . 'has-background-dim-60 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2>Get In Touch</h2><!-- /wp:heading -->'
+        . '</div></div>'
+        . '<!-- /wp:cover --></div>' . "\n"
+        . '<!-- /wp:group -->';
+}
+
 /** Required semantic palette, as both slug map and theme.json entries. */
 function hh_palette(): array
 {
@@ -422,6 +445,85 @@ test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone'
     assert_eq($px, HeaderHeroStep::capCovers($px)['markup']);
 });
 
+test('reserveOverlayClearance marks only an opening that states no height', function () {
+    // The shape that shipped the bug: a qualifying full-bleed opening cover
+    // that is only as tall as its content, so its first line starts at the
+    // band's own top padding — under the overlay header.
+    $result = HeaderHeroStep::reserveOverlayClearance(hh_protected_cover(null));
+    assert_contains(HeaderHeroStep::OVERLAY_CLEARANCE_CLASS, $result['markup']);
+    assert_eq(1, count($result['notes']));
+
+    // A band that states its own height already seats its content clear of
+    // the header, so every reviewed image-led opening is left as composed.
+    $sized = hh_protected_cover('92');
+    assert_eq($sized, HeaderHeroStep::reserveOverlayClearance($sized)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($sized)['notes']);
+
+    // A height that survives only in the saved HTML still governs the render,
+    // so the delivered bytes decide, not the attributes alone.
+    $inlineOnly = str_replace(',"minHeight":92,"minHeightUnit":"vh"', '', hh_protected_cover('92'));
+    assert_contains('style="min-height:92vh"', $inlineOnly);
+    assert_eq($inlineOnly, HeaderHeroStep::reserveOverlayClearance($inlineOnly)['markup']);
+
+    // Every other band states its height under style.dimensions.
+    $stated = '<!-- wp:group {"backgroundColor":"contrast","style":{"dimensions":{"minHeight":"70vh"}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($stated, HeaderHeroStep::reserveOverlayClearance($stated)['markup']);
+});
+
+test('reserveOverlayClearance leaves a band whose row the reservation would break', function () {
+    // The kit reserves the zone inside a cover or above a flow group's first
+    // child. A flex or grid band would take that as one more item in the row
+    // and misalign the rest, so it is left alone rather than damaged.
+    $columns = '<!-- wp:columns {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-columns has-contrast-background-color has-background">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:columns -->';
+    assert_eq($columns, HeaderHeroStep::reserveOverlayClearance($columns)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($columns)['notes']);
+
+    $flex = '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"flex"}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($flex, HeaderHeroStep::reserveOverlayClearance($flex)['markup']);
+});
+
+test('reserveOverlayClearance reaches a protection-token surface and is idempotent', function () {
+    $group = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:heading --><h2>Get In Touch</h2><!-- /wp:heading -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    $once = HeaderHeroStep::reserveOverlayClearance($group);
+    assert_contains(HeaderHeroStep::OVERLAY_CLEARANCE_CLASS, $once['markup']);
+    assert_eq(1, count($once['notes']));
+
+    // A repair pass must reach a fixed point: the class is added once and a
+    // second pass reports nothing.
+    $twice = HeaderHeroStep::reserveOverlayClearance($once['markup']);
+    assert_eq($once['markup'], $twice['markup']);
+    assert_eq([], $twice['notes']);
+    assert_eq(1, substr_count($twice['markup'], HeaderHeroStep::OVERLAY_CLEARANCE_CLASS));
+});
+
+test('reserveOverlayClearance leaves an opening that never earned an overlay alone', function () {
+    // No media and no protection token: this opening does not qualify to sit
+    // beneath an overlay at all, so the overlay gate downgrades the build and
+    // there is no zone to reserve.
+    $plain = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio":50,"align":"full"} -->'
+        . '<div class="wp-block-cover alignfull"></div>'
+        . '<!-- /wp:cover --></div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    assert_eq($plain, HeaderHeroStep::reserveOverlayClearance($plain)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($plain)['notes']);
+});
+
 test('header behavior selection uses site depth and excludes forced tall chrome', function () {
     $short = [[
         'slug' => 'home',
@@ -632,11 +734,11 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
         $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
@@ -652,20 +754,62 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
     });
 });
 
+test('the step reserves the overlay zone on an interior opening that states no height', function () {
+    with_project('builder_hh_overlay_', function ($project) {
+        $pages = [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [
+                ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'image'],
+            ]],
+            ['slug' => 'contact', 'title' => 'Contact', 'sections' => [
+                ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'image'],
+            ]],
+        ];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_protected_cover('92') . "\n");
+        $project->writeText('theme/parts/page-contact--hero.html', hh_protected_cover(null) . "\n");
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_eq(
+            AboveFoldContract::MODE_OVERLAY,
+            $project->readJson('aboveFold.json')['header']['mode'],
+            'the fixture must actually reach the overlay relation for this to prove anything'
+        );
+        assert_contains(
+            HeaderHeroStep::OVERLAY_CLEARANCE_CLASS,
+            $project->readText('theme/parts/page-contact--hero.html'),
+            'the interior opening states no height, so the header would land on its first line'
+        );
+        assert_true(
+            !str_contains(
+                $project->readText('theme/parts/page-home--hero.html'),
+                HeaderHeroStep::OVERLAY_CLEARANCE_CLASS
+            ),
+            'the front hero states 92vh and keeps the composition it was given'
+        );
+    });
+});
+
 test('the step strips a Home page-list from the footer part', function () {
     with_project('builder_hh_footer_home_', function ($project) {
         $pages = [
             [
                 'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'menu', 'title' => 'Menu', 'path' => '/menu/', 'front' => false,
-                'sections' => [['slug' => 'menu-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'menu-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'visit', 'title' => 'Visit', 'path' => '/visit/', 'front' => false,
-                'sections' => [['slug' => 'visit-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'visit-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
         ];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -704,11 +848,11 @@ test('HTML-first header-hero strips Home from transformed chrome on both header 
         $pages = [
             [
                 'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
             [
                 'slug' => 'about', 'title' => 'About', 'path' => '/about/', 'front' => false,
-                'sections' => [['slug' => 'about-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'about-hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ],
         ];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -764,11 +908,11 @@ test('the step protects a resumed legacy theme with global Group padding', funct
         $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
@@ -810,11 +954,11 @@ test('removing authored sticky behavior from a resolved static header warns acti
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $project->writeJson('pages.json', ['pages' => [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]]]);
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
@@ -858,7 +1002,7 @@ test('the step warns actionably when an unreadable palette downgrades sticky-sof
         }
         $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]]);
         $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm', 'header_chrome' => 'persistent']);
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -897,7 +1041,7 @@ test('moving authored root sticky behavior to a sticky outer shell is a warning-
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
         $project->writeJson('theme/theme.json', hh_theme_json());
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm', 'header_chrome' => 'persistent']);
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -940,9 +1084,9 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]]]);
         hh_above_fold($project, [[
@@ -954,9 +1098,9 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
@@ -998,9 +1142,9 @@ test('the step keeps overlay when generated opening markup begins with a real co
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]]]);
         hh_above_fold($project, [[
@@ -1012,9 +1156,9 @@ test('the step keeps overlay when generated opening markup begins with a real co
                     'layout_archetype' => 'full-bleed-cover',
                     'background' => 'image',
                 ],
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
@@ -1105,7 +1249,7 @@ test('the step writes earned sticky treatments into both the header part and the
         // custom page background, so the near-black foreground is provable
         // against everything a transparent start reveals; the scrolled state
         // frosts the soft neutral it lands on.
-        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
         $project->writeJson('pages.json', ['pages' => [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
@@ -1144,7 +1288,7 @@ test('theme.json page background feeds the transparent-start contrast contract i
     foreach (['base' => '#FFFFFF', 'contrast' => '#111111', 'secondary' => '#3B3B3B'] as $slug => $color) {
         $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
     }
-    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base'];
     $run = static function (?string $background) use ($palette, $section): array {
         return with_project('builder_hh_pagebg_', function ($project) use ($palette, $section, $background): array {
             $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -1549,7 +1693,7 @@ test('the step repairs header and hero parts without promoting successful repair
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $pages = [[
         'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'primary_action' => null]],
+        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'primary_action' => null]],
     ]];
     $project->writeJson('pages.json', ['pages' => $pages]);
     $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
@@ -1777,9 +1921,9 @@ test('a redundant has-background-dim-50 still earns the clear resting state (BIG
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -1833,9 +1977,9 @@ test('competing cover paint keeps a surviving overlay behind its scrim veil (BIG
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -1877,9 +2021,9 @@ test('an unprovable clear resting state keeps the scrim veil and the delivered d
                 ],
                 // Three more bands give the one page the depth persistent
                 // chrome needs; only the opening band is inspected here.
-                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
-                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base'],
+                ['slug' => 'about', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'services', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
+                ['slug' => 'contact', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base'],
             ],
         ]];
         // A mid-gray protection token can never bound a white image pixel at
@@ -2130,7 +2274,7 @@ test('the HTML-first hero re-assertion respects a root the design already measur
         return with_project('builder_hh_wide_' . $rootClass . '_', function ($project) use ($rootClass) {
             $pages = [[
                 'slug' => 'home', 'title' => 'Home', 'front' => true,
-                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
             ]];
             $project->writeJson('siteSpec.json', ['name' => 'Demo']);
             $project->writeJson('theme/theme.json', hh_theme_json());
@@ -2194,7 +2338,7 @@ test('header-hero does not restore a planned Add to cart label after storefront 
         // instead of treating the button as a dead control.
         [
             'slug' => 'cart', 'title' => 'Cart', 'path' => '/cart', 'front' => false,
-            'sections' => [['slug' => 'body', 'role' => 'section', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'body', 'role' => 'section', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ],
     ];
     $project->writeJson('pages.json', ['pages' => $pages]);
@@ -2919,7 +3063,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');
@@ -2944,7 +3088,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');
@@ -2969,7 +3113,7 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none', 'header_chrome' => 'persistent']);
         $pages = [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']],
         ]];
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'foreground-split');
@@ -2981,4 +3125,18 @@ test('header-hero injects the mark on every non-personal site and not on a perso
 
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'wp:site-logo'));
     });
+});
+
+test('the new header variants preserve the chrome choice and depth limits', function () {
+    $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
+    $deep = [...$short, ['slug' => 'work', 'sections' => []]];
+    foreach (['floating-pill', 'bar-center-cta', 'spread-nav'] as $archetype) {
+        foreach ([HeaderBehavior::MODE_STACKED, HeaderBehavior::MODE_OVERLAY] as $mode) {
+            $transient = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STATIC : HeaderBehavior::OVERLAY_TRANSIENT;
+            $persistent = $mode === HeaderBehavior::MODE_STACKED ? HeaderBehavior::STICKY_SOFT : HeaderBehavior::OVERLAY_TO_SOLID;
+            assert_eq($transient, HeaderBehavior::behaviorFor($short, $mode, $archetype, HeaderChrome::PERSISTENT));
+            assert_eq($transient, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::TRANSIENT));
+            assert_eq($persistent, HeaderBehavior::behaviorFor($deep, $mode, $archetype, HeaderChrome::PERSISTENT));
+        }
+    }
 });

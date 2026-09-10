@@ -98,11 +98,10 @@ test('the studio process is handed an empty stdin, never the caller terminal', f
     $script = <<<'INNER'
         require getenv('SB_BOOTSTRAP');
         $m = new ReflectionMethod(Automattic\SiteBuild\StudioCli::class, 'realExec');
-        $m->setAccessible(true);
         $r = $m->invoke(null, 'wc -c', 10);
         echo (int) trim($r['stdout']);
         INNER;
     $cmd = 'printf aaaaaaaa | SB_BOOTSTRAP=' . escapeshellarg(repo_path('src/bootstrap.php'))
-        . ' php -r ' . escapeshellarg($script);
+        . ' ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($script);
     assert_eq('0', trim((string) shell_exec($cmd)), 'the child read zero bytes, not our eight');
 });
