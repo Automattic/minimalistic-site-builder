@@ -241,3 +241,39 @@ test('label removal preserves an unrelated empty split and raw sibling text', fu
     assert_true(str_starts_with($result['markup'], $unrelated));
     assert_contains('<!-- wp:paragraph --><p>Three moves, one room.</p><!-- /wp:paragraph -->', $result['markup']);
 });
+
+
+test('nested label column removals preserve neighboring content and closing markup', function () {
+    $paragraph = static fn (string $text): string => '<!-- wp:paragraph --><p>' . $text . '</p><!-- /wp:paragraph -->';
+    $column = static fn (string $content): string => '<!-- wp:column --><div class="wp-block-column">' . $content . '</div><!-- /wp:column -->';
+    $row = static fn (string $content): string => '<!-- wp:columns --><div class="wp-block-columns">' . $content . '</div><!-- /wp:columns -->';
+    $label = static fn (string $text): string => '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">' . $text . '</p><!-- /wp:paragraph -->';
+    $neighbor = $paragraph('Ordinary neighboring paragraph must survive.');
+    $outside = $paragraph('After the outer columns.');
+    $prefix = '<!-- wp:group --><div class="wp-block-group">';
+    $suffix = '</div><!-- /wp:group -->';
+    // Unaffected rows before and after the edited rows must retain their bytes.
+    $unrelated = $row($column('') . $column($paragraph('Unrelated empty split.')));
+    foreach ([false, true] as $multipleKeptColumns) {
+        $inner = $row($column($label('Inner')) . $column($paragraph('Deep content.')));
+        $extra = $multipleKeptColumns ? $column($paragraph('Extra column.')) : '';
+        $outer = $row($column($label('Outer')) . $column($inner . $neighbor) . $extra);
+        $source = $prefix . $unrelated . $outer . $outside . $unrelated . $suffix;
+        $expectedContent = $paragraph('Deep content.') . $neighbor;
+        $expectedOuter = $multipleKeptColumns ? $row($column($expectedContent) . $extra) : $expectedContent;
+        $expected = $prefix . $unrelated . $expectedOuter . $outside . $unrelated . $suffix;
+        $result = SectionLabel::normalize($source, 'none', 'page-home--process');
+        assert_contains($outside, $result['markup'], 'the paragraph after the outer row survives');
+        assert_eq($expected, $result['markup'], 'only label columns and redundant wrappers are removed');
+        assert_eq(2, count($result['warnings']));
+        foreach (['Outer', 'Inner'] as $i => $text) {
+            assert_contains("file='theme/parts/page-home--process.html'", $result['warnings'][$i]);
+            assert_contains("block='paragraph.side-label'", $result['warnings'][$i]);
+            assert_contains($text, $result['warnings'][$i]);
+            assert_contains('delivered=removed; disposition=', $result['warnings'][$i]);
+        }
+        $again = SectionLabel::normalize($result['markup'], 'none', 'page-home--process');
+        assert_eq($expected, $again['markup'], 'normalization reaches a fixed point');
+        assert_eq([], $again['warnings']);
+    }
+});

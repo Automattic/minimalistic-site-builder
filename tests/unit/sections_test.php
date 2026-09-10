@@ -1471,9 +1471,14 @@ test('the header nav rule keeps its row shape out of the stacked archetypes (BIG
 test('sections records section-label removals and preserves sibling content', function () {
     [$project, $tmp] = sections_fixture();
     $sibling = '<!-- wp:paragraph --><p>Sibling content stays intact.</p><!-- /wp:paragraph -->';
+    $column = static fn (string $content): string => '<!-- wp:column --><div class="wp-block-column">' . $content . '</div><!-- /wp:column -->';
+    $row = static fn (string $content): string => '<!-- wp:columns --><div class="wp-block-columns">' . $content . '</div><!-- /wp:columns -->';
+    $label = static fn (string $text): string => '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">' . $text . '</p><!-- /wp:paragraph -->';
+    $deepContent = '<!-- wp:paragraph --><p>Nested content stays intact.</p><!-- /wp:paragraph -->';
+    $nested = $row($column($label('Outer')) . $column($row($column($label('Inner')) . $column($deepContent))));
     $raw = '<!-- wp:group --><div class="wp-block-group">'
         . '<!-- wp:paragraph {"className":"section-badge"} --><p class="section-badge">1</p><!-- /wp:paragraph -->'
-        . $sibling . '</div><!-- /wp:group -->';
+        . $nested . $sibling . '</div><!-- /wp:group -->';
     $llm = new FakeLlm();
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
@@ -1483,12 +1488,18 @@ test('sections records section-label removals and preserves sibling content', fu
     (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     $delivered = $project->readText('theme/parts/page-home--about.html');
     assert_contains($sibling, $delivered);
+    assert_contains($deepContent . $sibling . '</div><!-- /wp:group -->', $delivered);
+    assert_true(!str_contains($delivered, 'wp:column'));
     assert_true(!str_contains($delivered, 'class="section-badge"'));
     assert_true($project->exists('theme/parts/page-home--hero.html'));
     $warnings = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     foreach (["file='theme/parts/page-home--about.html'", 'paragraph.section-badge', 'authored=', 'delivered=removed', 'disposition='] as $context) {
         assert_contains($context, $warnings);
     }
+    foreach (['Outer', 'Inner'] as $text) {
+        assert_contains($text, $warnings);
+    }
+    assert_contains('paragraph.side-label', $warnings);
     $again = \Automattic\SiteBuild\SectionLabel::normalize($delivered, 'none', 'page-home--about');
     assert_eq($delivered, $again['markup']);
     assert_eq([], $again['warnings']);

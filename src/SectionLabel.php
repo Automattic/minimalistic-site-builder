@@ -261,12 +261,15 @@ final class SectionLabel
     /** Remove an empty label column and preserve the content blocks. */
     private static function collapseEmptyLabelColumns(string $markup, array $affectedRows): string
     {
-        $document = BlockMarkup::parse($markup);
-        $rows = array_values(array_filter($document->indices(), static fn (int $i): bool => $document->name($i) === 'columns'));
-        foreach (array_reverse($rows, true) as $ordinal => $index) {
-            if (!in_array($ordinal, $affectedRows, true)) {
-                continue;
-            }
+        $affectedRows = array_values(array_unique($affectedRows));
+        rsort($affectedRows, SORT_NUMERIC);
+        foreach ($affectedRows as $ordinal) {
+            // Later rows may be nested inside this row. Re-read both its content
+            // and its end offset after those edits. Descending order keeps the
+            // ordinals of every row still to process unchanged.
+            $document = BlockMarkup::parse($markup);
+            $rows = array_values(array_filter($document->indices(), static fn (int $i): bool => $document->name($i) === 'columns'));
+            $index = $rows[$ordinal];
             if ($document->name($index) !== 'columns' || !$document->isStructurallySafe($index)) {
                 continue;
             }
