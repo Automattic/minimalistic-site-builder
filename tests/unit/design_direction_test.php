@@ -2818,6 +2818,48 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     assert_eq('', $generic['subject_anchor']);
 });
 
+test('the direction persists the seed register as a bounded token and re-reads it (frm W1a)', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x'],
+        'cinematic-safe-zone',
+        'committed seed',
+        $repairs,
+        $warnings,
+        '',
+        '',
+        '',
+        'Modernist',
+    );
+    assert_eq('modernist', $direction['register']);
+
+    // A second pass without the seed axis keeps the persisted value.
+    $again = DesignDirectionStep::normalize($direction, 'cinematic-safe-zone', 'committed seed');
+    assert_eq('modernist', $again['register']);
+
+    // An unknown tradition is not persisted as a stray string.
+    $stray = DesignDirectionStep::normalize(
+        ['description' => 'x', 'register' => 'corporate-memphis'],
+        'cinematic-safe-zone',
+    );
+    assert_eq('', $stray['register']);
+
+    // A brief-only extra tradition counts too.
+    $extra = DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone', '', $repairs, $warnings, '', '', '', 'luxury');
+    assert_eq('luxury', $extra['register']);
+
+    assert_eq('', DesignDirectionStep::fallbackDirection('seed', 'cinematic-safe-zone')['register']);
+
+    with_project('frm-register', function ($project) use ($direction): void {
+        assert_eq('', DesignDirectionStep::registerFor($project), 'no artifact reads as no tradition');
+        $project->writeJson('designDirection.json', $direction);
+        assert_eq('modernist', DesignDirectionStep::registerFor($project));
+        $project->writeJson('designDirection.json', ['description' => 'pre-field artifact']);
+        assert_eq('', DesignDirectionStep::registerFor($project));
+    });
+});
+
 test('a glass depth on a light ground degrades to the ring it is built on, and stays on a dark one', function () {
     $base = [
         'description' => 'x',

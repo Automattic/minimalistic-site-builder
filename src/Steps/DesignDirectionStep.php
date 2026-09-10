@@ -473,6 +473,7 @@ final class DesignDirectionStep implements Step
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
+            'register'         => '',
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
     }
@@ -1172,6 +1173,9 @@ final class DesignDirectionStep implements Step
             'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
             'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
             'concept_seed'     => $conceptSeed,
+            'register'         => BoundedChoice::explicit($conceptRegister, ConceptSeeds::knownRegisters())
+                ?? BoundedChoice::explicit($raw['register'] ?? null, ConceptSeeds::knownRegisters())
+                ?? '',
             'hero_blueprint'   => $blueprint,
         ];
     }
@@ -2160,6 +2164,18 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return ImageCrop::explicit($project->readJson(self::FILE)['image_crop'] ?? null);
+    }
+
+    /** Read the bounded design tradition from the direction artifact. */
+    public static function registerFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        return BoundedChoice::explicit(
+            $project->readJson(self::FILE)['register'] ?? null,
+            ConceptSeeds::knownRegisters(),
+        ) ?? '';
     }
 
     /**
