@@ -1,0 +1,17 @@
+.design-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+.design-hero-headline {
+  max-width: 100%;
+  container-type: inline-size;
+}
+.design-hero-support {
+  max-width: 30ch;
+  line-height: 1.35;
+}
+@media (max-width: 781px) {
+  .design-hero-copy { display: block; }
+}
