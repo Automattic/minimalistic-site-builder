@@ -45,6 +45,55 @@ const PS_VALID_CSS = <<<CSS
     }
     CSS;
 
+test('blocks page styles reconcile layout spacing once without another model call', function () {
+    [$project, $tmp] = ps_project('ps_layout_owner_');
+    try {
+        $markup = '<!-- wp:group {"className":"design-copy"} --><div class="wp-block-group design-copy" style="padding-right:2rem">Copy</div><!-- /wp:group -->';
+        $project->writeText('plugin/pages/home.html', $markup);
+        $llm = new FakeLlm();
+        $css = '.design-copy { margin-left:0; margin-right:auto; padding-right:40%; }';
+        $llm->queueText($css);
+        $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+        $step->run($project);
+        $first = $project->readText('theme/style.css');
+        assert_contains('padding-right:40% !important;', $first);
+        assert_contains('margin-left:0 !important;', $first);
+        assert_contains('authored spacing priority', $project->readText('logs/authored-layout-css.txt'));
+        assert_eq($markup, $project->readText('plugin/pages/home.html'));
+        $llm->queueText($css);
+        $step->run($project);
+        assert_eq($first, $project->readText('theme/style.css'), 'resume replaces rather than duplicating the repaired appendix');
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('page styles receives image composition briefs matched to surviving assets in the same call', function () {
+    [$project, $tmp] = ps_project('ps_image_slots_');
+    try {
+        $markup = '<section class="wp-block-group design-hero"><img src="/wp-content/themes/demo/assets/scene.jpg"></section>'
+            . '<section class="wp-block-group design-about"><img src="theme:./assets/panel.jpg"></section>';
+        $project->writeText('plugin/pages/home.html', $markup);
+        $project->writeJson('images.json', [
+            ['filename' => 'scene.jpg', 'subject' => 'SUBJECT-IN-RIGHT-THIRD', 'pageContext' => 'FULL-HERO-BACKGROUND with empty left side', 'aspectRatio' => 'ultrawide', 'status' => 'pending'],
+            ['filename' => 'panel.jpg', 'subject' => 'PANEL-SUBJECT', 'pageContext' => 'CONTAINED-PANEL next to separate text', 'aspectRatio' => 'portrait'],
+            ['filename' => 'removed.jpg', 'subject' => 'REMOVED-IMAGE-MUST-NOT-LEAK'],
+        ]);
+        $llm = new FakeLlm();
+        $llm->queueText('.design-hero {display:grid;}');
+        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        assert_eq(1, count($llm->calls));
+        foreach (['scene.jpg', 'SUBJECT-IN-RIGHT-THIRD', 'FULL-HERO-BACKGROUND', 'CONTAINED-PANEL', 'portrait'] as $text) {
+            assert_contains($text, $llm->calls[0]['prompt']);
+        }
+        assert_true(!str_contains($llm->calls[0]['prompt'], 'REMOVED-IMAGE-MUST-NOT-LEAK'));
+        assert_eq($markup, $project->readText('plugin/pages/home.html'));
+        assert_true(in_array('images.json', (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->declaration()->reads, true));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 /**
  * Chunk one of every HTML-first merge: the deterministic wrap policy, which
  * ships whether or not the design contributed any CSS.
@@ -706,9 +755,9 @@ test('page-styles declares all delivered markup in both modes and source CSS onl
     ];
 
     assert_eq(
-        $legacyReads,
+        [...$legacyReads, 'images.json'],
         (new PageStylesStep($llm, $renderer))->declaration()->reads,
-        'blocks declaration covers every delivered page',
+        'blocks declaration covers every delivered page and its collected image briefs',
     );
     assert_eq(
         [...$legacyReads, 'design/page-artifact-map.json', 'design/*'],

@@ -8,6 +8,12 @@ const { chromium } = require('playwright-core');
 const repo = path.resolve(__dirname, '../..');
 const css = execFileSync('php', ['-r', `require 'src/bootstrap.php'; echo (new ReflectionClass(Automattic\\SiteBuild\\Steps\\ScaffoldThemeStep::class))->getConstant('STYLE_CSS'); echo Automattic\\SiteBuild\\Steps\\PageStylesStep::WORD_WRAP_CSS;`], { cwd: repo, encoding: 'utf8' });
 const script = path.join(repo, 'assets/heading-fit.js');
+const layoutMarkup = '<div class="wp-block-group design-region" style="padding-right:20px"><div class="wp-block-group design-copy">Copy</div></div>'
+    + '<div class="wp-block-cover design-photo" style="min-height:68vh">Image slot</div>';
+const layoutCss = '.design-copy {width:400px; margin-left:0; margin-right:auto;} .design-region {padding-right:48%;}'
+    + '@media(max-width:781px) {.design-region {padding-right:20px;} .design-copy {width:200px; margin-left:auto; margin-right:0;}}'
+    + '.design-photo {min-height:84vh;} @media(max-width:599px){.design-photo {min-height:42vh;}}';
+const repairedLayoutCss = execFileSync('php', ['-r', 'require "src/bootstrap.php"; echo Automattic\\SiteBuild\\AuthoredLayoutCss::reconcile($argv[1], $argv[2])["css"];', layoutCss, layoutMarkup], {cwd:repo,encoding:'utf8'});
 
 (async () => {
     const executablePath = process.env.CHROME_BINARY || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
@@ -30,6 +36,8 @@ const script = path.join(repo, 'assets/heading-fit.js');
           #cover h2 { font-size: 45px; }
           #hidden { display: none; width: 180px; }
           #hidden h2 { font-size: 70px; }
+          #grouped { width:403px; font-size:128px; line-height:.8; }
+          #long-groups { width:180px; font-size:32px; }
           @media(max-width:781px) { .columns { grid-template-columns: 1fr; } }
         </style>
         <section class="hero-composition--authored"><div class="columns"><div>Image region</div><div class="copy">
@@ -39,8 +47,10 @@ const script = path.join(repo, 'assets/heading-fit.js');
           <div style="width:180px"><h2 id="words" class="wp-block-heading">Bread made slowly</h2></div>
           <div id="cover"><div class="copy"><h2 id="intrinsic" class="wp-block-heading">Stone keeps time</h2></div></div>
           <div id="hidden"><h2 class="wp-block-heading">Velocity</h2></div>
+          <h1 id="grouped" class="wp-block-heading">When Your Best<br>Just Isn't<br><mark>Good Enough</mark></h1>
+          <h2 id="long-groups" class="wp-block-heading">This long line has far too many short words to fit on one line at a sane size<br>Next line</h2>
         </section><h2 id="outside" style="font-size:70px">Unrelated heading</h2>`);
-        const originals = await page.locator('#purposeful,#words,#outside').evaluateAll(els => els.map(el => el.outerHTML));
+        const originals = await page.locator('#purposeful,#words,#outside,#long-groups').evaluateAll(els => els.map(el => el.outerHTML));
         if (fs.existsSync(script)) await page.addScriptTag({ path: script });
         const settle = () => page.evaluate(() => document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
         const check = async selector => page.locator(selector).evaluate(el => {
@@ -66,8 +76,10 @@ const script = path.join(repo, 'assets/heading-fit.js');
             assert.equal(actual.fits, true, `Velocity fits its actual column at ${width}`);
             if (width === 1440) assert.equal(actual.size, 71, 'restores the authored size when it fits');
         }
-        assert.deepEqual(await page.locator('#purposeful,#words,#outside').evaluateAll(els => els.map(el => el.outerHTML)), originals, 'purposeful breaks, naturally wrapping phrases and unrelated headings stay byte-identical');
+        assert.deepEqual(await page.locator('#purposeful,#words,#outside,#long-groups').evaluateAll(els => els.map(el => el.outerHTML)), originals, 'purposeful breaks, naturally wrapping phrases, unreadably long groups and unrelated headings stay byte-identical');
         assert.equal((await check('#purposeful')).lines, 2, 'purposeful break remains');
+        assert.equal((await check('#grouped')).lines, 3, 'explicit headline groups fit instead of becoming a tower of words');
+        assert.ok((await check('#grouped')).size >= 16, 'group fitting remains readable');
         assert.ok((await check('#words')).lines > 1, 'natural wrapping at spaces remains');
         assert.ok((await check('#intrinsic')).width > 200, 'content-sized cover does not collapse');
         await page.locator('#hidden').evaluate(el => { el.style.display = 'block'; }); await settle();
@@ -78,6 +90,19 @@ const script = path.join(repo, 'assets/heading-fit.js');
         await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle();
         assert.equal((await check('#velocity')).fits, true, 'font load refit is stable');
         assert.deepEqual(errors, []);
-        console.log('PASS heading fit: 9 viewport transitions, purposeful breaks, natural word wrapping, intrinsic layout, hidden reveal, container resize, font events');
+        await page.setContent(`<style>body{margin:0}.design-region {box-sizing:border-box; width:100%;padding-left:20px;display:flex}
+          .design-region > * {margin-left:auto!important;margin-right:auto!important}
+          ${repairedLayoutCss}</style>${layoutMarkup}`);
+        for (const width of [1440,1024,390,1440]) {
+            await page.setViewportSize({width,height:900});
+            const box = await page.locator('.design-copy').boundingBox();
+            assert.equal(Math.round(box.x), width < 782 ? 170 : 20, `authored ${width < 782 ? 'right' : 'left'} position beats Core margins at ${width}`);
+            assert.equal(await page.locator('.design-region').evaluate(el=>Math.round(parseFloat(getComputedStyle(el).paddingRight))), width < 782 ? 20 : Math.round(width * .48), 'responsive CSS padding beats inline padding');
+            assert.equal(await page.locator('.design-photo').evaluate(el=>Math.round(parseFloat(getComputedStyle(el).minHeight))), width < 600 ? 378 : 756, 'responsive image-slot height beats saved inline cover height');
+        }
+        const centeredCss = execFileSync('php', ['-r', 'require "src/bootstrap.php"; echo Automattic\\SiteBuild\\AuthoredLayoutCss::reconcile($argv[1], $argv[2])["css"];', '.design-region {padding-inline:20px;} .design-copy {width:400px;margin-inline:auto;}', layoutMarkup], {cwd:repo,encoding:'utf8'});
+        await page.addStyleTag({content:centeredCss});
+        assert.equal(Math.round((await page.locator('.design-copy').boundingBox()).x), 520, 'intentional centered composition stays centered');
+        console.log('PASS heading fit and layout: explicit groups, readability fallback, 9 viewport transitions, natural wrapping, intrinsic layout, hidden reveal, container resize, font events, responsive left/right spacing ownership');
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
