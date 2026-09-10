@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\AuthoredLayoutCss;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CssContrastAdjuster;
 use Automattic\SiteBuild\CssContrastCheck;
@@ -320,6 +321,8 @@ CSS;
         if ($this->htmlFirst) {
             $reads[] = self::PAGE_ARTIFACT_MAP;
             $reads[] = 'design/*';
+        } else {
+            $reads[] = 'images.json';
         }
 
         return new StepDeclaration(
@@ -351,6 +354,7 @@ CSS;
             'theme_json'       => $project->readText('theme/theme.json'),
             'used_classes'     => self::classList($used),
             'delivered_markup' => $markup,
+            'image_composition' => self::imageComposition($project, $markup),
         ]);
         $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
@@ -412,6 +416,19 @@ CSS;
         }
         $floor = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
         $css = self::checkBlocksContrast($project, $css, $markup, $floor);
+        try {
+            $layout = AuthoredLayoutCss::reconcile($css, $markup);
+        } catch (\Throwable $error) {
+            $layout = ['css' => $css, 'repairs' => []];
+            $project->addWarnings($this->id(), [
+                'file=theme/style.css; block_path=design-* layout subjects; authored_value=generated spacing; '
+                . 'delivered_value=pre-reconciliation CSS; disposition=retained because layout ownership could not be checked: '
+                . $error->getMessage(),
+            ]);
+        }
+        $css = $layout['css'];
+        $project->writeText('logs/authored-layout-css.txt', implode("\n", $layout['repairs']) . "\n");
+
         // Replace only our delimited appendix on resume; preserve later static
         // or motion CSS rather than truncating everything after the marker.
         $base = (string) preg_replace('~' . preg_quote(self::MARKER, '~') . '.*?'
@@ -424,6 +441,41 @@ CSS;
             . "\n" . self::END_MARKER;
         $project->writeText('theme/style.css', self::withWordWrapPolicy($style));
         echo '  styled: ' . implode(', ', $used) . "\n";
+    }
+
+    /**
+     * collect-images preserves these briefs before fix-blocks strips AI_IMAGE
+     * placeholders from saved covers. CSS must see the same intended frame as
+     * image generation, not just a filename in the delivered markup. Include
+     * only surviving image references; dimensions here are planned, not pixels.
+     */
+    private static function imageComposition(Project $project, string $markup): string
+    {
+        if (!$project->exists('images.json')) {
+            return 'No image composition briefs available; use the delivered markup and opening intent.';
+        }
+        $dom = Html::loadUtf8Html('<html><body>' . $markup . '</body></html>', LIBXML_NONET);
+        $referenced = [];
+        foreach ($dom?->getElementsByTagName('img') ?? [] as $image) {
+            $path = parse_url($image->getAttribute('src'), PHP_URL_PATH);
+            if (is_string($path)) {
+                $referenced[rawurldecode(basename($path))] = true;
+            }
+        }
+        $briefs = [];
+        foreach ($project->readJson('images.json') as $image) {
+            if (!is_array($image) || !is_string($image['filename'] ?? null) || !isset($referenced[$image['filename']])) {
+                continue;
+            }
+            $brief = ['filename' => $image['filename']];
+            foreach (['subject', 'pageContext', 'style', 'aspectRatio'] as $field) {
+                if (is_string($image[$field] ?? null)) {
+                    $brief[$field] = $image[$field];
+                }
+            }
+            $briefs[] = $brief;
+        }
+        return json_encode($briefs, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 
     /** Check authored color changes, not harmless layout-only selectors. */
