@@ -2556,7 +2556,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Remove custom CSS that assigns a WordPress preset variable.
+     * Remove custom CSS that assigns or registers a WordPress preset variable.
      * Preserve preset reads, local variables, and all other declarations.
      * Record each removal with its path and authored value.
      *
@@ -2571,8 +2571,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
             foreach ($node as $key => $value) {
                 if ($key === 'css' && is_string($value)) {
-                    [$repaired, $dropped] = CssChecks::dropDeclarations(
+                    [$repaired, $registrations] = CssChecks::dropPropertyRegistrations(
                         $value,
+                        static fn (string $name): bool => str_starts_with(strtolower($name), '--wp--preset--'),
+                    );
+                    foreach ($registrations as $registration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored preset registration "
+                            . Warnings::value($registration)
+                            . '; delivered removed; disposition preset variables are build-owned tokens;'
+                            . ' custom CSS may not register their syntax, inheritance, or initial value';
+                    }
+                    [$repaired, $dropped] = CssChecks::dropDeclarations(
+                        $repaired,
                         static fn (array $declaration): bool =>
                             str_starts_with(strtolower($declaration['property']), '--wp--preset--'),
                     );
@@ -2583,7 +2593,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                             . ' a rule may read them, never reassign them (core paints .has-*-background-color'
                             . ' with the same variable, so a redefinition erases the band under its own ink)';
                     }
-                    if ($dropped !== []) {
+                    if ($dropped !== [] || $registrations !== []) {
                         $node[$key] = $repaired;
                     }
                     continue;

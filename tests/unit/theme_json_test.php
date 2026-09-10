@@ -4075,3 +4075,36 @@ test('CSS protection writes durable warnings and preserves valid sibling CSS', f
     assert_true(in_array('warnings.json', $step->declaration()->writes, true));
     remove_tree($tmp);
 });
+
+
+test('preset registrations are removed through the theme step with durable warnings and a fixed point', function () {
+    with_project('preset_registration_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project);
+        $payload = valid_theme_payload();
+        $safe = '.plain{color:var(--wp--preset--color--contrast);--local:2}';
+        $local = '@property --local-tone{syntax:"<color>";inherits:false;initial-value:blue}';
+        $registration = '@property --wp--preset--color--contrast{syntax:"<color>";inherits:false;initial-value:white}';
+        $payload['styles']['css'] = $safe . $registration . $local;
+        $payload['styles']['blocks']['core/group']['css'] = '@media (min-width:1px){' . $registration . $safe . '}';
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        $step = new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')));
+        $step->run($project);
+        $theme = $project->readJson('theme/theme.json');
+        assert_eq($safe . $local, $theme['styles']['css']);
+        assert_eq('@media (min-width:1px){' . $safe . '}', $theme['styles']['blocks']['core/group']['css']);
+        $warnings = array_values(array_filter($project->readJson('warnings.json')['theme-json'] ?? [], static fn (string $warning): bool => str_contains($warning, 'preset registration')));
+        assert_eq(2, count($warnings));
+        foreach ($warnings as $warning) {
+            foreach (['theme/theme.json', \Automattic\SiteBuild\Warnings::value($registration), 'delivered removed', 'disposition'] as $context) {
+                assert_contains($context, $warning);
+            }
+        }
+        assert_contains('styles.css', $warnings[0]);
+        assert_contains('styles.blocks.core/group.css', $warnings[1]);
+        assert_eq([$theme, []], ThemeJsonStep::repairScaffold($theme));
+        assert_true(in_array('warnings.json', $step->declaration()->writes, true));
+    });
+});
