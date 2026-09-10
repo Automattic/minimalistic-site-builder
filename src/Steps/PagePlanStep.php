@@ -111,7 +111,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Every OTHER archetype is capped by archetypeCap(), which works out to a
      * flat "at most twice" for every page length the planner actually produces
-     * (front pages aim 5-8 sections, interior 3-6) and only loosens beyond
+     * (front pages aim 3-5 sections, interior 3-4) and only loosens beyond
      * eight — this divisor is what makes it loosen.
      *
      * The adjacency rule cannot do this job: "no two ADJACENT sections share an
@@ -161,7 +161,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * rate rose WITH length rather than falling: 59% of 5-section pages, 81% of
      * 6-section, and 42 of 42 seven-section pages. Long pages are exactly where
      * pacing bands earn their keep, so a minimum is the only thing that catches
-     * it. Short pages — every contact page is 2 to 4 sections (BIGR-858) — are
+     * it. Short pages — every contact page is 2 to 3 sections (BIGR-858) — are
      * left alone, where one uniform ground is a fine answer.
      */
     private const MIN_BANDED_SECTIONS = 5;
@@ -179,17 +179,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
-        . ' energy: an opening hero, at least 3 distinct, image-rich content sections, and a closing next step that follows from this page\'s purpose.'
-        . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . " sections so the page is richer and flows well. Let the design direction's mood"
-        . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
+        . ' energy: an opening hero, 1 to 3 focused content sections, and a closing next step that follows from this page\'s purpose.'
+        . " Use the spec's \"sections\" list as a starting point, but prioritize it: combine, reorder, or rename"
+        . " sections so the page stays concise and flows well. Let the design direction's mood"
+        . " inform which sections you choose and how they're framed. Aim for 3 to 5 sections total including the hero, never more. The shared header and footer do not count.";
 
     /**
      * Interior default. Contact-like pages use a tighter brief via emphasisFor()
      * so a "reach us" purpose is not padded to homepage length (BIGR-858).
      */
-    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections'
-        . ' — fewer when THIS PAGE\'s purpose is narrow.'
+    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 4 sections total including the hero, never more.'
+        . ' The shared header and footer do not count.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
         . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
         . ' compact archetype instead),'
@@ -202,8 +202,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
 
-    /** Contact/enquiry pages stay brief. Ticket BIGR-858. */
-    public const MAX_CONTACT_SECTIONS = 4;
+    /** Page section budgets include the hero and closing, excluding shared chrome. BIGR-1001. */
+    public const MAX_FRONT_SECTIONS = 5;
+    public const MAX_INTERIOR_SECTIONS = 4;
+    public const MAX_CONTACT_SECTIONS = 3;
 
     /**
      * Slug/title identities that belong to some other page even when the
@@ -689,7 +691,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out[] = $page;
         }
 
-        // The plan prompt demands a hero, at least 3 content sections, and a
+        // The plan prompt demands at least 3 sections including the hero and
         // closing — a 1-2 section front page is a degenerate plan (observed:
         // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
         // Pad below the delivered sections with reviewed generic briefs so
@@ -697,7 +699,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings, $allowOffsetGrid);
         foreach ($out as $i => $page) {
             if (is_array($page)) {
-                $out[$i] = self::capContactPage($page, $warnings);
+                $out[$i] = self::capPageSections($page, $warnings);
             }
         }
 
@@ -1126,7 +1128,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
             }
             $page['sections'] = $sections;
-            $out[] = $page;
+            $out[] = self::capPageSections($page, $warnings);
         }
         $out = self::reconcileItemPatternAssignments(
             $out,
@@ -2135,7 +2137,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Per-page planning brief. The spec purpose is the contract; contact pages
-     * are 2–4 sections, not the 3–6 interior pad.
+     * are 2–3 sections, rather than the 3–4 interior range.
      *
      * @param array<string,mixed> $page
      */
@@ -2154,9 +2156,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : ' There is no form backend: present only contact facts present in SITE SPEC;'
                     . ' omit mailto/tel when none exist, never a fake form.';
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
-                . '. Honor it. A contact page is brief — 2 to 4 sections total, never more. '
+                . '. Honor it. A contact page is brief — 2 to 3 sections total including the hero, never more. The shared header and footer do not count. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
-                . 'optional hours/address, a short close. Do NOT add story, programs, galleries, '
+                . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
                 . $formLine;
         }
@@ -2165,25 +2167,27 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Drop extra bands from a contact page so it stays at most 4 sections.
-     * Keeps the opener, the closer, and the highest-scoring contact/form
-     * middles, in document order. Idempotent. BIGR-858.
+     * Enforce the page budget after every generation, repair, and fallback path.
+     * Keep the opener and closer. Contact pages prioritize form/contact facts;
+     * other pages keep the earliest content in the authored order. Repair the
+     * new seams and record the removed sections. Idempotent. BIGR-1001.
      *
      * @param array<string,mixed> $page
      * @param list<string> $warnings
      * @return array<string,mixed>
      */
-    public static function capContactPage(array $page, array &$warnings = []): array
+    public static function capPageSections(array $page, array &$warnings = []): array
     {
-        if (!self::isContactLikePage($page)) {
-            return $page;
-        }
+        $front = !empty($page['front']);
+        $contact = self::isContactLikePage($page);
+        $max = self::maxSectionsFor($page);
+        $kind = $front ? 'front' : ($contact ? 'contact' : 'interior');
         $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
         $authored = count($sections);
-        if ($authored <= self::MAX_CONTACT_SECTIONS) {
+        if ($authored <= $max) {
             return $page;
         }
-        $kept = self::selectContactSections($sections, self::MAX_CONTACT_SECTIONS);
+        $kept = self::selectPageSections($page, $sections);
         $keptSlugs = array_map(
             static fn (array $section): string => (string) ($section['slug'] ?? ''),
             $kept,
@@ -2201,7 +2205,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $kept,
         );
         $varietyWarnings = [];
-        $kept = self::repairVariety($kept, false, null, $varietyWarnings, $pageSlug);
+        $kept = self::repairVariety($kept, $front, null, $varietyWarnings, $pageSlug);
         $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $varietyWarnings, $pageSlug);
         array_push($warnings, ...$varietyWarnings);
         // Last, so the seam prose names the archetypes that actually ship.
@@ -2215,11 +2219,37 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             "pages[slug={$pageSlug}].sections",
             $authored . ' sections (' . implode(', ', array_column($sections, 'slug')) . ')',
             $count . ' sections (' . implode(', ', $keptSlugs) . ')',
-            'trimmed contact page to ' . self::MAX_CONTACT_SECTIONS
+            'trimmed ' . $kind . ' page to ' . $max
                 . ' sections; dropped ' . implode(', ', $dropped),
             true,
         );
         return $page;
+    }
+
+    /** @param array<string,mixed> $page */
+    public static function maxSectionsFor(array $page): int
+    {
+        return !empty($page['front']) ? self::MAX_FRONT_SECTIONS
+            : (self::isContactLikePage($page) ? self::MAX_CONTACT_SECTIONS : self::MAX_INTERIOR_SECTIONS);
+    }
+
+    /**
+     * Select whole sections without rewriting their content or representation.
+     * Shared by the blocks planner and the HTML fragment transformer.
+     *
+     * @param array<string,mixed> $page
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    public static function selectPageSections(array $page, array $sections): array
+    {
+        $max = self::maxSectionsFor($page);
+        if (count($sections) <= $max) {
+            return $sections;
+        }
+        return self::isContactLikePage($page)
+            ? self::selectContactSections($sections, $max)
+            : array_merge(array_slice($sections, 0, $max - 1), [$sections[count($sections) - 1]]);
     }
 
     /**
@@ -2304,7 +2334,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $path,
                 $authoredArchetypes[$i] ?? $archetype,
                 $replacement,
-                'reassigned to clear an adjacent duplicate after the contact trim,'
+                'reassigned to clear an adjacent duplicate after the section trim,'
                     . ' avoiding an image-led band on a brief page',
             );
         }
@@ -2355,6 +2385,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             (string) ($section['type'] ?? ''),
             (string) ($section['purpose'] ?? ''),
             (string) ($section['content_notes'] ?? ''),
+            strip_tags((string) ($section['html'] ?? '')),
         ]));
         $score = 0;
         if (preg_match('/\b(?:form|jp_form|enquiry|inquiry)\b/u', $blob) === 1) {
@@ -3670,7 +3701,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * The most times one archetype may appear on a page of `$sections`.
      *
-     * Never below 2, so short pages (a 2-to-4-section contact page) are governed
+     * Never below 2, so short pages (a 2-to-3-section contact page) are governed
      * by the adjacency rule alone and are not handed an unsatisfiable cap.
      */
     public static function archetypeCap(int $sections): int

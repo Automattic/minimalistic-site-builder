@@ -1,4 +1,5 @@
 {
+    "prompt_revision": "BIGR-1001: reduced section budgets; base capture inputs, cached prefixes, and output artifacts unchanged",
     "snapshot_source": "DP-Slice 2 staged-tree capture; no runtime ref required",
     "snapshot_commit": "f83ff4dc58a735e666f22be8611a669bf1707473",
     "snapshot_tree": "a5245785113b083549b78afe6238c2836d0b9b92",
@@ -44,7 +45,7 @@
         "complete_json_batch_calls": 0,
         "calls": [
             {
-                "prompt_sha256": "0cc0897ee7062e51bf91d8ed45a6c5a1ec5570d3664712e66a131f3abe7814f3",
+                "prompt_sha256": "5b3c8ccecf4230ae7ba67c983d8c0fff3660bcdde80a206933b0276beefdb5a1",
                 "prefix_sha256": [
                     "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
                     "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"
@@ -53,7 +54,7 @@
                 "temperature": null
             },
             {
-                "prompt_sha256": "63612349c9179bddd374951effc129b84d6779088a580ec90d4e54739f811a85",
+                "prompt_sha256": "35207a865a0dd163838ca664fd6655baaa835fe050994440409243570e515069",
                 "prefix_sha256": [
                     "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
                     "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"
@@ -62,7 +63,7 @@
                 "temperature": null
             },
             {
-                "prompt_sha256": "0fec8f95da83603b672566d2a7921b345ecc49b74f963997657a32f09e9f0cd1",
+                "prompt_sha256": "d0f23a479fc736ff208a29e88b01875dbe23dcffa8a45839df139ab9cfe6bbad",
                 "prefix_sha256": [
                     "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
                     "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"

@@ -266,6 +266,8 @@ test('transform-site writes exact legacy part names and AssemblePagesStep accept
 });
 
 test('G1 engine-support families reach final theme CSS after transform-site and page-styles', function () {
+    // These are nested support fixtures within one page section, so the page
+    // budget does not discard an engine family this test needs to exercise.
     $html = '<!doctype html><html><body>'
         . '<header class="site-header"><a class="brand" href="/">Verified Artifact</a>'
         . '<nav class="desktop-nav"><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li></ul></nav>'
@@ -274,7 +276,7 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
         . '<input type="text" name="q" placeholder="Search"></form></span>'
         . '<button class="search-icon"><svg width="12px" height="13px" viewBox="0 0 12 13"><path d="M1 1"></path></svg></button>'
         . '<button class="search-close">close</button></div>'
-        . '<script>document.querySelector(".search-icon").classList.add("visible")</script></header><main>'
+        . '<script>document.querySelector(".search-icon").classList.add("visible")</script></header><main><section id="support-families">'
         . '<section id="geometry"><p id="target" style="width:30rem">Geometry</p></section>'
         . '<section id="richtext"><ul class="maintenance-loop"><li><span>Build</span></li></ul></section>'
         . '<section id="layout"><div class="hero-visual"><div class="artifact-card"><span class="card-label">Input</span>'
@@ -288,7 +290,7 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
         . '<section id="direct-flex"><div class="stack"><a class="row" href="/product">'
         . '<span class="row__name">Product</span><span>$25</span></a></div></section>'
         . '<section id="full-width"><a class="btn btn--full selector-submit" href="/submit">Submit</a></section>'
-        . '</main><footer><span>Portable input.</span></footer></body></html>';
+        . '</section></main><footer><span>Portable input.</span></footer></body></html>';
 
     [$project, $llm, $tmp] = transform_site_fixture($html);
     $project->writeText('design/site.css', implode('', [
@@ -922,4 +924,47 @@ test('transform-site stamps the committed media aspect on the delivered hero roo
     assert_contains('hero-composition--foreground-split', $hero);
     assert_contains('hero-mobile--stack-copy-first', $hero);
     transform_site_cleanup($tmp);
+});
+
+
+test('BIGR-1001 caps HTML sections before materialization while preserving chrome and nested content', function () {
+    $bands = '';
+    foreach (['hero', 'story', 'offerings', 'gallery', 'contact', 'hours', 'close'] as $slug) {
+        $bands .= '<section id="' . $slug . '"><h2>' . ucfirst($slug) . '</h2><p>Exact ' . $slug . ' copy.</p>'
+            . ($slug === 'story' ? '<section id="nested"><h3>Nested detail</h3></section>' : '') . '</section>';
+    }
+    $home = '<!doctype html><html><body><header><p>Shared brand</p></header><main>' . $bands
+        . '</main><footer><p>Shared footer</p></footer></body></html>';
+    $inner = '<main>' . $bands . '</main>';
+    [$project, $llm, $tmp] = transform_site_fixture($home, ['about' => $inner]);
+    try {
+        $spec = $project->readJson('siteSpec.json');
+        $spec['pages'][] = ['slug' => 'contact', 'title' => 'Contact', 'purpose' => 'Reach us'];
+        $project->writeJson('siteSpec.json', $spec);
+        $project->writeJson('design/page-artifact-map.json', ['home' => 'home', 'about' => 'about', 'contact' => 'contact']);
+        $project->writeText('design/contact.html', $inner);
+        transform_site_run($project, $llm);
+        $pages = $project->readJson('pages.json')['pages'];
+        assert_eq([5, 4, 3], array_map(fn ($page) => count($page['sections']), $pages));
+        assert_eq(['hero', 'contact', 'close'], array_column($pages[2]['sections'], 'slug'));
+        assert_eq(['hero', 'story', 'offerings', 'gallery', 'close'], array_column($pages[0]['sections'], 'slug'));
+        assert_contains('Nested detail', $project->readText('theme/parts/page-home--story.html'));
+        assert_contains('Shared brand', $project->readText('theme/parts/header.html'));
+        assert_contains('Shared footer', $project->readText('theme/parts/footer.html'));
+        assert_true(!$project->exists('theme/parts/page-home--hours.html'));
+        assert_true(!$project->exists('theme/parts/page-contact--gallery.html'));
+        assert_eq($home, $project->readText('design/home.html'), 'the authored source remains available for repair');
+        $trail = implode("\n", $project->readJson('warnings.json')['transform-site']);
+        assert_contains('section_budget_exceeded', $trail);
+        assert_contains('design/home.html', $trail);
+        assert_contains('#hours', $trail);
+        assert_contains('authored_value', $trail);
+        assert_contains('delivered_value removed', $trail);
+        assert_contains('disposition', $trail);
+        $before = transform_site_outputs($project);
+        transform_site_run($project, $llm);
+        assert_eq($before, transform_site_outputs($project), 'repeat transformation reaches the same delivered artifact');
+    } finally {
+        transform_site_cleanup($tmp);
+    }
 });
