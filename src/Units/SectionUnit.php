@@ -34,6 +34,9 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * - form_placeholders: true when the host owns a form backend and wants the
  *   section to reserve a form's place with a JP_FORM placeholder block instead
  *   of the default no-form-markup rule; absent/false keeps the default
+ * - map_placeholders: true when the host can geocode an address and wants the
+ *   section to reserve a map's place with a JP_MAP placeholder block;
+ *   absent/false says nothing about maps at all
  *
  * Static authoring rules come from the package's prompt templates; no Project
  * or project artifact is read or written here.
@@ -61,7 +64,8 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   },
      *   neighbors:string,
      *   header_contract:string,
-     *   form_placeholders?:bool
+     *   form_placeholders?:bool,
+     *   map_placeholders?:bool
      * } $input
      */
     public function request(array $input): array
@@ -144,6 +148,14 @@ final class SectionUnit extends AbstractPageSectionUnit
                 ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
                 [],
             ),
+            // No off-mode counterpart to no-forms.md: the system preamble
+            // already covers a brief that asks for a map. That is not a
+            // guarantee none ships — MarkupSanitizer drops an `<iframe>` but
+            // keeps a `wp:embed`, so an off-flag build can still deliver a
+            // third-party map embed, as it could before this contract existed.
+            'map_instructions'   => ($input['map_placeholders'] ?? false)
+                ? $this->renderer->render('jetpack-map.md', [])
+                : '',
         ]);
 
         // The site layer is byte-identical to the one the header, footer and

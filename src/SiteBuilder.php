@@ -118,6 +118,10 @@ final class SiteBuilder
      * $formPlaceholders declares that the host owns a real form backend, so
      * sections reserve a form's place with a JP_FORM placeholder the host
      * replaces after the build; without it they emit no form markup at all.
+     * $mapPlaceholders is the same declaration for maps: the host can turn a
+     * stated address into coordinates, so a section that shows where the place
+     * is reserves a JP_MAP placeholder. The two are separate because they are
+     * separate host capabilities.
      *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
@@ -133,6 +137,7 @@ final class SiteBuilder
         ?string $writingDirection = null,
         bool $formPlaceholders = false,
         ?bool $htmlFirst = null,
+        bool $mapPlaceholders = false,
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -188,6 +193,9 @@ final class SiteBuilder
         }
         if ($formPlaceholders) {
             $seed['form_placeholders'] = true;
+        }
+        if ($mapPlaceholders) {
+            $seed['map_placeholders'] = true;
         }
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];

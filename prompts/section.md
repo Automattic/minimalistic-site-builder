@@ -94,6 +94,8 @@ IMAGE INSTRUCTIONS:
 FORM INSTRUCTIONS:
 {{form_instructions}}
 
+{{map_instructions}}
+
 {{block_markup_output_contract}}
 
 ASSIGNED CARD STYLE (authoritative machine contract): {{card_style}}

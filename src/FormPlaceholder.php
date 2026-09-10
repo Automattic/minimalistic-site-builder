@@ -14,6 +14,9 @@ namespace Automattic\SiteBuild;
  * spec no host could parse, and the host itself to build the form. Two copies
  * of a grammar drift, and the failure when they do is silent — a spec the
  * library accepts and the host cannot read ships as visible body text.
+ *
+ * This file owns the form grammar only. Finding the block that carries it is
+ * HostPlaceholder's job, shared with the map contract.
  */
 final class FormPlaceholder
 {
@@ -43,73 +46,23 @@ final class FormPlaceholder
      */
     public static function find(string $markup): array
     {
-        $pattern = '/<!--\s*wp:paragraph\b[^>]*?-->\s*<p[^>]*class="[^"]*\b'
-            . preg_quote(self::CLASS_NAME, '/')
-            . '\b[^"]*"[^>]*>(.*?)<\/p>\s*<!--\s*\/wp:paragraph\s*-->/is';
-        if (preg_match_all($pattern, $markup, $matches, PREG_SET_ORDER) < 1) {
-            return [];
-        }
-
-        $found = [];
-        foreach ($matches as $match) {
-            $spec = self::text($match[1]);
-            if (str_starts_with($spec, self::MARKER)) {
-                $found[] = ['block' => $match[0], 'spec' => $spec];
-            }
-        }
-
-        return $found;
+        return HostPlaceholder::find($markup, self::MARKER_NAME, self::CLASS_NAME);
     }
 
-    /**
-     * How many times the marker appears at all, placeholder or not.
-     *
-     * The name alone counts, without the colon a spec opens with: a paragraph
-     * reading `JP_FORM` is machine text a visitor can read, and it is the
-     * shape a marker takes when the model drops the spec it was supposed to
-     * carry. Counting only well-formed prefixes would call that page clean.
-     */
+    /** How many times the marker appears at all, placeholder or not. */
     public static function markerCount(string $markup): int
     {
-        return substr_count($markup, self::MARKER_NAME);
+        return HostPlaceholder::markerCount($markup, self::MARKER_NAME);
     }
 
     /**
      * Drop the marker paragraphs no host will ever substitute.
      *
-     * A marker only means something inside a placeholder block: that is the
-     * class the host looks the block up by. Anywhere else the paragraph is
-     * ordinary body copy that happens to read `JP_FORM`, and it ships to the
-     * visitor as grey text. Removing it costs a form the section never had,
-     * because nothing downstream could have built one from it.
-     *
      * @return array{markup:string, removed:int}
      */
     public static function stripLooseMarkers(string $markup): array
     {
-        $placeholders = [];
-        foreach (self::find($markup) as $found) {
-            $placeholders[$found['block']] = true;
-        }
-
-        $pattern = '/<!--\s*wp:paragraph\b[^>]*?-->\s*<p[^>]*>.*?<\/p>\s*<!--\s*\/wp:paragraph\s*-->/is';
-        $removed = 0;
-        $stripped = preg_replace_callback(
-            $pattern,
-            static function (array $match) use ($placeholders, &$removed): string {
-                if (isset($placeholders[$match[0]]) || !str_contains($match[0], self::MARKER_NAME)) {
-                    return $match[0];
-                }
-                ++$removed;
-                return '';
-            },
-            $markup,
-        );
-
-        return [
-            'markup' => $removed > 0 ? trim((string) $stripped) : $markup,
-            'removed' => $removed,
-        ];
+        return HostPlaceholder::stripLooseMarkers($markup, self::MARKER_NAME, self::CLASS_NAME);
     }
 
     /**
@@ -283,11 +236,5 @@ final class FormPlaceholder
             array_map('trim', $out),
             static fn (string $f): bool => $f !== '',
         ));
-    }
-
-    /** The readable text of a placeholder paragraph's inner HTML. */
-    private static function text(string $inner): string
-    {
-        return trim(PlainText::fromMarkup($inner));
     }
 }

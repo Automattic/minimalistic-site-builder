@@ -12,6 +12,7 @@ use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
+use Automattic\SiteBuild\HostPlaceholder;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PageOpeningFallback;
@@ -32,6 +33,7 @@ use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 use Automattic\SiteBuild\FormPlaceholder;
+use Automattic\SiteBuild\MapPlaceholder;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -342,6 +344,7 @@ final class SectionsStep implements Step
         }
         $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
         $files = self::stripLooseFormMarkers($files, $warnings);
+        $files = self::stripLooseMapMarkers($files, $warnings);
         if (self::formPlaceholders($project)) {
             $files = self::ensureContactFormPlaceholders(
                 $pages,
@@ -1057,6 +1060,7 @@ final class SectionsStep implements Step
             // backend exists to replace the placeholders, so it stays in the
             // caller-owned meta rather than in the spec the model authors.
             'form_placeholders' => self::formPlaceholders($project),
+            'map_placeholders'  => self::mapPlaceholders($project),
             'stated_highlight' => SectionComposition::statedHighlightFor(
                 $project->exists('meta.json') ? $project->readJson('meta.json') : [],
             ),
@@ -1177,7 +1181,7 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Remove every marker paragraph that is not a placeholder block.
+     * Remove every JP_FORM paragraph that is not a placeholder block.
      *
      * A model that writes the marker without the class, or without the spec
      * behind it, leaves a paragraph reading `JP_FORM` in the page. No host
@@ -1191,8 +1195,46 @@ final class SectionsStep implements Step
      */
     public static function stripLooseFormMarkers(array $files, array &$warnings = []): array
     {
+        return self::stripLooseMarkers(
+            $files,
+            FormPlaceholder::MARKER_NAME,
+            FormPlaceholder::CLASS_NAME,
+            $warnings,
+        );
+    }
+
+    /**
+     * The same, for JP_MAP. A loose map marker has no injected fallback
+     * behind it — a map needs a real address, and there is none to invent —
+     * so removing it costs the section its map outright.
+     *
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    public static function stripLooseMapMarkers(array $files, array &$warnings = []): array
+    {
+        return self::stripLooseMarkers(
+            $files,
+            MapPlaceholder::MARKER_NAME,
+            MapPlaceholder::CLASS_NAME,
+            $warnings,
+        );
+    }
+
+    /**
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    private static function stripLooseMarkers(
+        array $files,
+        string $markerName,
+        string $className,
+        array &$warnings,
+    ): array {
         foreach ($files as $rel => $markup) {
-            $stripped = FormPlaceholder::stripLooseMarkers($markup);
+            $stripped = HostPlaceholder::stripLooseMarkers($markup, $markerName, $className);
             // A part whose whole body was the marker is left alone: an empty
             // part file is a worse delivery than one grey line, and the
             // validator still reports the marker it kept.
@@ -1201,8 +1243,8 @@ final class SectionsStep implements Step
             }
             $files[$rel] = $stripped['markup'];
             $warnings[] = "file='theme/{$rel}'; block='paragraph'; "
-                . "authored={$stripped['removed']} " . FormPlaceholder::MARKER_NAME
-                . ' marker(s) outside a ' . FormPlaceholder::CLASS_NAME . ' block; delivered=removed; '
+                . "authored={$stripped['removed']} {$markerName}"
+                . " marker(s) outside a {$className} block; delivered=removed; "
                 . 'disposition=no host substitutes these, so they would ship as visible text';
         }
         return $files;
@@ -1335,6 +1377,22 @@ final class SectionsStep implements Step
         }
 
         return (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false);
+    }
+
+    /**
+     * Whether this build's host can turn an address into a real map.
+     *
+     * Set by the caller at createProject time (CLI: --use-jetpack-maps). Its
+     * own key rather than formPlaceholders': a host can own a form backend and
+     * not be able to geocode, which is the state this ships into.
+     */
+    public static function mapPlaceholders(Project $project): bool
+    {
+        if (!$project->exists('meta.json')) {
+            return false;
+        }
+
+        return (bool) ($project->readJson('meta.json')['map_placeholders'] ?? false);
     }
 
     /** The portable routing rule: position and front flag, never mutable role prose. */
