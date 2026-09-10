@@ -97,11 +97,29 @@
         }
     }, true);
 
-    if (!('IntersectionObserver' in window)
-        || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!('IntersectionObserver' in window) || motionPreference.matches) {
         return;
     }
     root.classList.add('motion-js');
+    var restoreMarquees = [];
+    var activeCounters = [];
+
+    // Keep this listener after entrance observers finish, and on pages with
+    // only a marquee. CSS can stop animation but cannot undo repeated DOM.
+    function honorReducedMotion() {
+        if (!motionPreference.matches) {
+            return;
+        }
+        restoreMarquees.splice(0).forEach(function (restore) { restore(); });
+        activeCounters.slice().forEach(function (finish) { finish(); });
+    }
+    if (typeof motionPreference.addEventListener === 'function') {
+        motionPreference.addEventListener('change', honorReducedMotion);
+    } else if (typeof motionPreference.addListener === 'function') {
+        motionPreference.addListener(honorReducedMotion);
+    }
+
 
     // Build each `.marquee` paragraph into a track of two identical groups
     // of repeated items (frm W8c): the CSS loop translates the track by
@@ -110,6 +128,7 @@
     // motion-ready and only under motion-js, so reduced motion and no-JS
     // keep the plain static line.
     function buildMarquees() {
+        if (motionPreference.matches) { return; }
         var marquees = document.querySelectorAll('.marquee:not(.marquee--built)');
         Array.prototype.forEach.call(marquees, function (marquee) {
             var text = (marquee.textContent || '').replace(/\s+/g, ' ').trim();
@@ -117,6 +136,16 @@
                 return;
             }
             var originalNodes = Array.prototype.slice.call(marquee.childNodes);
+            var addedTabIndex = !marquee.hasAttribute('tabindex');
+            restoreMarquees.push(function () {
+                var focused = document.activeElement;
+                var restoreFocus = focused && focused !== marquee && marquee.contains(focused);
+                marquee.textContent = '';
+                originalNodes.forEach(function (node) { marquee.appendChild(node); });
+                marquee.classList.remove('marquee--built');
+                if (addedTabIndex) { marquee.removeAttribute('tabindex'); }
+                if (restoreFocus) { focused.focus({ preventScroll: true }); }
+            });
             var group = document.createElement('span');
             group.className = 'marquee__group';
             var makeItem = function (hidden) {
@@ -153,11 +182,16 @@
             track.appendChild(clone);
             marquee.appendChild(track);
             marquee.classList.add('marquee--built');
-            if (!marquee.hasAttribute('tabindex')) { marquee.setAttribute('tabindex', '0'); }
+            if (addedTabIndex) { marquee.setAttribute('tabindex', '0'); }
         });
     }
 
     function reveal() {
+        // The preference can change between script loading and DOM readiness.
+        if (motionPreference.matches) {
+            root.classList.remove('motion-js');
+            return;
+        }
         var targets;
         try {
             splitWords();
@@ -254,7 +288,7 @@
         // move. Static paths (reduced motion, motion-skip, no JS) never call
         // this, so the final figure is what they show.
         function startCountUp(target) {
-            if (!target.classList.contains('count-up') || target.classList.contains('motion-skip') || target.getAttribute('data-count-started') === 'true') {
+            if (motionPreference.matches || !target.classList.contains('count-up') || target.classList.contains('motion-skip') || target.getAttribute('data-count-started') === 'true') {
                 return;
             }
             target.setAttribute('data-count-started', 'true');
@@ -289,24 +323,40 @@
                 return prefix + fixed + suffix;
             };
             var start = null;
+            var frame = null;
+            var running = true;
+            function finishCount() {
+                if (!running) { return; }
+                running = false;
+                if (frame !== null) { window.cancelAnimationFrame(frame); }
+                target.textContent = '';
+                originalNodes.forEach(function (node) { target.appendChild(node); });
+                var index = activeCounters.indexOf(finishCount);
+                if (index !== -1) { activeCounters.splice(index, 1); }
+            }
             var step = function (now) {
+                if (!running) { return; }
+                // Check again at the frame boundary even if the media-query
+                // change event has not been delivered yet.
+                if (motionPreference.matches || target.classList.contains('motion-skip')) {
+                    finishCount();
+                    return;
+                }
                 if (start === null) {
                     start = now;
                 }
                 var progress = Math.min(1, (now - start) / duration);
                 var eased = 1 - Math.pow(1 - progress, 3);
                 if (progress >= 1) {
-                    target.textContent = '';
-                    originalNodes.forEach(function (node) { target.appendChild(node); });
-                } else {
-                    target.textContent = format(finalValue * eased);
+                    finishCount();
+                    return;
                 }
-                if (progress < 1) {
-                    window.requestAnimationFrame(step);
-                }
+                target.textContent = format(finalValue * eased);
+                frame = window.requestAnimationFrame(step);
             };
+            activeCounters.push(finishCount);
             target.textContent = format(0);
-            window.requestAnimationFrame(step);
+            frame = window.requestAnimationFrame(step);
         }
 
         function show(target) {
