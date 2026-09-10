@@ -33,11 +33,11 @@ function section_composition_row(int $images = 1): string
 test('the section catalog rejects an unknown archetype id', function () {
     assert_true(!SectionComposition::isKnown('sticky-pair'), 'an uncataloged id is not known');
     assert_true(!SectionComposition::isKnown(''), 'an empty id is not known');
-    assert_true(SectionComposition::isKnown('centered-stack'), 'a cataloged id is known');
+    assert_true(SectionComposition::isKnown('cta-panel'), 'a cataloged id is known');
 
     $error = assert_throws(fn () => SectionComposition::assertKnown('sticky-pair'));
     assert_contains("unknown section archetype 'sticky-pair'", $error->getMessage());
-    assert_contains('centered-stack', $error->getMessage(), 'the message lists the valid ids');
+    assert_contains('cta-panel', $error->getMessage(), 'the message lists the valid ids');
 
     assert_throws(fn () => SectionComposition::metadata('sticky-pair'));
     assert_throws(fn () => SectionComposition::marker('sticky-pair'));
@@ -245,7 +245,7 @@ test('the section eligibility gate reserves offset-grid for a broken-grid rhythm
     );
 
     assert_contains('offset or gallery band rhythm', SectionComposition::ineligibleReason('offset-grid'));
-    assert_eq('', SectionComposition::ineligibleReason('centered-stack'));
+    assert_eq('', SectionComposition::ineligibleReason('cta-panel'));
 });
 
 test('the section eligibility context refuses a fact the catalog never reads', function () {
@@ -304,10 +304,8 @@ test('the section catalog stays quiet on markup that executes its assignment', f
             . '<!-- wp:paragraph --><p>Over the image.</p><!-- /wp:paragraph -->'
             . '</div><!-- /wp:cover -->',
         'asymmetric-split' => section_composition_row(1),
-        'centered-stack' => '<!-- wp:paragraph --><p>One column.</p><!-- /wp:paragraph -->',
         'offset-grid' => section_composition_row(2),
         'equal-card-grid' => section_composition_row(3),
-        'list-with-thumbnails' => section_composition_row(2),
     ] as $archetype => $inner) {
         assert_eq(
             [],
@@ -467,47 +465,31 @@ test('the section catalog reports an ignored assignment as an advisory warning',
     $missingMarker = '<!-- wp:group --><div class="wp-block-group">'
         . '<!-- wp:paragraph --><p>No marker.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
-    $rows = SectionComposition::markupWarnings($missingMarker, 'centered-stack', 'page-home--story');
+    $rows = SectionComposition::markupWarnings($missingMarker, 'full-bleed-cover', 'page-home--story');
     assert_eq(1, count($rows), 'one missing hook is one row');
     assert_contains("file='theme/parts/page-home--story.html'", $rows[0]);
     assert_contains('archetype root marker', $rows[0]);
-    assert_contains('section-composition--centered-stack', $rows[0]);
+    assert_contains('section-composition--full-bleed-cover', $rows[0]);
     assert_contains('disposition=safe parseable section was retained', $rows[0]);
 
-    // A split delivered as one stacked column, with no thumbnail row beneath.
+    // A staggered grid delivered as one stacked column, with no row beneath.
     $stacked = section_composition_markup(
-        'list-with-thumbnails',
+        'offset-grid',
         '<!-- wp:paragraph --><p>Just a list.</p><!-- /wp:paragraph -->'
     );
-    $joined = implode("\n", SectionComposition::markupWarnings($stacked, 'list-with-thumbnails', 'page-menu--index'));
-    assert_contains('archetype media count', $joined, 'a thumbnail row with no thumbnail is reported');
-    assert_contains('"min_images":1', $joined);
-    assert_contains('archetype row topology', $joined, 'a stacked column is not a thumbnail row');
+    $joined = implode("\n", SectionComposition::markupWarnings($stacked, 'offset-grid', 'page-menu--index'));
+    assert_contains('archetype media count', $joined, 'a staggered grid with no picture is reported');
+    assert_contains('"min_images":2', $joined);
+    assert_contains('archetype row topology', $joined, 'a stacked column is not a staggered row');
     assert_contains('"row_block_count":0', $joined);
 
-    $overRation = section_composition_markup('centered-stack', str_repeat(
+    $overRation = section_composition_markup('full-bleed-cover', str_repeat(
         '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure><!-- /wp:image -->',
-        5
+        7
     ));
-    $joined = implode("\n", SectionComposition::markupWarnings($overRation, 'centered-stack', 'page-home--story'));
+    $joined = implode("\n", SectionComposition::markupWarnings($overRation, 'full-bleed-cover', 'page-home--story'));
     assert_contains('archetype media count', $joined);
-    assert_contains('"image_count":5', $joined);
-});
-
-test('centered-stack budgets one supporting image and retains excess authored media with a warning (BIGR-988)', function () {
-    $image = '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure><!-- /wp:image -->';
-    $single = section_composition_markup('centered-stack', $image);
-    assert_eq([], SectionComposition::markupWarnings($single, 'centered-stack', 'page-home--invitation'));
-
-    $pair = section_composition_markup('centered-stack', $image . $image);
-    $before = $pair;
-    $warnings = SectionComposition::markupWarnings($pair, 'centered-stack', 'page-home--invitation');
-    assert_eq($before, $pair, 'an advisory check never removes supplied media');
-    assert_eq(1, count($warnings));
-    assert_contains('"max_images":1', $warnings[0]);
-    assert_contains('"image_count":2', $warnings[0]);
-    assert_contains('page-home--invitation', $warnings[0]);
-    assert_contains('disposition=safe parseable section was retained', $warnings[0]);
+    assert_contains('"image_count":7', $joined);
 });
 
 test('the section catalog advisory check never throws on hostile markup', function () {
@@ -629,8 +611,8 @@ test('the cta-panel archetype checks one contained panel and exactly one action 
     assert_contains('cta panel alignment', $joined, 'a panel with no image reports a start-aligned lead');
     assert_contains('"start_aligned_text_blocks":1', $joined);
 
-    $other = str_replace('section-composition--cta-panel', 'section-composition--centered-stack', $noPanel);
-    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'centered-stack', 'x')), 'cta panel'));
+    $other = str_replace('section-composition--cta-panel', 'section-composition--faq-split', $noPanel);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'faq-split', 'x')), 'cta panel'));
 });
 
 test('the pricing-tiers archetype checks one row of two or three tiers, one highlight, and one list and action per tier (frm W3c)', function () {
@@ -814,32 +796,6 @@ test('the zigzag-steps archetype checks three to five two-column rows whose copy
     assert_eq([], SectionComposition::markupWarnings($deep, 'zigzag-steps', 'page-home--process'), 'a wrapped heading still names the copy side');
 });
 
-test('the statement-lines archetype checks one marked group of three to six heading lines and nothing else (frm W3e)', function () {
-    assert_true(in_array('statement-lines', SectionComposition::ARCHETYPES, true));
-    $meta = SectionComposition::metadata('statement-lines');
-    assert_eq('section-compositions/statement-lines.md', $meta['prompt']);
-    assert_eq(false, $meta['requires_row']);
-    assert_eq(0, $meta['max_images']);
-    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'zigzag-steps, statement-lines'));
-
-    $line = static fn (string $t): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading -->';
-    $list = static fn (string $inner): string => '<!-- wp:group {"className":"statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group statement-lines">' . $inner . '</div><!-- /wp:group -->';
-    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--statement-lines"><!-- wp:heading --><h2 class="wp-block-heading">What we stand for</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
-
-    $good = $band($list($line('Contrast is a decision') . $line('Type carries the argument') . $line('Nothing without weight')));
-    assert_eq([], SectionComposition::markupWarnings($good, 'statement-lines', 'page-home--values'));
-    $two = $band($list($line('A') . $line('B')));
-    assert_contains('statement lines list', implode("\n", SectionComposition::markupWarnings($two, 'statement-lines', 'page-home--values')));
-    $mixed = $band($list($line('A') . $line('B') . $line('C') . '<!-- wp:paragraph --><p>Not a line.</p><!-- /wp:paragraph -->'));
-    $joined = implode("\n", SectionComposition::markupWarnings($mixed, 'statement-lines', 'page-home--values'));
-    assert_contains('"others":1', $joined);
-    $none = $band($line('A') . $line('B') . $line('C'));
-    assert_contains('"list_groups":0', implode("\n", SectionComposition::markupWarnings($none, 'statement-lines', 'page-home--values')));
-    $plain = str_replace('section-composition--statement-lines', 'section-composition--centered-stack', $two);
-    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'statement'));
-});
-
 test('the project-grid-2x2 archetype checks rows of two cover tiles, each naming its project once (frm W3h)', function () {
     assert_true(in_array('project-grid-2x2', SectionComposition::ARCHETYPES, true));
     $meta = SectionComposition::metadata('project-grid-2x2');
@@ -848,7 +804,7 @@ test('the project-grid-2x2 archetype checks rows of two cover tiles, each naming
     assert_eq(4, $meta['max_images']);
     assert_true($meta['requires_row']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'statement-lines, project-grid-2x2'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'zigzag-steps, project-grid-2x2'));
     assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), '- project-grid-2x2 — '));
     assert_eq([2, 4], SectionComposition::PROJECT_TILE_COUNTS);
     assert_eq('project-meta', SectionComposition::PROJECT_META_CLASS);
@@ -913,8 +869,8 @@ test('the logo-strip archetype checks one marked row of four to eight one-line n
     $unmarked = $band(str_replace('logo-strip', 'brand-row', $row($name('A') . $name('B') . $name('C') . $name('D'))));
     assert_contains('"rows":0', implode("\n", SectionComposition::markupWarnings($unmarked, 'logo-strip', 'page-home--partners')));
 
-    $plain = str_replace('section-composition--logo-strip', 'section-composition--centered-stack', $three);
-    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'logo strip'));
+    $plain = str_replace('section-composition--logo-strip', 'section-composition--faq-split', $three);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'faq-split', 'x')), 'logo strip'));
 });
 
 test('a highlighted card the brief states reaches an equal-card-grid as one committed highlight (frm PR-3s)', function () {

@@ -755,7 +755,7 @@ test('transform-site reroutes only failed inner pages through scoped legacy plan
         'type' => 'about',
         'purpose' => 'Explain the studio',
         'content_notes' => 'Introduce the team.',
-        'layout_archetype' => 'centered-stack',
+        'layout_archetype' => 'bento-grid',
         'background' => 'base',
         'vertical_density' => 'standard',
         'handoff' => 'Between the site header and footer.',

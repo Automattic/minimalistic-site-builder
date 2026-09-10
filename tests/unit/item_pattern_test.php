@@ -80,8 +80,8 @@ test('item-pattern delivery repairs only the root marker and advises on missing 
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);
     $input = item_pattern_unit_input('spec-table');
-    $raw = '<!-- wp:group {"className":"section-composition--centered-stack"} -->'
-        . '<div class="section-composition--centered-stack">'
+    $raw = '<!-- wp:group {"className":"section-composition--bento-grid"} -->'
+        . '<div class="section-composition--bento-grid">'
         . '<!-- wp:group {"className":"item-pattern__item"} --><div class="item-pattern__item">'
         . '<!-- wp:paragraph --><p>Material</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"item-pattern__item"} --><div class="item-pattern__item">'
@@ -104,8 +104,8 @@ test('item-pattern delivery repairs only the root marker and advises on missing 
 test('a section preserves separators with or without an assigned ruled recipe', function (): void {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);
-    $raw = '<!-- wp:group {"className":"section-composition--centered-stack"} -->'
-        . '<div class="section-composition--centered-stack">'
+    $raw = '<!-- wp:group {"className":"section-composition--bento-grid"} -->'
+        . '<div class="section-composition--bento-grid">'
         . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Archive</h2><!-- /wp:heading -->'
         . '<!-- wp:separator {"className":"is-style-wide"} --><hr class="wp-block-separator is-style-wide"/>'
         . '<!-- /wp:separator -->'
@@ -141,8 +141,8 @@ test('a section keeps authored rule styling independently of its item recipe', f
     // planned as card, bound to a border in the model's own theme.json css.
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);
-    $raw = '<!-- wp:group {"className":"section-composition--centered-stack is-style-rule-list"} -->'
-        . '<div class="wp-block-group section-composition--centered-stack is-style-rule-list">'
+    $raw = '<!-- wp:group {"className":"section-composition--bento-grid is-style-rule-list"} -->'
+        . '<div class="wp-block-group section-composition--bento-grid is-style-rule-list">'
         . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Steps</h2><!-- /wp:heading -->'
         . '<!-- wp:group {"className":"item-pattern__item is-style-rule-row"} -->'
         . '<div class="wp-block-group item-pattern__item is-style-rule-row">'
@@ -187,7 +187,7 @@ function item_pattern_unit_input(?string $pattern): array
             'type' => 'archive',
             'purpose' => 'Help readers scan the archive.',
             'content_notes' => 'Three real entries.',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'base',
             'vertical_density' => 'compact',
             'text_placement' => 'centered',
@@ -204,7 +204,7 @@ test('a cardless archetype releases its planned item pattern and corrects the no
         'slug' => 'home',
         'sections' => [
             ['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'asymmetric-split', 'item_pattern' => null],
-            ['slug' => 'services', 'type' => 'services', 'layout_archetype' => 'statement-lines', 'item_pattern' => 'card', 'content_notes' => 'Four service cards.'],
+            ['slug' => 'services', 'type' => 'services', 'layout_archetype' => 'feature-row-hairlines', 'item_pattern' => 'card', 'content_notes' => 'Four service cards.'],
             ['slug' => 'numbers', 'type' => 'metrics', 'layout_archetype' => 'stat-ledger', 'item_pattern' => 'rule-row'],
             ['slug' => 'partners', 'type' => 'partners', 'layout_archetype' => 'logo-strip', 'item_pattern' => null],
             ['slug' => 'values', 'type' => 'values', 'layout_archetype' => 'feature-row-hairlines', 'item_pattern' => 'card'],
@@ -217,7 +217,7 @@ test('a cardless archetype releases its planned item pattern and corrects the no
     assert_eq([null, null, null, null, null, 'card', 'card'], array_column($delivered[0]['sections'], 'item_pattern'));
     assert_eq(3, count($repairs), 'one repair per authored pattern on a cardless archetype');
     assert_contains("sections[1].item_pattern", $repairs[0]);
-    assert_contains("released the 'statement-lines' section from the item idiom", $repairs[0]);
+    assert_contains("released the 'feature-row-hairlines' section from the item idiom", $repairs[0]);
     assert_contains("sections[2].item_pattern", $repairs[1]);
     assert_contains("sections[4].item_pattern", $repairs[2]);
     assert_contains('Four service cards.', $delivered[0]['sections'][1]['content_notes']);

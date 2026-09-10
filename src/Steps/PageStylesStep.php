@@ -4197,7 +4197,14 @@ CSS;
         if (preg_match('/--wp--preset--shadow--depth\s*:/i', $stripped) === 1) {
             $problems[] = 'the depth shadow preset variable is build-owned and cannot be redeclared';
         }
+        [, $emphasisDrops] = CssChecks::dropEmphasisHookDeclarations($stripped);
+        if ($emphasisDrops !== []) {
+            $problems[] = 'heading emphasis declarations are build-owned';
+        }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (str_starts_with(strtolower($declaration['property']), '--wp--preset--')) {
+                $problems[] = 'WordPress preset variables are build-owned and cannot be redeclared';
+            }
             if (self::declarationTargetsShape($declaration)
                 && CssChecks::isShapeAffectingDeclaration(
                     $declaration['property'],
@@ -4470,6 +4477,7 @@ CSS;
      */
     public static function dropOffendingDeclarations(string $css): array
     {
+        [$css, $emphasisDrops] = CssChecks::dropEmphasisHookDeclarations($css);
         $problems = [];
         foreach (CssChecks::scanDeclarations($css) as $declaration) {
             $problem = self::declarationProblem(
@@ -4495,7 +4503,10 @@ CSS;
             )) . ' (' . $problems[$declaration['start']] . ')',
             $droppedRows,
         );
-        return [$salvaged, array_values($dropped)];
+        return [$salvaged, [
+            ...array_map(static fn (string $raw): string => $raw . ' (heading emphasis is build-owned)', $emphasisDrops),
+            ...array_values($dropped),
+        ]];
     }
 
     /**
@@ -4522,6 +4533,9 @@ CSS;
         }
         if ($property === '--wp--preset--shadow--depth') {
             return 'the depth shadow preset variable is build-owned';
+        }
+        if (str_starts_with($property, '--wp--preset--')) {
+            return 'WordPress preset variables are build-owned';
         }
         if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
             return 'contained-image/button corner is shape-owned by the design direction';

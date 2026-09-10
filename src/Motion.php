@@ -31,14 +31,24 @@ final class Motion
     public const SCROLL_CLASSES = [
         'reveal', 'reveal-up', 'reveal-fade', 'reveal-scale',
         'reveal-blur', 'reveal-wipe', 'reveal-wipe-up', 'reveal-aperture', 'reveal-zoom',
-        'stagger-children', 'hero-entrance',
+        'stagger-children', 'hero-entrance', 'word-reveal',
+        'count-up',
     ];
 
+    /** Entrances that do not spend a section's entrance budget: a stat row counts every figure (frm W8b). */
+    public const UNBUDGETED_ENTRANCES = ['count-up'];
+
+    /** Hero-only entrances: the first section, once per page each. */
+    public const HERO_CLASSES = ['hero-entrance', 'word-reveal'];
+
     /** Ambient classes: signature effects, budgeted to ONE per page. */
-    public const AMBIENT_CLASSES = ['ken-burns', 'gradient-shift', 'ambient-drift'];
+    public const AMBIENT_CLASSES = ['ken-burns', 'gradient-shift', 'ambient-drift', 'marquee'];
 
     /** Hover classes implemented by the static kit and gated by the profile. */
     public const HOVER_CLASSES = ['hover-lift', 'hover-reveal'];
+
+    /** Scroll-driven layout, not an entrance: the cards of one container stack as the page scrolls (frm W8d). */
+    public const STACK_CLASSES = ['sticky-stack'];
 
     /** Hard cap promised by the section prompt; each part is one section. */
     public const MAX_ENTRANCES_PER_SECTION = 2;
@@ -49,7 +59,7 @@ final class Motion
     /** @return string[] every class the motion kit's CSS implements */
     public static function kitClasses(): array
     {
-        return array_merge(self::SCROLL_CLASSES, self::AMBIENT_CLASSES, self::HOVER_CLASSES);
+        return array_merge(self::SCROLL_CLASSES, self::AMBIENT_CLASSES, self::HOVER_CLASSES, self::STACK_CLASSES);
     }
 
     /**
@@ -84,7 +94,7 @@ final class Motion
             return true;
         }
         return preg_match(
-            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
+            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee|count-up|sticky-stack)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
             $token
         ) === 1;
     }
@@ -98,7 +108,7 @@ final class Motion
      */
     public static function noteClasses(): array
     {
-        return array_values(array_diff(self::kitClasses(), ['hero-entrance']));
+        return array_values(array_diff(self::kitClasses(), self::HERO_CLASSES));
     }
 
     /**
@@ -202,6 +212,9 @@ final class Motion
     /** Which site-wide note budget a class draws from. Entrance is uncapped. */
     private static function noteBucket(string $class): string
     {
+        if ($class === 'marquee') {
+            return 'marquee';
+        }
         if (in_array($class, self::AMBIENT_CLASSES, true)) {
             return 'ambient';
         }
