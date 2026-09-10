@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Steps\HeaderHeroStep;
 
 /** Return the complete CSS block beginning at a selector/at-rule needle. */
 function header_asset_css_block(string $css, string $needle): string
@@ -287,4 +289,40 @@ test('header driver runtime covers restored scroll, measurement, admin bar, and 
 
     assert_eq(0, $exit, implode("\n", $output));
     assert_contains('header state driver runtime harness passed', implode("\n", $output));
+});
+
+test('header CSS reserves the overlay safe-top zone the contract states', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    // The kit's reservation and the contract fact are the same zone stated
+    // twice; a change to one that misses the other reopens the bug.
+    assert_contains('--header-safe-top: ' . AboveFoldContract::OVERLAY_SAFE_TOP_PX . 'px', $css);
+    assert_eq(80, AboveFoldContract::OVERLAY_SAFE_TOP_PX);
+
+    // Only bands the build marked are padded, and only beneath an overlay:
+    // a stacked header takes its own height out of the flow already.
+    $cover = header_asset_css_block(
+        $css,
+        ':is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)'
+            . "\n    + .wp-block-post-content\n    ." . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS
+    );
+    assert_contains('> .wp-block-cover__inner-container', $cover);
+    assert_contains('padding-block: var(--header-safe-top)', $cover);
+
+    // A cover centres its content, so the zone is reserved on BOTH sides: an
+    // opening that later gains a height keeps the composition it was given.
+    assert_true(
+        !str_contains($cover, 'padding-block-start:'),
+        'a one-sided reservation would push centred hero content off its centre line'
+    );
+
+    $group = header_asset_css_block(
+        $css,
+        '.' . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ':not(.wp-block-cover)'
+    );
+    assert_contains('margin-block-start: var(--header-safe-top)', $group);
+
+    // Print gives the header its own space, so the zone collapses there.
+    $print = header_asset_css_block($css, '@media print');
+    assert_contains('--header-safe-top: 0px', $print);
 });

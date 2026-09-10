@@ -135,6 +135,14 @@ final class HeaderHeroStep implements Step
     public const NAV_OVERLAY_ONLY_CLASS = 'header-nav-overlay-only';
 
     /**
+     * A page-opening band with no height of its own, beneath an overlay header
+     * that has none either. The kit reserves
+     * AboveFoldContract::OVERLAY_SAFE_TOP_PX around the content of every band
+     * wearing this class; header.css carries the geometry.
+     */
+    public const OVERLAY_CLEARANCE_CLASS = 'header-overlay-clearance';
+
+    /**
      * The generated brand mark, as opposed to a logo the design authored.
      * FinalizeThemeStep matches on it to hide the site title while the mark
      * renders, so the two must name the same class.
@@ -575,6 +583,13 @@ final class HeaderHeroStep implements Step
             self::capOpeningCovers($project, $pages, $writes, $report);
         }
 
+        // The overlay's mirror of that budget: a stacked header takes its own
+        // height out of the first viewport, an overlay takes none and pays for
+        // it by landing on whatever the page opens with.
+        if (($final['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY) {
+            self::reserveOverlayOpenings($project, $pages, $protection, $writes, $report);
+        }
+
         // An overlay that survived to the final relation may earn a truly
         // transparent resting state: when every delivered opening cover's own
         // dim proves the persisted foreground, the kit scrim is redundant
@@ -922,7 +937,23 @@ final class HeaderHeroStep implements Step
     /** Return the qualifying first-band evidence, or null when none exists. */
     private static function overlayOpeningEvidence(string $markup, string $protection = 'contrast'): ?string
     {
-        $doc = BlockMarkup::parse($markup);
+        $band = self::overlayOpeningBand(BlockMarkup::parse($markup), $markup, $protection);
+        return $band === null ? null : $band['evidence'];
+    }
+
+    /**
+     * The opening's first visual band, and why it qualifies to sit beneath an
+     * overlay header. One traversal serves both callers: the gate that decides
+     * whether the overlay is earned at all, and the clearance pass that has to
+     * reach the same band to mark it. Null when nothing qualifies.
+     *
+     * @return array{index:int, evidence:string}|null
+     */
+    private static function overlayOpeningBand(
+        BlockMarkup $doc,
+        string $markup,
+        string $protection,
+    ): ?array {
         $i = $doc->topLevel();
         if ($i === null || self::hasVisibleLeadingMarkup($markup, $doc->openingOffset($i))) {
             return null;
@@ -935,16 +966,18 @@ final class HeaderHeroStep implements Step
                     || ($attrs['useFeaturedImage'] ?? false) === true
                     || str_contains($doc->ownHtml($i), 'wp-block-cover__image-background');
                 if ($hasMedia) {
-                    return ($attrs['align'] ?? null) === 'full' ? 'image-backed cover' : null;
+                    return ($attrs['align'] ?? null) === 'full'
+                        ? ['index' => $i, 'evidence' => 'image-backed cover']
+                        : null;
                 }
                 if (($attrs['overlayColor'] ?? null) === $protection
                     || ($attrs['backgroundColor'] ?? null) === $protection) {
-                    return 'protection-token cover';
+                    return ['index' => $i, 'evidence' => 'protection-token cover'];
                 }
                 return null;
             }
             if (($attrs['backgroundColor'] ?? null) === $protection) {
-                return 'protection-token surface';
+                return ['index' => $i, 'evidence' => 'protection-token surface'];
             }
             if (!self::isTransparentZeroOffsetWrapper($doc, $i, $attrs)) {
                 return null;
@@ -2461,6 +2494,75 @@ final class HeaderHeroStep implements Step
                 . '(an opaque header stacks above this page-opening section; together they must fit one viewport)';
         }
         return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * Mark a page-opening band that states no height of its own. A band that
+     * sets a minimum height already seats its content clear of the header and
+     * is left alone, so every reviewed image-led opening stays as composed.
+     * Pure — unit-testable.
+     *
+     * @return array{markup:string, notes:string[]}
+     */
+    public static function reserveOverlayClearance(string $markup, string $protection = 'contrast'): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $band = self::overlayOpeningBand($doc, $markup, $protection);
+        if ($band === null) {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $attrs = $doc->attrs($band['index']) ?? [];
+        if (($attrs['minHeight'] ?? null) !== null) {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $classes = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+        if (self::hasClassToken($classes, self::OVERLAY_CLEARANCE_CLASS)) {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $attrs['className'] = self::withClassToken($classes, self::OVERLAY_CLEARANCE_CLASS);
+        $doc->setAttrs($band['index'], $attrs);
+        return [
+            'markup' => $doc->render(),
+            'notes' => [
+                "opening {$band['evidence']} marked " . self::OVERLAY_CLEARANCE_CLASS
+                    . ' (it states no height of its own, so the overlay header would otherwise '
+                    . 'paint over its first line)',
+            ],
+        ];
+    }
+
+    /**
+     * Reserve the overlay header's zone on every page-opening band in the
+     * pending transaction that states no height of its own.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string> $writes
+     * @param list<string> $report
+     */
+    private static function reserveOverlayOpenings(
+        Project $project,
+        array $pages,
+        string $protection,
+        array &$writes,
+        array &$report,
+    ): void {
+        foreach ($pages as $page) {
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            $slug = trim((string) (SectionsStep::openingSection($page)['slug'] ?? ''));
+            if ($pageSlug === '' || $slug === '') {
+                continue;
+            }
+            $rel = 'parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html';
+            if (!isset($writes[$rel]) && !$project->exists('theme/' . $rel)) {
+                continue;
+            }
+            $markup = $writes[$rel] ?? $project->readText('theme/' . $rel);
+            $result = self::reserveOverlayClearance($markup, $protection);
+            $writes[$rel] = $result['markup'];
+            foreach ($result['notes'] as $note) {
+                $report[] = "[{$rel}] {$note}";
+            }
+        }
     }
 
     /**
