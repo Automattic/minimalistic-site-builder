@@ -9,11 +9,11 @@ use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
-use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -363,11 +363,6 @@ final class FinalizeThemeStep implements Step
         );
     }
 
-    /**
-     * The corner-language kit: contained media surfaces theme.json cannot reach
-     * (the media half of core/media-text, the core/cover canvas). `sharp` and an
-     * absent commitment resolve to no CSS, so the kit is pruned instead.
-     */
     public static function shapeKit(): OverlayKit
     {
         return new OverlayKit(
