@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Steps\HeaderHeroStep;
 
 /** Return the complete CSS block beginning at a selector/at-rule needle. */
 function header_asset_css_block(string $css, string $needle): string
@@ -287,4 +289,187 @@ test('header driver runtime covers restored scroll, measurement, admin bar, and 
 
     assert_eq(0, $exit, implode("\n", $output));
     assert_contains('header state driver runtime harness passed', implode("\n", $output));
+});
+
+test('header CSS reserves the overlay safe-top zone the contract states', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $scope = ':is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)'
+        . "\n    + .wp-block-post-content\n    .";
+
+    // The kit's reservation and the contract fact are the same zone stated
+    // twice; a change to one that misses the other reopens the bug.
+    assert_contains('--header-safe-top: ' . AboveFoldContract::OVERLAY_SAFE_TOP_PX . 'px', $css);
+    assert_eq(80, AboveFoldContract::OVERLAY_SAFE_TOP_PX);
+
+    // The zone actually applied is what the header covers — its measured
+    // height plus the admin bar it sits below — with the contract fact only
+    // as the floor for the first paint and for no-JS.
+    $derived = header_asset_css_block($css, $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ' {');
+    assert_contains('--header-clearance: max(', $derived);
+    assert_contains('var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px)', $derived);
+    assert_contains('var(--header-safe-top)', $derived);
+
+    // A cover centres its content, so the zone is reserved on BOTH sides: an
+    // opening that later gains a height keeps the composition it was given.
+    // Matched exactly, because `padding-block: X 0` is the one-sided form.
+    $cover = header_asset_css_block(
+        $css,
+        $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . "\n    > .wp-block-cover__inner-container"
+    );
+    assert_contains('padding-block: var(--header-clearance);', $cover);
+    assert_true(
+        preg_match('/padding-block:\s*var\(--header-clearance\)\s*;/', $cover) === 1
+            && preg_match('/padding(?:-block)?-(?:start|top):/', $cover) !== 1,
+        'a one-sided reservation would push centred hero content off its centre line'
+    );
+
+    // A flow group takes a spacer box, never a margin: a margin on the first
+    // child collapses out of a band with no top padding of its own.
+    $group = header_asset_css_block(
+        $css,
+        $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ':not(.wp-block-cover)::before'
+    );
+    assert_contains('block-size: var(--header-clearance)', $group);
+    assert_true(
+        !str_contains($group, 'margin-block-start'),
+        'a collapsible margin would move the band instead of clearing its content'
+    );
+
+    // Both consumers stay scoped to an overlay shell: a stacked header takes
+    // its own height out of the flow and needs no zone reserved for it.
+    assert_eq(
+        3,
+        substr_count($css, $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS),
+        'every clearance rule outside the print block is scoped to the overlay shells'
+    );
+
+    // Print gives the header its own space, so the zone collapses there. The
+    // whole clearance is zeroed, not just its floor: the driver's measured
+    // height outlives the media switch. It overrides through cascade order,
+    // so it has to repeat the same overlay scope.
+    $print = header_asset_css_block($css, '@media print');
+    assert_contains('--header-clearance: 0px', $print);
+    assert_contains('.site-header-shell--overlay-transient)', $print);
+    assert_contains('.' . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ' {', $print);
+});
+
+test('header CSS paints the floating pill on the inner row and keeps the rail transparent (frm W1a)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill,');
+    assert_contains('background-color: transparent !important', $rail, 'the rail paints nothing in any state');
+    assert_contains('html.header-is-scrolled .site-header-shell .header-archetype--floating-pill', $rail);
+    assert_contains('.site-header-shell--force-solid .header-archetype--floating-pill', $rail);
+
+    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill .header-pill {');
+    assert_contains('border-radius: 999px', $pill);
+    assert_contains('inline-size: fit-content', $pill);
+    assert_contains('margin-inline: auto', $pill);
+    assert_contains('var(--header-start-surface', $pill, 'the pill paints the proved start surface');
+    assert_contains('transition-property: background-color, box-shadow', $pill);
+
+    $scrolled = header_asset_css_block(
+        $css,
+        'html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .header-pill',
+    );
+    assert_contains('var(--header-scrolled-surface', $scrolled, 'the scrolled pill paints the proved scrolled surface');
+    assert_true(
+        preg_match('/\b(?:height|padding|margin|position|top|inset|border-width)\s*:/', $scrolled) !== 1,
+        'the scrolled pill state must not mutate geometry',
+    );
+
+    assert_true(
+        substr_count($css, 'position: fixed') === 1,
+        'the pill adds no fixed positioning of its own',
+    );
+    assert_contains('.header-pill::before', $css, 'glass blurs behind the pill via a non-ancestor pseudo-element');
+    assert_contains('@media (max-width: 600px)', $css);
+});
+
+test('header CSS moves the overlay scrim and blur onto the pill in overlay mode (frm PR-1e)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $scrim = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill,');
+    assert_contains('var(--header-start-surface, var(--header-overlay-scrim))', $scrim);
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay.header-top-transparent', $css, 'an earned clear overlay keeps the scrim on the pill');
+    assert_contains('.header-archetype--floating-pill.header-behavior-overlay::before {', $css);
+    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay::before');
+    assert_contains('content: none', $rail, 'the rail never blurs in overlay mode');
+    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before');
+    assert_contains('backdrop-filter: blur(14px) saturate(115%)', $pill);
+    assert_true(substr_count($css, 'position: fixed') === 1, 'still no fixed positioning of its own');
+});
+
+test('header CSS lays the centered bar out as a three-column grid and collapses it under the hamburger (frm W1b)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    $row = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center {');
+    assert_contains('display: grid', $row);
+    assert_contains('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)', $row, 'equal flanks keep the nav on the center line');
+    assert_contains('align-items: center', $row);
+
+    $nav = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {');
+    assert_contains('justify-self: center', $nav);
+    $cta = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-buttons {');
+    assert_contains('justify-self: end', $cta);
+    $link = header_asset_css_block($css, '.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-button__link {');
+    assert_contains('border-radius: 999px', $link);
+    assert_true(!preg_match('/\b(?:background|color)\s*:/', $link), 'the CTA fill and text stay with the direction');
+
+    $phone = substr($css, strpos($css, 'grid-template-columns: minmax(0, 1fr) auto auto'));
+    assert_true($phone !== false, 'the phone grid drops the centered column');
+    $start = (int) strpos($css, 'Centered bar (frm W1b)');
+    $end = (int) strpos($css, 'Glass blurs behind the pill', $start);
+    assert_true($start > 0 && $end > $start, 'the centered bar block sits before the pill glass block');
+    assert_true(!str_contains(substr($css, $start, $end - $start), '!important'), 'the centered bar fights nothing');
+});
+
+test('header driver marks the in-view section on pill and centered-bar navigation and the kit paints it (frm W1c)', function () {
+    $js = (string) file_get_contents(repo_path('assets/header/header.js'));
+    assert_contains("'is-current-section'", $js);
+    assert_contains('function watchSectionNavigation()', $js);
+    assert_contains(".header-archetype--floating-pill, .header-archetype--bar-center-cta", $js, 'the three section-aware header variants mark sections');
+    assert_contains("a[href^=\"#\"]", $js, 'only in-page links take part');
+    assert_contains("'location'", $js, 'the link says aria-current=location, never page');
+    assert_true(strpos($js, 'watchSectionNavigation();') > strpos($js, 'function setup()'), 'the observer starts in setup');
+    assert_contains('sectionObserver.disconnect()', $js, 'stop releases the observer');
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $rule = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,');
+    assert_contains('box-shadow: inset 0 0 0 1px currentColor', $rule);
+    assert_true(!str_contains($rule, 'background'), 'the active mark preserves the verified surface');
+    assert_contains('border-radius: 999px', $rule);
+});
+
+test('header CSS spreads the navigation across the spread bar and the driver marks its sections (frm W1d)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $row = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread {');
+    assert_contains('grid-template-columns: auto minmax(0, 1fr)', $row);
+    $list = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation .wp-block-navigation__container {');
+    assert_contains('justify-content: space-between', $list);
+    assert_contains('inline-size: 100%', $list);
+    $full = header_asset_css_block($css, '.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {');
+    assert_contains('padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem)', $full, 'a full row keeps the page gutter');
+    assert_contains('.header-archetype--spread-nav', (string) file_get_contents(repo_path('assets/header/header.js')));
+    assert_eq(\Automattic\SiteBuild\HeaderBehavior::STATIC, \Automattic\SiteBuild\HeaderBehavior::behaviorFor([['slug' => 'home', 'sections' => [['slug' => 'hero']]]], \Automattic\SiteBuild\HeaderBehavior::MODE_STACKED, 'spread-nav'));
+});
+
+
+test('header CSS keeps the phone pill on one row: nowrap caption CTA, shrinking title, tight gap (frm PR-1x)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $at = (int) strpos($css, '@media (max-width: 600px) {' . "\n" . '    .site-header-shell .header-archetype--floating-pill .header-pill {');
+    assert_true($at > 0, 'the phone pill block exists');
+    $block = substr($css, $at, 1400);
+    assert_contains('gap: var(--wp--preset--spacing--sm, 0.75rem);', $block);
+    assert_contains('.header-pill > .wp-block-site-title {', $block);
+    assert_contains('flex: 1 1 auto;', $block, 'the title shrinks first');
+    assert_contains('.header-pill > .wp-block-buttons {', $block);
+    assert_contains('flex: 0 0 auto;', $block);
+    assert_contains('.header-pill .wp-block-button__link {', $block);
+    assert_contains('white-space: nowrap;', $block, 'the CTA never wraps');
+    assert_contains('font-size: var(--wp--preset--font-size--caption, 0.875rem);', $block);
+});
+
+test('the floating pill places an open navigation above its other controls', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    assert_contains('.header-pill > :has(.wp-block-navigation__responsive-container.is-menu-open)', $css);
+    assert_contains('z-index: 2;', $css);
 });

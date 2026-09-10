@@ -88,10 +88,10 @@ test('eval reports the archetype histogram and its concentration', function () {
         ['a', 'asymmetric-split', 1, null],
         ['b', 'asymmetric-split', 1, null],
         ['c', 'asymmetric-split', 1, null],
-        ['d', 'centered-stack', 0, null],
+        ['d', 'bento-grid', 0, null],
     ]));
 
-    assert_eq(['asymmetric-split' => 3, 'centered-stack' => 1], $metrics['archetypes']);
+    assert_eq(['asymmetric-split' => 3, 'bento-grid' => 1], $metrics['archetypes']);
     // The number BIGR-885 targets: one archetype carrying most of a site. A
     // histogram alone would let 75% read as four healthy entries.
     assert_eq(0.75, $metrics['archetype_max_share'], 'concentration is its own number');

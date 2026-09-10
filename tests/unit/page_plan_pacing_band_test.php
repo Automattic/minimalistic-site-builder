@@ -12,13 +12,13 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
 function pacing_plan(int $sections, string $background = 'base'): array
 {
     $archetypes = [
-        'centered-stack',
+        'bento-grid',
         'asymmetric-split',
         'equal-card-grid',
-        'list-with-thumbnails',
+        'zigzag-steps',
         'equal-card-grid',
         'offset-grid',
-        'centered-stack',
+        'bento-grid',
         'asymmetric-split',
     ];
     $plan = [];

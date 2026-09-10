@@ -33,10 +33,8 @@ final class SectionComposition
     public const ARCHETYPES = [
         'full-bleed-cover',
         'asymmetric-split',
-        'centered-stack',
         'offset-grid',
         'equal-card-grid',
-        'list-with-thumbnails',
         'bento-grid',
         'faq-split',
         'cta-panel',
@@ -44,7 +42,6 @@ final class SectionComposition
         'stat-ledger',
         'feature-row-hairlines',
         'zigzag-steps',
-        'statement-lines',
         'project-grid-2x2',
         'logo-strip',
     ];
@@ -147,10 +144,6 @@ final class SectionComposition
 
     public const PROJECT_META_CLASS = 'project-meta';
 
-    public const STATEMENT_LINE_COUNTS = [3, 4, 5, 6];
-
-    public const STATEMENT_LIST_CLASS = 'statement-lines';
-
     public const ZIGZAG_STEP_COUNTS = [3, 4, 5];
 
     public const FEATURE_ROW_COUNTS = [3, 4];
@@ -252,7 +245,7 @@ final class SectionComposition
      * list without touching the six entries beside it.
      *
      * The media ranges are deliberately wide. They exist to catch an archetype
-     * the model ignored (a `list-with-thumbnails` with no thumbnail), not to
+     * the model ignored (a `project-grid-2x2` with no project picture), not to
      * ration imagery, which `collect-images` and the image budget already own.
      */
     private const CATALOG = [
@@ -315,19 +308,6 @@ final class SectionComposition
             // whole point of a stagger and unremarkable in a card row.
             'unequal_regions' => true,
         ],
-        'centered-stack' => [
-            'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
-            'default_background' => 'base',
-            'min_images' => 0,
-            'max_images' => 1,
-            'copy_capacity' => 'compact',
-
-            'requires_row' => false,
-            'requires_context' => [],
-            'ineligible_reason' => '',
-            'root_hook' => '.section-composition--centered-stack',
-            'prompt' => 'section-compositions/centered-stack.md',
-        ],
         'offset-grid' => [
             'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
             'default_background' => 'base',
@@ -353,21 +333,6 @@ final class SectionComposition
             'root_hook' => '.section-composition--equal-card-grid',
             'prompt' => 'section-compositions/equal-card-grid.md',
         ],
-        'list-with-thumbnails' => [
-            'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
-            'default_background' => 'base',
-            // "each a small image beside its text" — a row with no thumbnail
-            // is a plain list, not this archetype.
-            'min_images' => 1,
-            'max_images' => 12,
-            'copy_capacity' => 'expanded',
-            'requires_row' => true,
-            'requires_context' => [],
-            'ineligible_reason' => '',
-            'root_hook' => '.section-composition--list-with-thumbnails',
-            'prompt' => 'section-compositions/list-with-thumbnails.md',
-        ],
-
         'bento-grid' => [
             'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
             'default_background' => 'base',
@@ -459,19 +424,6 @@ final class SectionComposition
             'prompt' => 'section-compositions/zigzag-steps.md',
         ],
 
-        'statement-lines' => [
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'min_images' => 0,
-            'max_images' => 0,
-            'copy_capacity' => 'compact',
-            'requires_row' => false,
-            'requires_context' => [],
-            'ineligible_reason' => '',
-            'root_hook' => '.section-composition--statement-lines',
-            'prompt' => 'section-compositions/statement-lines.md',
-        ],
-
         'project-grid-2x2' => [
             'backgrounds' => ['base', 'tinted', 'contrast'],
             'default_background' => 'base',
@@ -551,7 +503,7 @@ final class SectionComposition
      * facts decide it, and both are already on the plan:
      *
      * - The archetype must be `pinnable`. Only an unequal-column band can have
-     *   one region outrun the other; a card grid or a centered stack cannot.
+     *   one region outrun the other; a card grid cannot.
      * - The section must carry an item pattern. `page-plan.md` sets that field
      *   on genuinely list-like sections — menus, catalogs, schedules,
      *   programmes, archives, pricing and service sets — and null on stories,
@@ -1225,38 +1177,6 @@ TEXT;
             }
         }
 
-        if ($archetype === 'statement-lines') {
-            $lists = [];
-            foreach ($document->indices() as $index) {
-                if ($document->name($index) !== 'group'
-                    || !in_array(self::STATEMENT_LIST_CLASS, self::classTokens($document, $index), true)) {
-                    continue;
-                }
-                $headings = 0;
-                $others = 0;
-                foreach ($document->children($index) as $child) {
-                    if ($document->name($child) === 'heading') {
-                        $headings++;
-                    } else {
-                        $others++;
-                    }
-                }
-                $lists[] = ['headings' => $headings, 'others' => $others];
-            }
-            $sound = count($lists) === 1
-                && in_array($lists[0]['headings'], self::STATEMENT_LINE_COUNTS, true)
-                && $lists[0]['others'] === 0;
-            if (!$sound) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'statement lines list',
-                    ['archetype' => $archetype, 'list_groups' => 1, 'class' => self::STATEMENT_LIST_CLASS, 'headings' => self::STATEMENT_LINE_COUNTS, 'other_children' => 0],
-                    ['list_groups' => count($lists), 'lists' => $lists],
-                    'safe parseable section was retained; a statement ledger is one marked group of three to six heading lines and nothing else',
-                );
-            }
-        }
-
         if ($archetype === 'faq-split') {
             $items = 0;
             foreach ($document->indices() as $index) {
@@ -1363,7 +1283,7 @@ TEXT;
     {
         $worst = null;
         foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'columns') {
+            if ($document->name($index) !== 'columns' || self::isSideLabelSplit($document, $index)) {
                 continue;
             }
             $perRegion = [];
@@ -1453,6 +1373,22 @@ TEXT;
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+    private static function isSideLabelSplit(BlockMarkup $document, int $index): bool
+    {
+        $columns = array_values(array_filter(
+            $document->children($index),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        if (count($columns) < 2) {
+            return false;
+        }
+        $leading = $document->children($columns[0]);
+        if (count($leading) !== 1 || $document->name($leading[0]) !== 'paragraph') {
+            return false;
+        }
+        return SectionLabel::hasClass($document, $leading[0], SectionLabel::SIDE_CLASS);
     }
 
     private static function countHeadings(BlockMarkup $document, int $index): int

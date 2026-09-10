@@ -7,13 +7,13 @@ use Automattic\SiteBuild\Units\SectionUnit;
 
 test('section specifics omit unrelated grid instructions', function () {
     $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    foreach (['centered-stack', 'full-bleed-cover', 'list-with-thumbnails'] as $archetype) {
+    foreach (['cta-panel', 'full-bleed-cover', 'zigzag-steps'] as $archetype) {
         $input = section_unit_input();
         $input['section']['layout_archetype'] = $archetype;
         $prompt = section_unit_request_text($unit->request($input));
         assert_true(!str_contains($prompt, '1. `equal-grid`'), $archetype);
         assert_true(!str_contains($prompt, '2. `staggered-grid`'), $archetype);
-        assert_eq($archetype === 'list-with-thumbnails', str_contains($prompt, '### list-with-thumbnails'));
+        assert_eq($archetype === 'zigzag-steps', str_contains($prompt, '### zigzag-steps'));
         assert_true(!str_contains($prompt, '### equal-card-grid'));
         assert_true(!str_contains($prompt, '### offset-grid'));
         assert_contains('AI_IMAGE: subject | page-context | style | aspect-ratio', $prompt);
@@ -49,6 +49,9 @@ test('section specifics gate motion vocabulary and keep shared cache prefixes st
         $prompt = section_unit_request_text($request);
         assert_eq($profile !== 'none', str_contains($prompt, '- `hover-lift`'));
         assert_eq(!in_array($profile, ['none', 'minimal'], true), str_contains($prompt, '- `reveal-up`'));
+        foreach (['sticky-stack', 'count-up', 'marquee'] as $effect) {
+            assert_eq(!in_array($profile, ['none', 'minimal'], true), str_contains($prompt, '- `' . $effect . '`'), "$profile/$effect");
+        }
         foreach (array_diff(['calm', 'energetic', 'dramatic'], [$profile]) as $other) {
             assert_true(!str_contains($prompt, '- `' . $other . '`:'), "$profile excludes $other choreography");
         }
@@ -60,21 +63,23 @@ test('section specifics gate motion vocabulary and keep shared cache prefixes st
 
 test('section specifics keep complete requests within a bounded instruction budget', function () {
     $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    foreach (['centered-stack', 'full-bleed-cover', 'equal-card-grid', 'asymmetric-split', 'offset-grid', 'list-with-thumbnails'] as $archetype) {
+    foreach (['cta-panel', 'full-bleed-cover', 'equal-card-grid', 'asymmetric-split', 'offset-grid', 'zigzag-steps'] as $archetype) {
         $input = section_unit_input();
         $input['section']['layout_archetype'] = $archetype;
         foreach (['none', 'minimal', 'calm', 'energetic', 'dramatic'] as $profile) {
             $input['motion_profile'] = $profile;
-            $budget = in_array($profile, ['none', 'minimal'], true) ? 48500 : 53500;
+            // Includes section-label guidance alongside the expanded motion recipes.
+            // Fixture maxima: 49,279 bytes for minimal motion, 54,798 for animated.
+            $budget = in_array($profile, ['none', 'minimal'], true) ? 50000 : 55000;
             $bytes = strlen(section_unit_request_text($unit->request($input)));
             assert_true($bytes < $budget, "$archetype/$profile request is $bytes bytes; budget is $budget including fixture context");
         }
     }
 });
 
-test('section specifics keep item cards available inside a centered composition', function () {
+test('section specifics keep item cards available inside a cardless-looking composition', function () {
     $input = section_unit_input();
-    $input['section']['layout_archetype'] = 'centered-stack';
+    $input['section']['layout_archetype'] = 'faq-split';
     $input['section']['item_pattern'] = 'card';
     $input['card_style'] = 'framed';
     $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));

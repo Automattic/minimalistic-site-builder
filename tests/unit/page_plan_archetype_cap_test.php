@@ -26,11 +26,11 @@ function cap_alternating_plan(): array
 {
     return [
         cap_section('hero', 'asymmetric-split'),
-        cap_section('a', 'centered-stack'),
+        cap_section('a', 'bento-grid'),
         cap_section('b', 'asymmetric-split'),
-        cap_section('c', 'centered-stack'),
+        cap_section('c', 'bento-grid'),
         cap_section('d', 'asymmetric-split'),
-        cap_section('e', 'centered-stack'),
+        cap_section('e', 'bento-grid'),
     ];
 }
 
@@ -118,9 +118,9 @@ test('the cap leaves a legitimate short page alone', function () {
     // A contact page is 2 to 4 sections (BIGR-858). Two compositions twice each
     // is the correct plan for one, and must not be rejected as dominance.
     $plan = [
-        cap_section('hero', 'centered-stack'),
+        cap_section('hero', 'bento-grid'),
         cap_section('form', 'asymmetric-split'),
-        cap_section('map', 'centered-stack'),
+        cap_section('map', 'bento-grid'),
         cap_section('cta', 'asymmetric-split'),
     ];
     $warnings = [];
@@ -128,7 +128,7 @@ test('the cap leaves a legitimate short page alone', function () {
     $out = PagePlanStep::normalize($plan, false, null, [], $warnings, 'contact', $repairs, true);
     assert_eq(4, count($out), 'the plan survives intact');
     assert_eq(
-        ['centered-stack', 'asymmetric-split', 'centered-stack', 'asymmetric-split'],
+        ['bento-grid', 'asymmetric-split', 'bento-grid', 'asymmetric-split'],
         array_column($out, 'layout_archetype'),
         'nothing was reassigned',
     );
@@ -140,9 +140,9 @@ test('the dominance pass respects the interior page opening rule', function () {
     // hero normalize() rejects.
     $plan = [
         cap_section('hero', 'asymmetric-split'),
-        cap_section('a', 'centered-stack'),
+        cap_section('a', 'bento-grid'),
         cap_section('b', 'asymmetric-split'),
-        cap_section('c', 'centered-stack'),
+        cap_section('c', 'bento-grid'),
         cap_section('d', 'asymmetric-split'),
     ];
     $warnings = [];

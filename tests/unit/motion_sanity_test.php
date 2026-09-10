@@ -248,7 +248,7 @@ test('motion vocabulary agrees between the static kit and its isolated authoring
     $heroPrompt = file_get_contents(repo_path('prompts/hero.md'));
     $kitCss = file_get_contents(repo_path('assets/motion/motion.css'));
     foreach (Motion::kitClasses() as $class) {
-        $authoringPrompt = $class === 'hero-entrance' ? $heroPrompt : $sectionPrompt;
+        $authoringPrompt = in_array($class, \Automattic\SiteBuild\Motion::HERO_CLASSES, true) ? $heroPrompt : $sectionPrompt;
         assert_contains("`{$class}`", $authoringPrompt, "{$class} documented at its authoring boundary");
         assert_contains(".{$class}", $kitCss, "{$class} implemented by the kit");
     }
@@ -266,4 +266,71 @@ test('motion vocabulary agrees between the static kit and its isolated authoring
         'prompt documents the transform conflict enforced by motion-sanity'
     );
     assert_contains('keeps only the first two', $sectionPrompt, 'prompt states the enforced section entrance cap');
+});
+
+test('motion-sanity treats word-reveal as a hero-only entrance with its own once-per-page budget (frm W8a)', function () {
+    $budget = MotionSanityStep::newBudget();
+    $both = MotionSanityStep::sanitize(
+        motion_group('hero-entrance', '<!-- wp:heading {"level":1,"className":"word-reveal"} --><h1 class="wp-block-heading word-reveal">Frames that hold</h1><!-- /wp:heading -->'),
+        'calm',
+        $budget,
+    );
+    assert_eq(2, substr_count($both['markup'], 'word-reveal'), 'the headline keeps its word-reveal beside the copy group entrance');
+    assert_eq(2, substr_count($both['markup'], 'hero-entrance'));
+
+    $twiceBudget = MotionSanityStep::newBudget();
+    $twice = MotionSanityStep::sanitize(
+        motion_group('word-reveal') . "\n" . motion_group('word-reveal'),
+        'calm',
+        $twiceBudget,
+    );
+    assert_eq(2, substr_count($twice['markup'], 'word-reveal'), 'once per page — once in attrs, once in html');
+
+    $laterBudget = MotionSanityStep::newBudget();
+    $later = MotionSanityStep::sanitize(motion_group('word-reveal'), 'calm', $laterBudget, false);
+    assert_true(!str_contains($later['markup'], 'word-reveal'), 'a later section cannot claim the headline reveal');
+    assert_contains('word-reveal is allowed only in the first section', implode(' ', $later['notes'] ?? []) . implode(' ', $later['warnings'] ?? []));
+});
+
+test('the marquee keeps its own one-per-page slot beside the ambient budget and runs on a paragraph only (frm W8c)', function () {
+    $paragraph = static fn (string $text): string => '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">' . $text . '</p><!-- /wp:paragraph -->';
+    $budget = MotionSanityStep::newBudget();
+    $cover = MotionSanityStep::sanitize(motion_group('ken-burns'), 'dramatic', $budget);
+    assert_contains('ken-burns', $cover['markup'], 'the hero ambient takes the ambient slot');
+    $first = MotionSanityStep::sanitize($paragraph('Identity systems'), 'dramatic', $budget);
+    assert_contains('class="marquee"', $first['markup'], 'the marquee still runs: it does not spend the ambient slot');
+    $second = MotionSanityStep::sanitize($paragraph('Again'), 'dramatic', $budget);
+    assert_true(!str_contains($second['markup'], 'marquee'), 'one loop per page');
+    $heading = MotionSanityStep::sanitize(
+        '<!-- wp:heading {"className":"marquee"} --><h2 class="wp-block-heading marquee">Loop</h2><!-- /wp:heading -->',
+        'dramatic',
+        MotionSanityStep::newBudget(),
+    );
+    assert_true(!str_contains($heading['markup'], 'marquee'), 'a heading never loops');
+    $minimal = MotionSanityStep::sanitize($paragraph('Quiet'), 'minimal', MotionSanityStep::newBudget());
+    assert_true(!str_contains($minimal['markup'], 'marquee'), 'the minimal profile allows hover only');
+});
+
+
+test('retained marquee typography removals reach durable warnings with their location and value', function () {
+    $tmp = sys_get_temp_dir() . '/builder_motion_type_' . uniqid();
+    try {
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'dramatic']);
+        $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'hero', 'type' => 'hero']]]]]);
+        $sibling = '<!-- wp:paragraph --><p>Keep this sibling.</p><!-- /wp:paragraph -->';
+        $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph {"className":"marquee","fontSize":"caption"} --><p class="marquee has-caption-font-size">More projects</p><!-- /wp:paragraph -->' . $sibling);
+        quietly(fn () => (new MotionSanityStep())->run($project));
+        $out = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('<p class="marquee">More projects</p>', $out);
+        assert_contains($sibling, $out);
+        $warnings = implode(' ', $project->readJson('warnings.json')['motion-sanity'] ?? []);
+        foreach (['page-home--hero.html', 'paragraph.marquee[0]', "fontSize 'caption'", 'delivered=removed', 'disposition=removed'] as $context) {
+            assert_contains($context, $warnings);
+        }
+        quietly(fn () => (new MotionSanityStep())->run($project));
+        assert_eq($out, $project->readText('theme/parts/page-home--hero.html'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });

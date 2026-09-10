@@ -506,6 +506,7 @@ final class SectionsStep implements Step
                 'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
+                'register' => DesignDirectionStep::registerFor($project),
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
@@ -1040,6 +1041,7 @@ final class SectionsStep implements Step
         }
 
         $common = [
+            'section_label' => DesignDirectionStep::sectionLabelFor($project),
             'site_spec'         => $siteSpec,
             'language'          => SiteSpecStep::languageOf($project),
             'theme_json'        => $themeJsonText,
@@ -1076,6 +1078,7 @@ final class SectionsStep implements Step
                 'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
+                'register' => DesignDirectionStep::registerFor($project),
                 // The one text wp:site-tagline will render at runtime — the
                 // contract exposes it so neither above-fold author discovers
                 // it by surprise on the live site (BIGR-773).
@@ -1142,7 +1145,9 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
+                    'motion_profile' => DesignDirectionStep::motionProfileFor($project),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
+                    'is_opening' => $opening,
                     'header_contract' => $opening
                         ? ($frontHero
                             ? $frontContract

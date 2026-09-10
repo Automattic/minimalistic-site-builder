@@ -134,7 +134,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     ];
 
     private const CARDLESS_ARCHETYPES = [
-        'statement-lines', 'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel', 'centered-stack',
+        'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel',
     ];
 
     /**
@@ -144,7 +144,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private const LEVEL_ROW_ARCHETYPES = [
         'equal-card-grid',
         'asymmetric-split',
-        'list-with-thumbnails',
         'bento-grid',
     ];
 
@@ -2433,8 +2432,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             foreach (array_slice($briefs, 0, $missing) as $brief) {
                 // Only the final invitation has a known short content budget.
                 $safeArchetypes = $brief['type'] === 'cta'
-                    ? ['centered-stack', 'cta-panel', 'asymmetric-split']
-                    : ['asymmetric-split', 'equal-card-grid', 'list-with-thumbnails'];
+                    ? ['cta-panel', 'asymmetric-split', 'equal-card-grid']
+                    : ['asymmetric-split', 'equal-card-grid', 'bento-grid'];
                 $archetype = $safeArchetypes[0];
                 foreach ($safeArchetypes as $candidate) {
                     if ($candidate !== $above && $candidate !== $below) {
@@ -2883,7 +2882,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ?array $frontProjection = null,
         array $actionContext = [],
     ): array {
-        $archetype = $front ? 'full-bleed-cover' : 'centered-stack';
+        $archetype = $front ? 'full-bleed-cover' : 'asymmetric-split';
         $background = 'base';
         if ($front && $frontProjection !== null) {
             [$archetype, $_allowedBackgrounds, $background] = self::projectionContract($frontProjection);
@@ -2943,7 +2942,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
         $sections = array_values(array_filter($raw, 'is_array'));
 
-        $excluded = ['full-bleed-cover', 'equal-card-grid', 'centered-stack'];
+        $excluded = ['full-bleed-cover', 'equal-card-grid'];
         $candidates = array_values(array_filter(
             array_diff(self::ARCHETYPES, $excluded),
             static fn (string $candidate): bool => self::archetypeEligible($candidate, $allowOffsetGrid),
@@ -3357,7 +3356,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         string ...$exclude,
     ): string {
         foreach (self::ARCHETYPES as $candidate) {
-            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
+            if ($candidate === 'equal-card-grid') {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
@@ -3701,8 +3700,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $best = null;
         $bestCount = PHP_INT_MAX;
         foreach (self::ARCHETYPES as $candidate) {
-            // Card grids have a separate cap. Centered stacks require a short message.
-            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
+            // Card grids have a separate cap.
+            if ($candidate === 'equal-card-grid') {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
@@ -3753,31 +3752,35 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 if (!is_array($section) || ($front && $position === 0)) {
                     continue;
                 }
-                if ($archetypes[$position] !== 'asymmetric-split') {
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                $authored = $archetypes[$position];
+                if ($authored !== 'asymmetric-split') {
                     continue;
                 }
-                $type = strtolower(trim((string) ($section['type'] ?? '')));
 
                 $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
                 if (!$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
                     continue;
                 }
+                // The card grid is the one level row this repair may reach for,
+                // and it carries a page cap and the adjacency rule. When the
+                // page has already spent that budget the split stands.
                 $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
-                $neighbourGrid = ($archetypes[$position - 1] ?? null) === 'equal-card-grid'
-                    || ($archetypes[$position + 1] ?? null) === 'equal-card-grid';
-                $replacement = $neighbourGrid || $grids >= self::MAX_EQUAL_CARD_GRIDS
-                    ? 'list-with-thumbnails'
-                    : 'equal-card-grid';
+                if ($grids >= self::MAX_EQUAL_CARD_GRIDS) {
+                    continue;
+                }
+                $replacement = 'equal-card-grid';
                 if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
                     continue;
                 }
                 $archetypes[$position] = $replacement;
                 $sections[$key]['layout_archetype'] = $replacement;
                 $handoff = trim((string) ($section['handoff'] ?? ''));
-                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now ' . ($replacement === 'equal-card-grid' ? 'an equal-card-grid, one card per item in a row' : 'a list-with-thumbnails, one row per item with a small picture') . '; this supersedes any layout named earlier in this line.');
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now an equal-card-grid,'
+                    . ' one card per item in a row; this supersedes any layout named earlier in this line.');
                 $repairs[] = self::successfulRepair(
                     self::sectionPath($slug, (int) $key) . '.layout_archetype',
-                    'asymmetric-split',
+                    $authored,
                     $replacement,
                     "a repeated '{$type}' list under the split stacks every item's picture in one column",
                 );
@@ -3806,7 +3809,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $archetype = trim((string) ($section['layout_archetype'] ?? ''));
                 if (
                     $archetype === 'logo-strip'
-                    || !in_array($archetype, ['centered-stack', 'statement-lines', 'feature-row-hairlines', 'stat-ledger'], true)
+                    || !in_array($archetype, ['feature-row-hairlines', 'stat-ledger'], true)
                     || !SectionComposition::highlightAppliesTo($clause, $section)
                 ) {
                     continue;
