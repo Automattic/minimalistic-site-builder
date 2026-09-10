@@ -9,6 +9,7 @@ use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
@@ -449,6 +450,7 @@ final class DesignDirectionStep implements Step
             'subject_anchor'   => '',
             'tension'          => '',
             'image_grade'      => '',
+            'image_kind'       => ImageKind::DEFAULT,
             'image_treatment'  => ImageTreatment::DEFAULT,
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
@@ -1032,6 +1034,14 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $imageKind = BoundedChoice::normalize(
+            $raw['image_kind'] ?? null,
+            ImageKind::ALL,
+            ImageKind::DEFAULT,
+            'image_kind',
+            $warnings,
+            'unsupported imagery kind replaced by photo',
+        );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $headerChrome = HeaderChrome::normalize($raw['header_chrome'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
@@ -1116,6 +1126,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_kind'       => $imageKind,
             'image_treatment'  => $imageTreatment,
             'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -1882,6 +1893,19 @@ final class DesignDirectionStep implements Step
                 . 'Do not combine a texture with a decorative device.';
         }
 
+        $imageKind = ImageKind::explicit($direction['image_kind'] ?? null);
+        if ($imageKind !== null && $imageKind !== ImageKind::DEFAULT) {
+            $facts[] = "- **Image kind**: {$imageKind} — " . ImageKind::meaning($imageKind)
+                . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
+                . '`; the build appends the kind\'s render instruction to every image request.'
+                . ($imageKind === 'ui-mockup'
+                    ? ' The build frames every contained picture as a product screen (panel radius, hairline ring,'
+                        . ' soft shadow, no window chrome), so author no frame, border or shadow around an image. Add the class `'
+                        . ImageKind::TILT_CLASS . '` to the figure or hero media wrapper of at most ONE screen per page (the hero media or the first'
+                        . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
+                    : '');
+        }
+
         $headingEmphasis = HeadingEmphasis::explicit($direction['heading_emphasis'] ?? null);
         if ($headingEmphasis !== null && $headingEmphasis !== 'none') {
             $facts[] = "- **Heading emphasis**: {$headingEmphasis} — " . HeadingEmphasis::meaning($headingEmphasis)
@@ -2260,6 +2284,31 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
+    }
+
+    /** Return the image kind, or photo when the field is absent. */
+    public static function imageKindFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return ImageKind::DEFAULT;
+        }
+        return ImageKind::explicit($project->readJson(self::FILE)['image_kind'] ?? null) ?? ImageKind::DEFAULT;
+    }
+
+    /** Return the ui-mockup interface theme sentence from the palette, or '' without a usable base. */
+    public static function screenThemeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        $palette = $project->readJson(self::FILE)['palette'] ?? null;
+        if (!is_array($palette)) {
+            return '';
+        }
+        return ImageKind::screenTheme(
+            is_string($palette['base'] ?? null) ? $palette['base'] : null,
+            is_string($palette['accent'] ?? null) ? $palette['accent'] : null,
+        );
     }
 
     public static function headingEmphasisFor(Project $project): string
