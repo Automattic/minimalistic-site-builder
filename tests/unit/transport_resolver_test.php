@@ -1087,9 +1087,15 @@ test('ancestry returns process names without throwing', function (): void {
 
 test('billing ancestry guard uses shell_exec availability, not proc_open availability', function (): void {
     $autoload = dirname(__DIR__, 2) . '/autoload.php';
-    $code = 'require ' . var_export($autoload, true) . '; '
+    // Exercise the real function-availability guard without requiring permission
+    // to inspect the host's processes. Other ancestry tests cover ps failures.
+    $code = 'namespace Automattic\\SiteBuild { '
+        . 'function posix_getppid(): int { return 100; } '
+        . 'function getmypid(): int { return 100; } '
+        . 'function shell_exec(string $command): string { return "1 fixture-parent"; } '
+        . '} namespace { require ' . var_export($autoload, true) . '; '
         . 'try { echo json_encode(\\Automattic\\SiteBuild\\TransportResolver::ancestry()); } '
-        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); } }';
 
     [$withoutShellExec, $shellExecStatus] = tr_php($code, ['disable_functions=shell_exec']);
     [$withoutProcOpen, $procOpenStatus] = tr_php($code, ['disable_functions=proc_open']);
@@ -1098,7 +1104,7 @@ test('billing ancestry guard uses shell_exec availability, not proc_open availab
     assert_eq('[]', $withoutShellExec);
     assert_eq(0, $procOpenStatus, $withoutProcOpen);
     $ancestry = json_decode($withoutProcOpen, true);
-    assert_true(is_array($ancestry) && $ancestry !== [], $withoutProcOpen);
+    assert_eq(['fixture-parent'], $ancestry, $withoutProcOpen);
 });
 
 test('billing ancestry rejects a non-numeric parent pid from ps', function (): void {

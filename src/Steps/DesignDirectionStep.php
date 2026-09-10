@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
@@ -465,6 +466,7 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'surface_reason'   => '',
             'device'           => Device::DEFAULT,
+            'section_label' => SectionLabel::DEFAULT,
             'heading_emphasis' => HeadingEmphasis::DEFAULT,
             'header_chrome'    => HeaderChrome::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
@@ -1045,6 +1047,7 @@ final class DesignDirectionStep implements Step
             $conceptTypeRegister,
             $warnings,
         );
+        $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
         $imageKind = BoundedChoice::normalize(
             $raw['image_kind'] ?? null,
             ImageKind::ALL,
@@ -1156,6 +1159,7 @@ final class DesignDirectionStep implements Step
             'surface'          => $surface,
             'surface_reason'   => $surfaceReason,
             'device'           => $device,
+            'section_label' => $sectionLabel,
             'heading_emphasis' => $headingEmphasis,
             // Whether the header survives the scroll. HeaderBehavior keeps
             // the archetype, depth, and contrast vetoes on top of it.
@@ -1411,6 +1415,19 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    public static function normalizeSectionLabel(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            SectionLabel::ALL,
+            SectionLabel::DEFAULT,
+            'section_label',
+            $warnings,
+            'unsupported section label replaced by none',
+        );
+    }
+
+    /** @param list<string> $warnings */
     public static function normalizeHeadingEmphasis(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1927,6 +1944,13 @@ final class DesignDirectionStep implements Step
                 . ' paragraphs, navigation or buttons; never author a colour, face or background on the span.';
         }
 
+        $sectionLabel = SectionLabel::explicit($direction['section_label'] ?? null);
+        if ($sectionLabel !== null && $sectionLabel !== 'none') {
+            $facts[] = "- **Section label**: {$sectionLabel} — " . SectionLabel::meaning($sectionLabel)
+                . '. Never in the hero or any page opening; never two per section; the label names the topic'
+                . ' ("Use cases", "Pricing"), never repeats the heading.';
+        }
+
         $device = Device::explicit($direction['device'] ?? null);
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
@@ -2351,6 +2375,14 @@ final class DesignDirectionStep implements Step
             return HeadingEmphasis::DEFAULT;
         }
         return self::normalizeHeadingEmphasis($project->readJson(self::FILE)['heading_emphasis'] ?? null);
+    }
+
+    public static function sectionLabelFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return SectionLabel::DEFAULT;
+        }
+        return self::normalizeSectionLabel($project->readJson(self::FILE)['section_label'] ?? null);
     }
 
     /**

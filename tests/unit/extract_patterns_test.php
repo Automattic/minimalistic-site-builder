@@ -772,6 +772,17 @@ test('a scandir failure does not restore a hollow backup over live', function ()
 
 test('a failed rollback keeps staging so the previous tree is not deleted', function (): void {
     with_project('builder_extract_rollback_keep_', function (Project $project): void {
+        $left = $project->themePath('exchange-left');
+        $right = $project->themePath('exchange-right');
+        mkdir($left, 0775, true);
+        mkdir($right);
+        $canExchange = (new \ReflectionMethod(ExtractPatternsStep::class, 'exchangePaths'))
+            ->invoke(null, $left, $right);
+        rmdir($left);
+        rmdir($right);
+        if (!$canExchange) {
+            skip_test('atomic directory exchange unavailable; in-place rollback is tested separately');
+        }
         putenv('MSB_FAIL_EXCHANGE_ROLLBACK=1');
         putenv('MSB_FAIL_ROLLBACK_INSTALL=1');
         try {
@@ -1588,4 +1599,57 @@ test('label normalization distinguishes special es plurals from ordinary s plura
     assert_eq('news', \Automattic\SiteBuild\SectionPattern::normalizeLabel('news'));
     assert_eq('series', \Automattic\SiteBuild\SectionPattern::normalizeLabel('series'));
     assert_eq('species', \Automattic\SiteBuild\SectionPattern::normalizeLabel('species'));
+});
+
+
+test('first-run in-place manifest failure restores absence and permits a retry', function (): void {
+    with_project('builder_extract_first_inplace_', function (Project $project): void {
+        $previous = getenv('MSB_FORCE_PATTERN_INPLACE');
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $blocker = $project->path('patterns.json');
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old manifest path');
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $step = new ExtractPatternsStep();
+            $files = ['hero.php' => "<?php\n// new\n"];
+            $manifest = ['version' => 2, 'patterns' => [['slug' => 'hero', 'kind' => 'section']], 'starter' => null, 'dropped' => []];
+            assert_throws(static fn () => $method->invoke($step, $project, $files, $manifest));
+            assert_true(!is_dir($project->themePath('patterns')), 'restore the absent first-run directory');
+            assert_eq('old manifest path', file_get_contents($blocker . '/keep'));
+            assert_true(!is_dir($project->themePath('.patterns-next')));
+            unlink($blocker . '/keep');
+            rmdir($blocker);
+            $method->invoke($step, $project, $files, $manifest);
+            assert_eq($files['hero.php'], $project->readText('theme/patterns/hero.php'));
+            assert_eq($manifest, $project->readJson('patterns.json'));
+        } finally {
+            $previous === false ? putenv('MSB_FORCE_PATTERN_INPLACE') : putenv("MSB_FORCE_PATTERN_INPLACE={$previous}");
+        }
+    });
+});
+
+test('a failed in-place rollback preserves the previous backup', function (): void {
+    with_project('builder_extract_inplace_backup_', function (Project $project): void {
+        $previousInplace = getenv('MSB_FORCE_PATTERN_INPLACE');
+        $previousFailure = getenv('MSB_FAIL_ROLLBACK_INSTALL');
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        putenv('MSB_FAIL_ROLLBACK_INSTALL=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // previous');
+            $blocker = $project->path('patterns.json');
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old manifest path');
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project,
+                ['hero.php' => '<?php // new'],
+                ['version' => 2, 'patterns' => [], 'starter' => null, 'dropped' => []]));
+            assert_eq('<?php // new', $project->readText('theme/patterns/hero.php'), 'forward installation succeeded before rollback failed');
+            assert_eq('<?php // previous', $project->readText('theme/.patterns-prev/ghost.php'));
+            assert_eq('old manifest path', file_get_contents($blocker . '/keep'));
+        } finally {
+            $previousInplace === false ? putenv('MSB_FORCE_PATTERN_INPLACE') : putenv("MSB_FORCE_PATTERN_INPLACE={$previousInplace}");
+            $previousFailure === false ? putenv('MSB_FAIL_ROLLBACK_INSTALL') : putenv("MSB_FAIL_ROLLBACK_INSTALL={$previousFailure}");
+        }
+    });
 });

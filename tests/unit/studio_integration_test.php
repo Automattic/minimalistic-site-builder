@@ -17,37 +17,6 @@ function studio_present_requires_assertions(bool $asserted): void
     }
 }
 
-function studio_int_copy_dir(string $from, string $to): void
-{
-    if (!is_dir($from)) {
-        throw new RuntimeException("Cannot copy missing directory {$from}");
-    }
-    if (!is_dir($to) && !mkdir($to, 0775, true) && !is_dir($to)) {
-        throw new RuntimeException("Cannot create {$to}");
-    }
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST,
-    );
-    foreach ($iterator as $item) {
-        /** @var SplFileInfo $item */
-        $target = $to . '/' . $iterator->getSubPathname();
-        if ($item->isDir()) {
-            if (!is_dir($target) && !mkdir($target, 0775, true) && !is_dir($target)) {
-                throw new RuntimeException("Cannot create {$target}");
-            }
-            continue;
-        }
-        $parent = dirname($target);
-        if (!is_dir($parent) && !mkdir($parent, 0775, true) && !is_dir($parent)) {
-            throw new RuntimeException("Cannot create {$parent}");
-        }
-        if (!copy($item->getPathname(), $target)) {
-            throw new RuntimeException("Failed to copy {$item->getPathname()} to {$target}");
-        }
-    }
-}
-
 function studio_http_code(string $url): int
 {
     $ch = curl_init($url);
@@ -83,19 +52,13 @@ test('a real Studio site boots, activates and serves', function () {
             $slug = 'sb-int-' . getmypid();
             try {
                 with_temp_dir('studio_int_proj_', function (string $projRoot) use ($cli, $runner, &$asserted, &$site, $slug): void {
-                    $src = repo_path('projects/amber-ember');
-                    if (!is_file($src . '/theme/style.css')) {
-                        throw new RuntimeException('projects/amber-ember/theme/style.css is missing');
-                    }
-                    $dest = $projRoot . '/' . $slug;
-                    if (!mkdir($dest, 0775, true) && !is_dir($dest)) {
-                        throw new RuntimeException("Could not create {$dest}");
-                    }
-                    studio_int_copy_dir($src . '/theme', $dest . '/theme');
-                    if (is_file($src . '/plugin/site-content.php')) {
-                        studio_int_copy_dir($src . '/plugin', $dest . '/plugin');
-                    }
-                    $project = (new ProjectStore($projRoot))->open($slug);
+                    // A fresh checkout must be able to run this without a paid,
+                    // untracked generated project in projects/.
+                    $project = (new ProjectStore($projRoot))->create($slug);
+                    $project->writeText('theme/style.css', "/*\nTheme Name: Studio integration fixture\n*/\n");
+                    $project->writeJson('theme/theme.json', ['version' => 3]);
+                    $project->writeText('theme/templates/index.html',
+                        '<!-- wp:paragraph --><p>Studio integration fixture.</p><!-- /wp:paragraph -->');
                     $site = $runner->start($project);
 
                     $code = studio_http_code($site->url);
