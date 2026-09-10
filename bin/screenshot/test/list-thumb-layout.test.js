@@ -20,7 +20,7 @@ function fixture(variant, nested, direction) {
   return `<html dir="${direction}"><body><section class="wp-block-group alignfull section-composition--list-with-thumbnails is-layout-constrained">
     <div class="wp-block-group alignwide copy-flush is-layout-constrained"><h2>Signature dishes</h2><p>One short introduction.</p></div>
     ${nested ? `<div class="wp-block-group alignwide is-layout-constrained">${items}</div>` : items}
-    </section><section class="control is-layout-constrained"><div class="alignwide">Other section</div></section></body></html>`;
+    </section><section class="control is-layout-constrained"><div class="wp-block-group alignwide copy-flush is-layout-constrained"><h2>Other section</h2><p>Another short introduction.</p></div></section></body></html>`;
 }
 
 // These rules represent Core's constrained layout and column proportions.
@@ -38,7 +38,7 @@ const coreCss = `
   @media(max-width:781px) { .wp-block-columns:not(.is-not-stacked-on-mobile) { flex-wrap:wrap; } }
 `;
 
-test('thumbnail list containers share one width on mobile and wide screens', { skip: !executablePath }, async () => {
+test('thumbnail lists stay narrow while introduction containers keep the standard width', { skip: !executablePath }, async () => {
   const css = execFileSync('php', ['-r',
     'require "src/bootstrap.php"; echo (new ReflectionClass(Automattic\\SiteBuild\\Steps\\ScaffoldThemeStep::class))->getConstant("STYLE_CSS");',
   ], { cwd: root, encoding: 'utf8' });
@@ -59,27 +59,36 @@ test('thumbnail list containers share one width on mobile and wide screens', { s
               };
               const section = document.querySelector('.section-composition--list-with-thumbnails');
               return {
-                section: box(section), intro: box(section.firstElementChild),
+                intro: box(section.firstElementChild),
+                copy: [...section.firstElementChild.children].map(box),
+                container: box(section.children[1]),
                 items: [...section.querySelectorAll('.wp-block-columns, hr')].map(box),
                 rows: [...section.querySelectorAll('.wp-block-columns')].map((row) => [...row.children].map(box)),
                 thumbs: [...section.querySelectorAll('figure')].map(box),
                 control: box(document.querySelector('.control > div')),
+                controlCopy: [...document.querySelector('.control > div').children].map(box),
                 overflow: document.documentElement.scrollWidth > innerWidth,
               };
             });
             const label = `${width}/${variant}/${nested}/${direction}`;
             assert.equal(result.overflow, false, label);
-            assert.ok(result.intro.width < 850, label);
+            assert.deepEqual(result.intro, { ...result.control, top: result.intro.top }, label);
+            for (const [index, copy] of result.copy.entries()) {
+              const control = result.controlCopy[index];
+              assert.equal(copy.width, control.width, label);
+              assert.equal(copy.left, control.left, label);
+            }
+            assert.ok(result.container.width < 850, label);
             for (const item of result.items) {
-              assert.ok(Math.abs(item.left - result.intro.left) < 1, label);
-              assert.ok(Math.abs(item.right - result.intro.right) < 1, label);
+              assert.ok(Math.abs(item.left - result.container.left) < 1, label);
+              assert.ok(Math.abs(item.right - result.container.right) < 1, label);
             }
             for (const thumb of result.thumbs) assert.ok(thumb.width <= 144.1, label);
             for (const [media, copy] of result.rows) {
               assert.ok(Math.abs(media.top - copy.top) < 1, label);
               assert.ok(direction === 'ltr' ? media.right <= copy.left : copy.right <= media.left, label);
             }
-            if (width >= 1440) assert.ok(result.control.width > result.intro.width, label);
+            if (width >= 1440) assert.ok(result.intro.width > result.container.width, label);
           }
         }
       }

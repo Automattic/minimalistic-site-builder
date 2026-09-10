@@ -96,9 +96,11 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
 
-    // The introduction, containers, and separators share the row width limit.
+    // The list keeps its width limit without a limit on the introduction.
     assert_contains(
-        ".wp-block-group.section-composition--list-with-thumbnails > :is(.wp-block-group, .wp-block-columns, .wp-block-separator) {\n"
+        ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-group:has(> .wp-block-columns > .wp-block-column > figure.card-media-thumb),\n"
+            . ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb),\n"
+            . ".wp-block-group.section-composition--list-with-thumbnails > .wp-block-separator {\n"
             . "    max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));\n"
             . "    margin-inline: auto !important;\n"
             . '}',

@@ -372,10 +372,12 @@ final class ScaffoldThemeStep implements Step
             border-radius: 0 !important;
         }
 
-        /* Keep the introduction, row containers, and separators in one column.
-           The section background can still cover the full viewport. Core centers
-           each direct child; nested rows inherit the container width limit. */
-        .wp-block-group.section-composition--list-with-thumbnails > :is(.wp-block-group, .wp-block-columns, .wp-block-separator) {
+        /* Limit row containers and separators to the list width.
+           The introduction keeps the standard section width and text measure.
+           Core centers the list; nested rows inherit its width limit. */
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-group:has(> .wp-block-columns > .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-separator {
             max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));
             margin-inline: auto !important;
         }

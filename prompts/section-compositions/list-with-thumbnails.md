@@ -27,9 +27,10 @@ set of address, hours, and contact details; those details do not need thumbnails
   thumbnail crops square. Use group, columns/column, image, heading, paragraph,
   list, separator, and buttons.
 - Surface/width: the band runs wide or full, and each row takes
-  `"align":"wide"` itself. The theme gives the introduction, row containers,
-  rows, and separators one shared width limit. The band background can stay full width.
-  Keep the introduction and rows in the same column. Author the `18%`/`82%`
+  `"align":"wide"` itself. The theme limits the row containers, rows, and
+  separators to a narrow column. Put the title and introduction in a separate
+  group with the standard section width and text measure. Keep that group
+  outside the row container. The band background can stay full width. Author the `18%`/`82%`
   widths without a custom `width`, `max-width`, or inline width style.
   A `wp:separator` between rows is allowed. Keep it inside the row container.
 - Objective failure: rows with no thumbnail, a row that stacks the thumbnail
