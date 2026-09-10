@@ -187,6 +187,8 @@ test('section prompt freezes site, build, page, and brief layer boundaries', fun
         '{{card_style}}',
         '{{image_instructions}}',
         '{{block_markup_output_contract}}',
+        '{{motion_instructions}}',
+        '{{card_instructions}}',
     ] as $placeholder) {
         assert_contains($placeholder, $build);
     }

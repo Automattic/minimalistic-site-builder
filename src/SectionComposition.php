@@ -37,7 +37,139 @@ final class SectionComposition
         'offset-grid',
         'equal-card-grid',
         'list-with-thumbnails',
+        'bento-grid',
+        'faq-split',
+        'cta-panel',
+        'pricing-tiers',
+        'stat-ledger',
+        'feature-row-hairlines',
+        'zigzag-steps',
+        'statement-lines',
+        'project-grid-2x2',
+        'logo-strip',
     ];
+
+    /**
+     * @var list<string>
+     */
+    private const STATED_HIGHLIGHT_PHRASES = [
+        'one highlighted', 'one card highlighted', 'one highlighted card', 'highlighted card', 'highlight card',
+        'one inverted card', 'one card inverted', 'one featured card', 'one card featured', 'one accent card',
+    ];
+
+    private const PRICING_WORDS = '/\\b(?:pricing|prices?|plans?|tiers?|subscriptions?)\\b/u';
+
+    /** Read an explicit highlight request from one brief clause. */
+    public static function statedHighlight(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (preg_split('/[,.;:]/u', $text) ?: [] as $clause) {
+            $clause = trim($clause);
+            if ($clause === '' || preg_match(self::PRICING_WORDS, $clause) === 1) {
+                continue;
+            }
+            foreach (self::STATED_HIGHLIGHT_PHRASES as $phrase) {
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $clause) === 1) {
+                    return $clause;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    public static function statedHighlightFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $clause = self::statedHighlight($text);
+            if ($clause !== null) {
+                return $clause;
+            }
+        }
+        return null;
+    }
+
+    private const HIGHLIGHT_STOPWORDS = [
+        'one', 'two', 'three', 'four', 'five', 'six', 'with', 'and', 'the', 'card', 'cards', 'highlighted',
+        'highlight', 'highlights', 'inverted', 'featured', 'accent', 'violet', 'purple', 'blue', 'green', 'red',
+        'orange', 'yellow', 'pink', 'black', 'white', 'dark', 'light', 'row', 'grid', 'large', 'small', 'each',
+    ];
+
+    /** Match the highlight request to the section's subject. */
+    public static function highlightAppliesTo(?string $clause, array $section): bool
+    {
+        if ($clause === null || trim($clause) === '') {
+            return false;
+        }
+        $stems = [];
+        foreach (preg_split('/[^\\p{L}]+/u', mb_strtolower($clause, 'UTF-8')) ?: [] as $word) {
+            if (mb_strlen($word, 'UTF-8') >= 4 && !in_array($word, self::HIGHLIGHT_STOPWORDS, true)) {
+                $stems[] = mb_substr($word, 0, 4, 'UTF-8');
+            }
+        }
+        if ($stems === []) {
+            return false;
+        }
+        $haystack = mb_strtolower(implode(' ', array_map(
+            static fn (string $key): string => (string) ($section[$key] ?? ''),
+            ['slug', 'title', 'type', 'purpose'],
+        )), 'UTF-8');
+        foreach (preg_split('/[^\\p{L}]+/u', $haystack) ?: [] as $word) {
+            if (mb_strlen($word, 'UTF-8') >= 4 && in_array(mb_substr($word, 0, 4, 'UTF-8'), $stems, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static function highlightDirective(string $archetype, bool $statedHighlight): string
+    {
+        if ($archetype !== 'equal-card-grid' || !$statedHighlight) {
+            return '';
+        }
+        return '- Highlight (the brief asks for one highlighted card): exactly ONE card group adds'
+            . ' `"className":"' . self::BENTO_HIGHLIGHT_CLASS . '"` to its card marker classes and paints its'
+            . ' surface with `"backgroundColor":"accent"` and `"textColor":"base"`; every other card keeps the'
+            . ' band surface. Never two highlights, never none.';
+    }
+
+    public const LOGO_STRIP_COUNTS = [4, 5, 6, 7, 8];
+
+    public const LOGO_STRIP_CLASS = 'logo-strip';
+
+    public const PROJECT_TILE_COUNTS = [2, 4];
+
+    public const PROJECT_META_CLASS = 'project-meta';
+
+    public const STATEMENT_LINE_COUNTS = [3, 4, 5, 6];
+
+    public const STATEMENT_LIST_CLASS = 'statement-lines';
+
+    public const ZIGZAG_STEP_COUNTS = [3, 4, 5];
+
+    public const FEATURE_ROW_COUNTS = [3, 4];
+
+    public const STAT_LEDGER_COUNTS = [3, 4];
+
+    public const FIGURE_PATTERN = '/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:[kKmMbB]|\p{L}{1,2})?\s?(?:%|\+|x|×)?$/u';
+
+    public const PRICING_TIER_COUNTS = [2, 3];
+
+    public const CTA_PANEL_CLASS = 'cta-panel';
+    /** Build-owned hooks for a closing panel whose image bleeds to its edges. */
+    public const CTA_PANEL_FLUSH_CLASS = 'cta-panel--flush';
+    public const CTA_PANEL_COPY_CLASS = 'cta-panel__copy';
+    public const CTA_PANEL_MEDIA_CLASS = 'cta-panel__media';
+
+    public const FAQ_MIN_ITEMS = 3;
+
+    public const BENTO_HIGHLIGHT_CLASS = 'card-highlight';
 
     /** Background treatments a planned section may carry. */
     public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
@@ -69,7 +201,7 @@ final class SectionComposition
      *
      * @var list<string>
      */
-    public const RECIPE_VARS = ['pin_directive'];
+    public const RECIPE_VARS = ['pin_directive', 'highlight_directive', 'thumbnail_treatment'];
 
     /**
      * How many more images one region may hold than its sibling before the row
@@ -187,10 +319,9 @@ final class SectionComposition
             'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
             'default_background' => 'base',
             'min_images' => 0,
-            'max_images' => 2,
-            'copy_capacity' => 'standard',
-            // One column is the whole point, so no row block is required and
-            // none is forbidden either — a stack may still hold one grid.
+            'max_images' => 1,
+            'copy_capacity' => 'compact',
+
             'requires_row' => false,
             'requires_context' => [],
             'ineligible_reason' => '',
@@ -235,6 +366,136 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--list-with-thumbnails',
             'prompt' => 'section-compositions/list-with-thumbnails.md',
+        ],
+
+        'bento-grid' => [
+            'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 6,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--bento-grid',
+            'prompt' => 'section-compositions/bento-grid.md',
+        ],
+
+        'faq-split' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 1,
+            'copy_capacity' => 'expanded',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--faq-split',
+            'prompt' => 'section-compositions/faq-split.md',
+        ],
+
+        'cta-panel' => [
+            'backgrounds' => ['base', 'tinted'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 1,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--cta-panel',
+            'prompt' => 'section-compositions/cta-panel.md',
+        ],
+
+        'pricing-tiers' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--pricing-tiers',
+            'prompt' => 'section-compositions/pricing-tiers.md',
+        ],
+
+        'stat-ledger' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--stat-ledger',
+            'prompt' => 'section-compositions/stat-ledger.md',
+        ],
+
+        'feature-row-hairlines' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--feature-row-hairlines',
+            'prompt' => 'section-compositions/feature-row-hairlines.md',
+        ],
+
+        'zigzag-steps' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 5,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--zigzag-steps',
+            'prompt' => 'section-compositions/zigzag-steps.md',
+        ],
+
+        'statement-lines' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--statement-lines',
+            'prompt' => 'section-compositions/statement-lines.md',
+        ],
+
+        'project-grid-2x2' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 2,
+            'max_images' => 4,
+            'copy_capacity' => 'compact',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--project-grid-2x2',
+            'prompt' => 'section-compositions/project-grid-2x2.md',
+        ],
+
+        'logo-strip' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--logo-strip',
+            'prompt' => 'section-compositions/logo-strip.md',
         ],
     ];
 
@@ -327,9 +588,13 @@ final class SectionComposition
      *
      * @return array<string,string>
      */
-    public static function recipeVars(string $archetype, ?string $itemPattern): array
+    public static function recipeVars(string $archetype, ?string $itemPattern, bool $statedHighlight = false, string $cardStyle = 'flush'): array
     {
-        return ['pin_directive' => self::pinDirective($archetype, $itemPattern)];
+        return [
+            'pin_directive' => self::pinDirective($archetype, $itemPattern),
+            'highlight_directive' => self::highlightDirective($archetype, $statedHighlight),
+            'thumbnail_treatment' => $archetype === 'list-with-thumbnails' ? ListThumbTreatment::instructions($cardStyle) : '',
+        ];
     }
 
     /**
@@ -503,6 +768,7 @@ TEXT;
         string $archetype,
         string $part,
         ?string $itemPattern = null,
+        bool $statedHighlight = false,
     ): array {
         self::assertKnown($archetype);
         $meta = self::metadata($archetype);
@@ -510,6 +776,23 @@ TEXT;
 
         $imageCount = preg_match_all('~<img\b~i', $markup);
         $imageCount = is_int($imageCount) ? $imageCount : 0;
+        if ($archetype === 'project-grid-2x2') {
+            $imageCount = 0;
+            foreach ($document->indices() as $index) {
+                $name = $document->name($index);
+                if ($name === 'image') {
+                    $imageCount++;
+                    continue;
+                }
+                if ($name !== 'cover') {
+                    continue;
+                }
+                $parent = $document->parent($index);
+                if ($parent !== null && $document->name($parent) === 'column') {
+                    $imageCount += (int) preg_match_all('~<img\b~i', $document->ownHtml($index));
+                }
+            }
+        }
 
         $rows = 0;
         foreach ($document->indices() as $index) {
@@ -544,6 +827,453 @@ TEXT;
                 ['image_count' => $imageCount],
                 'safe parseable section was retained for later archetype repair; no media or copy was invented',
             );
+        }
+
+        if ($archetype === 'bento-grid') {
+            $columnRows = 0;
+            $highlights = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'columns') {
+                    $columnRows++;
+                }
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+            }
+            if ($columnRows < 2) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'bento row count',
+                    ['archetype' => $archetype, 'minimum_column_rows' => 2],
+                    ['column_row_count' => $columnRows],
+                    'safe parseable section was retained; a bento is two card rows of unequal count, not one row',
+                );
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'bento highlight',
+                    ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_cards' => $highlights],
+                    'safe parseable section was retained; exactly one card carries the inverted highlight',
+                );
+            }
+        }
+
+        if ($archetype === 'cta-panel') {
+            $panels = 0;
+            $buttons = 0;
+            $columns = 0;
+            $startAligned = 0;
+            foreach ($document->indices() as $index) {
+                $name = $document->name($index);
+                if ($name === 'group'
+                    && in_array(self::CTA_PANEL_CLASS, self::classTokens($document, $index), true)) {
+                    $panels++;
+                }
+                if ($name === 'button') {
+                    $buttons++;
+                }
+                if ($name === 'columns') {
+                    $columns++;
+                }
+                if ($name === 'heading' || $name === 'paragraph') {
+                    $attrs = $document->attrs($index) ?? [];
+                    $legacy = $name === 'heading' ? ($attrs['textAlign'] ?? null) : ($attrs['align'] ?? null);
+                    $textAlign = $attrs['style']['typography']['textAlign'] ?? $legacy;
+                    if ($textAlign !== 'center') {
+                        $startAligned++;
+                    }
+                }
+            }
+            if ($columns === 0 && $startAligned > 0) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel alignment',
+                    ['archetype' => $archetype, 'start_aligned_text_blocks' => 0],
+                    ['start_aligned_text_blocks' => $startAligned],
+                    'safe parseable section was retained; a panel with no image centers its heading and lead line',
+                );
+            }
+            if ($panels !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel container',
+                    ['archetype' => $archetype, 'panel_groups' => 1, 'class' => self::CTA_PANEL_CLASS],
+                    ['panel_groups' => $panels],
+                    'safe parseable section was retained; the closing invitation lives in exactly one contained panel group',
+                );
+            }
+            if ($buttons !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel action',
+                    ['archetype' => $archetype, 'buttons' => 1],
+                    ['buttons' => $buttons],
+                    'safe parseable section was retained; a closing panel carries exactly one action',
+                );
+            }
+        }
+
+        if ($archetype === 'pricing-tiers') {
+            $rows = [];
+            $highlights = 0;
+            $buttons = 0;
+            $lists = 0;
+            foreach ($document->indices() as $index) {
+                $name = $document->name($index);
+                if ($name === 'columns') {
+                    $tiers = 0;
+                    foreach ($document->children($index) as $child) {
+                        if ($document->name($child) === 'column') {
+                            $tiers++;
+                        }
+                    }
+                    $rows[] = $tiers;
+                }
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+                if ($name === 'button') {
+                    $buttons++;
+                }
+                if ($name === 'list') {
+                    $lists++;
+                }
+            }
+            $tierCount = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($tierCount, self::PRICING_TIER_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing tier row',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'tiers' => self::PRICING_TIER_COUNTS],
+                    ['column_rows' => count($rows), 'tiers_per_row' => $rows],
+                    'safe parseable section was retained; pricing is one row of two or three tier columns',
+                );
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing highlight',
+                    ['archetype' => $archetype, 'highlighted_tiers' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_tiers' => $highlights],
+                    'safe parseable section was retained; exactly one tier carries the inverted highlight',
+                );
+            }
+            if ($tierCount > 0 && ($buttons !== $tierCount || $lists < $tierCount)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing tier anatomy',
+                    ['archetype' => $archetype, 'buttons' => $tierCount, 'minimum_lists' => $tierCount],
+                    ['buttons' => $buttons, 'lists' => $lists],
+                    'safe parseable section was retained; every tier carries one feature list and one action',
+                );
+            }
+        }
+
+        if ($archetype === 'stat-ledger') {
+            $rows = [];
+            $figureColumns = 0;
+            $columnsTotal = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+                $rows[] = count($columns);
+                foreach ($columns as $column) {
+                    $columnsTotal++;
+                    $first = $document->children($column)[0] ?? null;
+                    if ($first === null || $document->name($first) !== 'heading') {
+                        continue;
+                    }
+                    $text = trim(html_entity_decode(strip_tags($document->innerHtml($first)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    if (preg_match(self::FIGURE_PATTERN, $text) === 1) {
+                        $figureColumns++;
+                    }
+                }
+            }
+            $count = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($count, self::STAT_LEDGER_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stat ledger row',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'figures' => self::STAT_LEDGER_COUNTS],
+                    ['column_rows' => count($rows), 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a stat ledger is one row of three or four figure columns',
+                );
+            }
+            if ($columnsTotal > 0 && $figureColumns < $columnsTotal) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stat ledger figures',
+                    ['archetype' => $archetype, 'figure_led_columns' => $columnsTotal],
+                    ['figure_led_columns' => $figureColumns],
+                    'safe parseable section was retained; every column leads with a heading that is only a figure',
+                );
+            }
+        }
+
+        if ($archetype === 'feature-row-hairlines') {
+            $rows = [];
+            $cardColumns = 0;
+            $headedColumns = 0;
+            $columnsTotal = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+                $rows[] = count($columns);
+                foreach ($columns as $column) {
+                    $columnsTotal++;
+                    $first = $document->children($column)[0] ?? null;
+                    if ($first !== null && $document->name($first) === 'heading') {
+                        $headedColumns++;
+                    }
+                    foreach ($document->children($column) as $child) {
+                        foreach (self::classTokens($document, $child) as $token) {
+                            if (str_starts_with($token, 'card-style--') || $token === 'card-body') {
+                                $cardColumns++;
+                                continue 3;
+                            }
+                        }
+                    }
+                }
+            }
+            $count = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($count, self::FEATURE_ROW_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row shape',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'columns' => self::FEATURE_ROW_COUNTS],
+                    ['column_rows' => count($rows), 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a hairline feature row is one row of three or four text columns',
+                );
+            }
+            if ($columnsTotal > 0 && $headedColumns < $columnsTotal) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row headings',
+                    ['archetype' => $archetype, 'heading_led_columns' => $columnsTotal],
+                    ['heading_led_columns' => $headedColumns],
+                    'safe parseable section was retained; every column opens with its short heading',
+                );
+            }
+            if ($cardColumns > 0) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row cards',
+                    ['archetype' => $archetype, 'card_columns' => 0],
+                    ['card_columns' => $cardColumns],
+                    'safe parseable section was retained; the hairlines are the structure, a card shell inside a column doubles it',
+                );
+            }
+        }
+
+        if ($archetype === 'zigzag-steps') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+
+                $copySide = null;
+                foreach ($columns as $position => $column) {
+                    if (self::holdsHeading($document, $column)) {
+                        $copySide = $position;
+                        break;
+                    }
+                }
+                $rows[] = ['columns' => count($columns), 'copy' => $copySide];
+            }
+            $count = count($rows);
+            $twoColumns = array_values(array_filter($rows, static fn (array $row): bool => $row['columns'] === 2));
+            if (!in_array($count, self::ZIGZAG_STEP_COUNTS, true) || count($twoColumns) !== $count) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'zigzag step rows',
+                    ['archetype' => $archetype, 'rows' => self::ZIGZAG_STEP_COUNTS, 'columns_per_row' => 2],
+                    ['rows' => $count, 'columns_per_row' => array_column($rows, 'columns')],
+                    'safe parseable section was retained; a zigzag is three to five two-column step rows',
+                );
+            } elseif ($count >= 2) {
+                $alternates = true;
+                for ($i = 1; $i < $count; $i++) {
+                    if ($rows[$i]['copy'] === null || $rows[$i - 1]['copy'] === null || $rows[$i]['copy'] === $rows[$i - 1]['copy']) {
+                        $alternates = false;
+                        break;
+                    }
+                }
+                if (!$alternates) {
+                    $warnings[] = self::markupWarning(
+                        $part,
+                        'zigzag alternation',
+                        ['archetype' => $archetype, 'copy_column' => 'alternates row by row'],
+                        ['copy_column_per_row' => array_column($rows, 'copy')],
+                        'safe parseable section was retained; consecutive steps put the copy on opposite sides',
+                    );
+                }
+            }
+        }
+
+        if ($archetype === 'project-grid-2x2') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $rows[] = count(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+            }
+
+            $tiles = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'cover') {
+                    continue;
+                }
+                $parent = $document->parent($index);
+                if ($parent === null || $document->name($parent) !== 'column') {
+                    continue;
+                }
+                $tiles[] = self::countHeadings($document, $index);
+            }
+            $rowCount = count($rows);
+            $twoWide = count(array_filter($rows, static fn (int $n): bool => $n === 2));
+            if (
+                !in_array(count($tiles), self::PROJECT_TILE_COUNTS, true)
+                || $rowCount < 1
+                || $twoWide !== $rowCount
+                || count($tiles) !== 2 * $rowCount
+            ) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'project grid tiles',
+                    ['archetype' => $archetype, 'tiles' => self::PROJECT_TILE_COUNTS, 'columns_per_row' => 2, 'tile_block' => 'core/cover'],
+                    ['tiles' => count($tiles), 'rows' => $rowCount, 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a project grid is one or two rows of two cover tiles',
+                );
+            } elseif (array_filter($tiles, static fn (int $headings): bool => $headings !== 1) !== []) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'project tile heading',
+                    ['archetype' => $archetype, 'headings_per_tile' => 1],
+                    ['headings_per_tile' => $tiles],
+                    'safe parseable section was retained; every tile names its project with exactly one heading',
+                );
+            }
+        }
+
+        if ($archetype === 'equal-card-grid' && $statedHighlight) {
+            $highlights = 0;
+            foreach ($document->indices() as $index) {
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'stated highlight',
+                    ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_cards' => $highlights],
+                    'safe parseable section was retained; the brief asks for exactly one highlighted card in the row',
+                );
+            }
+        }
+
+        if ($archetype === 'logo-strip') {
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if (!in_array(self::LOGO_STRIP_CLASS, self::classTokens($document, $index), true)) {
+                    continue;
+                }
+                $names = [];
+                foreach ($document->children($index) as $child) {
+                    $text = trim(html_entity_decode(strip_tags($document->innerHtml($child)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    $words = preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $names[] = $document->name($child) === 'paragraph'
+                        && $text !== ''
+                        && count($words) <= 3
+                        && preg_match('~<img\b~i', $document->innerHtml($child)) !== 1;
+                }
+                $rows[] = $names;
+            }
+            $sound = count($rows) === 1
+                && in_array(count($rows[0]), self::LOGO_STRIP_COUNTS, true)
+                && !in_array(false, $rows[0], true)
+                && $imageCount === 0;
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'logo strip names',
+                    ['archetype' => $archetype, 'row_class' => self::LOGO_STRIP_CLASS, 'rows' => 1, 'names' => self::LOGO_STRIP_COUNTS, 'name' => 'one paragraph of at most three words', 'images' => 0],
+                    ['rows' => count($rows), 'names' => $rows === [] ? 0 : count($rows[0]), 'images' => $imageCount],
+                    'safe parseable section was retained; a logo strip is one marked row of four to eight one-line names and no images',
+                );
+            }
+        }
+
+        if ($archetype === 'statement-lines') {
+            $lists = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'group'
+                    || !in_array(self::STATEMENT_LIST_CLASS, self::classTokens($document, $index), true)) {
+                    continue;
+                }
+                $headings = 0;
+                $others = 0;
+                foreach ($document->children($index) as $child) {
+                    if ($document->name($child) === 'heading') {
+                        $headings++;
+                    } else {
+                        $others++;
+                    }
+                }
+                $lists[] = ['headings' => $headings, 'others' => $others];
+            }
+            $sound = count($lists) === 1
+                && in_array($lists[0]['headings'], self::STATEMENT_LINE_COUNTS, true)
+                && $lists[0]['others'] === 0;
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'statement lines list',
+                    ['archetype' => $archetype, 'list_groups' => 1, 'class' => self::STATEMENT_LIST_CLASS, 'headings' => self::STATEMENT_LINE_COUNTS, 'other_children' => 0],
+                    ['list_groups' => count($lists), 'lists' => $lists],
+                    'safe parseable section was retained; a statement ledger is one marked group of three to six heading lines and nothing else',
+                );
+            }
+        }
+
+        if ($archetype === 'faq-split') {
+            $items = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'details') {
+                    $items++;
+                }
+            }
+            if ($items < self::FAQ_MIN_ITEMS) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'faq accordion items',
+                    ['archetype' => $archetype, 'minimum_details_blocks' => self::FAQ_MIN_ITEMS],
+                    ['details_block_count' => $items],
+                    'safe parseable section was retained; a FAQ split is an accordion of core/details blocks, not a paragraph list',
+                );
+            }
         }
 
         if (($meta['requires_row'] ?? false) === true && $rows < 1) {
@@ -724,5 +1454,24 @@ TEXT;
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return $encoded === false ? get_debug_type($value) : $encoded;
+    }
+
+    private static function countHeadings(BlockMarkup $document, int $index): int
+    {
+        $count = 0;
+        foreach ($document->children($index) as $child) {
+            $count += ($document->name($child) === 'heading' ? 1 : 0) + self::countHeadings($document, $child);
+        }
+        return $count;
+    }
+
+    private static function holdsHeading(BlockMarkup $document, int $index): bool
+    {
+        foreach ($document->children($index) as $child) {
+            if ($document->name($child) === 'heading' || self::holdsHeading($document, $child)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

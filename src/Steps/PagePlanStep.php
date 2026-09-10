@@ -129,6 +129,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const ARCHETYPE_SHARE_DIVISOR = 3;
 
+    private const LIST_SPLIT_TYPES = [
+        'accolades', 'awards', 'capabilities', 'disciplines', 'expertise', 'honours', 'honors', 'practices', 'recognition',
+    ];
+
+    private const CARDLESS_ARCHETYPES = [
+        'statement-lines', 'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel', 'centered-stack',
+    ];
+
     /**
      * Level replacements for an ineligible offset-grid. Matches the page-plan
      * prompt: never a cover, prefer a card row, honor the grid cap.
@@ -137,6 +145,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'equal-card-grid',
         'asymmetric-split',
         'list-with-thumbnails',
+        'bento-grid',
     ];
 
     /** Whitespace-led pauses are accents, not a page's default cadence. */
@@ -697,6 +706,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // decides only WHETHER a section is list-like; once it assigns a
         // pattern, the exact value cannot drift. Obvious list-like semantic
         // types that omitted the field are repaired onto the same commitment.
+        $out = self::withStatedHighlightCards(
+            $out,
+            SectionComposition::statedHighlightFor($project->readJson('meta.json')),
+            $successfulRepairs,
+        );
+        $out = self::withListsOffTheSplit($out, $successfulRepairs);
+
         $out = self::reconcileItemPatternAssignments(
             $out,
             DesignDirectionStep::itemPatternFor($project),
@@ -730,6 +746,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $project->readText('siteSpec.json'),
             DesignDirectionStep::readFor($project),
         );
+        $out = self::withBandOffClosingPanel($out, $warnings);
         $out = self::withClosingBandOffFooterSurface(
             $out,
             FooterComposition::surface($footerArchetype),
@@ -836,6 +853,46 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $explicit = ItemPattern::explicit($authored);
                 $type = strtolower(trim((string) ($section['type'] ?? '')));
                 $listLike = self::isListLikeType($type);
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (in_array($archetype, self::CARDLESS_ARCHETYPES, true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                null,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            null,
+                            "released the '{$archetype}' section from the item idiom: its recipe defines the content structure",
+                        );
+                    }
+                    continue;
+                }
+                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
+                    if ($explicit !== ItemPattern::DEFAULT) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                ItemPattern::DEFAULT,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            ItemPattern::DEFAULT,
+                            "the '{$archetype}' recipe requires cards",
+                        );
+                    }
+                    continue;
+                }
                 if (self::isQuoteLedType($type) && $committed !== 'card') {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
@@ -1407,6 +1464,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!in_array($archetype, self::ARCHETYPES, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
                     . implode(', ', self::ARCHETYPES);
+            } elseif (
+                in_array(strtolower($type), self::ARCHETYPES, true)
+                && strtolower($type) !== $archetype
+                && !($front && count($out) === 0)
+            ) {
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
+                    $archetype,
+                    strtolower($type),
+                    'the section type names an archetype, so the layout follows it',
+                );
+                $archetype = strtolower($type);
             }
             $background = trim((string) ($section['background'] ?? ''));
             if (!in_array($background, self::BACKGROUNDS, true)) {
@@ -2333,9 +2402,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // hero-only plan appends, so the appended tail takes the role.
             // Each inserted archetype avoids both neighbors so the adjacency
             // variety rule holds by construction.
-            $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
-                ? ['centered-stack', 'asymmetric-split', 'offset-grid']
-                : ['centered-stack', 'asymmetric-split', 'equal-card-grid'];
             $briefs = [
                 [
                     'slug'          => 'overview',
@@ -2365,6 +2431,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : '';
             $inserted = [];
             foreach (array_slice($briefs, 0, $missing) as $brief) {
+                // Only the final invitation has a known short content budget.
+                $safeArchetypes = $brief['type'] === 'cta'
+                    ? ['centered-stack', 'cta-panel', 'asymmetric-split']
+                    : ['asymmetric-split', 'equal-card-grid', 'list-with-thumbnails'];
                 $archetype = $safeArchetypes[0];
                 foreach ($safeArchetypes as $candidate) {
                     if ($candidate !== $above && $candidate !== $below) {
@@ -2825,7 +2895,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'title'            => 'Content',
                 'type'             => 'content',
                 'purpose'          => '',
-                'content_notes'    => '',
+                'content_notes'    => $front ? '' : 'A compact page introduction: one heading and one short paragraph grounded in the site spec. No repeated items or multi-paragraph story.',
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => 'standard',
@@ -2873,9 +2943,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
         $sections = array_values(array_filter($raw, 'is_array'));
 
-        // Neither of these is a safe landing spot for a value we are guessing:
-        // a cover has its own interior-page rule and a grid has a cap.
-        $excluded = ['full-bleed-cover', 'equal-card-grid'];
+        $excluded = ['full-bleed-cover', 'equal-card-grid', 'centered-stack'];
         $candidates = array_values(array_filter(
             array_diff(self::ARCHETYPES, $excluded),
             static fn (string $candidate): bool => self::archetypeEligible($candidate, $allowOffsetGrid),
@@ -3289,7 +3357,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         string ...$exclude,
     ): string {
         foreach (self::ARCHETYPES as $candidate) {
-            if ($candidate === 'equal-card-grid') {
+            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
@@ -3431,7 +3499,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $banded = 0;
         foreach ($sections as $section) {
             $background = strtolower(trim((string) ($section['background'] ?? '')));
-            if ($background !== '' && $background !== 'base') {
+            $cover = trim((string) ($section['layout_archetype'] ?? '')) === 'full-bleed-cover';
+            if ($cover || ($background !== '' && $background !== 'base')) {
                 $banded++;
             }
         }
@@ -3632,9 +3701,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $best = null;
         $bestCount = PHP_INT_MAX;
         foreach (self::ARCHETYPES as $candidate) {
-            // The card grid has its own tighter cap and its own pass; letting
-            // this one hand out grids would fight it.
-            if ($candidate === 'equal-card-grid') {
+            // Card grids have a separate cap. Centered stacks require a short message.
+            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
                 continue;
             }
             if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
@@ -3663,5 +3731,148 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
+    }
+
+    /** Give repeated items a row or grid, while preserving the front hero. */
+    public static function withListsOffTheSplit(array $pages, array &$repairs = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $front = !empty($page['front']);
+            $keys = array_keys($sections);
+            $archetypes = array_map(
+                static fn ($section): string => is_array($section) ? trim((string) ($section['layout_archetype'] ?? '')) : '',
+                array_values($sections),
+            );
+            foreach ($keys as $position => $key) {
+                $section = $sections[$key];
+                if (!is_array($section) || ($front && $position === 0)) {
+                    continue;
+                }
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                $authored = $archetypes[$position];
+                $practicalList = $authored === 'list-with-thumbnails'
+                    && in_array($type, ['location', 'location-hours', 'hours', 'contact', 'contact-info', 'address', 'practical-info', 'visit-info'], true);
+                if ($authored !== 'asymmetric-split' && !$practicalList) {
+                    continue;
+                }
+
+                $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
+                if (!$practicalList && !$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
+                    continue;
+                }
+                $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
+                $neighbourGrid = ($archetypes[$position - 1] ?? null) === 'equal-card-grid'
+                    || ($archetypes[$position + 1] ?? null) === 'equal-card-grid';
+                $replacement = $neighbourGrid || $grids >= self::MAX_EQUAL_CARD_GRIDS
+                    ? 'list-with-thumbnails'
+                    : 'equal-card-grid';
+                if ($replacement === $authored) {
+                    continue;
+                }
+                if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
+                    continue;
+                }
+                $archetypes[$position] = $replacement;
+                $sections[$key]['layout_archetype'] = $replacement;
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now ' . ($replacement === 'equal-card-grid' ? 'an equal-card-grid, one card per item in a row' : 'a list-with-thumbnails, one row per item with a small picture') . '; this supersedes any layout named earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    $authored,
+                    $replacement,
+                    $practicalList
+                        ? "practical '{$type}' details use cards without a required thumbnail per detail"
+                        : "a repeated '{$type}' list under the split stacks every item's picture in one column",
+                );
+            }
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /** Select a card layout when the brief requests a card highlight. */
+    public static function withStatedHighlightCards(array $pages, ?string $clause, array &$repairs = []): array
+    {
+        if ($clause === null || trim($clause) === '') {
+            return $pages;
+        }
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            foreach ($sections as $key => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (
+                    $archetype === 'logo-strip'
+                    || !in_array($archetype, ['centered-stack', 'statement-lines', 'feature-row-hairlines', 'stat-ledger'], true)
+                    || !SectionComposition::highlightAppliesTo($clause, $section)
+                ) {
+                    continue;
+                }
+                $sections[$key]['layout_archetype'] = 'equal-card-grid';
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now an equal-card-grid,'
+                    . ' one card per item with one card highlighted as the brief asks; this supersedes any layout named'
+                    . ' earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    $archetype,
+                    'equal-card-grid',
+                    'the brief states one highlighted card for this section, and a ' . $archetype
+                        . ' draws no card to highlight',
+                );
+            }
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /** Keep the contrast panel distinct from the preceding band. */
+    public static function withBandOffClosingPanel(array $pages, array &$warnings = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections) || count($sections) < 2) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            $lastKey = end($keys);
+            $aboveKey = $keys[count($keys) - 2];
+            $last = $sections[$lastKey];
+            $above = $sections[$aboveKey];
+            if (!is_array($last) || !is_array($above)) {
+                continue;
+            }
+            if (trim((string) ($last['layout_archetype'] ?? '')) !== 'cta-panel'
+                || ($above['background'] ?? null) !== 'contrast'
+            ) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$aboveKey]['background'] = 'tinted';
+            $handoff = trim((string) ($above['handoff'] ?? ''));
+            $sections[$aboveKey]['handoff'] = trim($handoff . ' Build correction: this section\'s background is now '
+                . '"tinted" because the closing panel below it carries the contrast surface; this supersedes any '
+                . 'background named earlier in this line.');
+            $pages[$index]['sections'] = $sections;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $aboveKey) . '.background',
+                'contrast',
+                'tinted',
+                'the closing cta-panel below it paints its card on the contrast surface, so a contrast band '
+                . 'directly above would fuse with the panel into one dark close',
+            );
+        }
+        return $pages;
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ListThumbTreatment;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -50,7 +51,7 @@ final class ScaffoldThemeStep implements Step
 
     public function run(Project $project): void
     {
-        $project->writeText('theme/style.css', self::STYLE_CSS);
+        $project->writeText('theme/style.css', self::STYLE_CSS . ListThumbTreatment::css());
         $project->writeText('theme/readme.txt', self::README);
         self::copyMotionKit($project);
         self::copyHeaderKit($project);
@@ -211,6 +212,10 @@ final class ScaffoldThemeStep implements Step
             margin-top: auto;
             justify-content: center;
         }
+        .item-pattern__item .cta-bottom,
+        .equal-cards .cta-bottom {
+            padding-block-start: var(--wp--preset--spacing--md, 1.5rem);
+        }
         .equal-cards p.cta-bottom {
             text-align: center;
         }
@@ -356,15 +361,6 @@ final class ScaffoldThemeStep implements Step
                 flex-basis: 82% !important;
             }
         }
-        /* At wide viewports the square thumb can out-measure a short text
-           stack; the row then takes the thumb's height and top-pinned copy
-           would ride the row's upper edge. Centering only spends the extra
-           space — a text-driven row height leaves none. */
-        .wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
         .list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {
             height: 100%;
             margin: 0;
@@ -375,6 +371,35 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: auto;
             height: 100%;
             border-radius: 0 !important;
+        }
+
+        /* Limit row containers and separators to the list width.
+           The introduction keeps the standard section width and text measure.
+           Core centers the list; nested rows inherit its width limit. */
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-group:has(> .wp-block-columns > .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-separator {
+            max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));
+            margin-inline: auto !important;
+        }
+        /* Bound rows outside a composition wrapper too. */
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {
+            max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));
+        }
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) > .wp-block-column:has(figure.card-media-thumb) {
+            flex-grow: 1;
+            max-inline-size: 9rem;
+        }
+        /* The text column also owns the centering both variants need: when the
+           thumbnail out-measures a short text stack the row takes the
+           thumbnail's height, and top-pinned copy would ride the row's upper
+           edge. Centering only spends extra space — a text-driven row height
+           leaves none. */
+        .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) > .wp-block-column:not(:has(figure.card-media-thumb)) {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            max-inline-size: 52ch;
         }
 
         /* Core gives pullquotes a font-relative 4em vertical pad and a trailing
@@ -646,6 +671,8 @@ final class ScaffoldThemeStep implements Step
             overflow-wrap: normal;
             word-break: normal;
             hyphens: manual;
+            /* Balance the line breaks in the hero heading. */
+            text-wrap: balance;
         }
         .hero-composition__copy .wp-block-heading.headline-hyphenate,
         .hero-composition--layered-poster .wp-block-heading.headline-hyphenate {
@@ -732,6 +759,289 @@ final class ScaffoldThemeStep implements Step
             }
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
+            }
+        }
+
+        .wp-block-details {
+            padding-block: 0.9rem;
+            border-block-end: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        }
+        .faq-list > .wp-block-details:first-child {
+            border-block-start: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        }
+        .wp-block-details > summary {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            cursor: pointer;
+            list-style: none;
+            font-weight: 600;
+        }
+        .wp-block-details > summary::-webkit-details-marker {
+            display: none;
+        }
+        .wp-block-details > summary::after {
+            content: "+";
+            flex: none;
+            font-weight: 400;
+            font-size: 1.25em;
+            line-height: 1;
+            transition: transform 200ms ease;
+        }
+        .wp-block-details[open] > summary::after {
+            transform: rotate(45deg);
+        }
+        .wp-block-details > :not(summary) {
+            margin-block-start: 0.75rem;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .wp-block-details > summary::after {
+                transition: none;
+            }
+        }
+
+        .section-composition--pricing-tiers .price-figure {
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            font-size: var(--wp--preset--font-size--section-title);
+            font-weight: 700;
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+        }
+        @media (min-width: 782px) {
+            .section-composition--pricing-tiers .equal-cards > .wp-block-column > .card-highlight {
+                transform: translateY(-0.75rem);
+            }
+        }
+
+        .section-composition--stat-ledger .wp-block-columns > .wp-block-column {
+            container-type: inline-size;
+            min-width: 0;
+        }
+
+        .section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {
+            font-family: var(--wp--preset--font-family--heading, inherit);
+
+            font-size: min(var(--wp--preset--font-size--display), 26cqi);
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: -0.03em;
+            margin-block-end: 0.35em;
+            white-space: nowrap;
+        }
+
+        .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,
+        .section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {
+            border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+            padding-inline-start: var(--wp--preset--spacing--md, 1.5rem);
+        }
+        .section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {
+            margin-block-end: 0.5em;
+        }
+        @media (max-width: 781px) {
+            .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,
+            .section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {
+                border-inline-start: 0;
+                border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+                padding-inline-start: 0;
+                padding-block-start: var(--wp--preset--spacing--md, 1.5rem);
+            }
+        }
+
+        .section-composition--logo-strip .wp-block-group.logo-strip {
+            justify-content: center;
+            column-gap: clamp(2rem, 6vw, 5.5rem);
+            row-gap: var(--wp--preset--spacing--sm, 0.75rem);
+            align-items: center;
+        }
+        .section-composition--logo-strip .wp-block-group.logo-strip > p {
+            margin: 0;
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            font-size: var(--wp--preset--font-size--lead, 1.125rem);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            line-height: 1;
+            white-space: nowrap;
+            opacity: 0.55;
+        }
+        .section-composition--logo-strip > p {
+            text-align: center;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+            opacity: 0.7;
+        }
+        @media (max-width: 781px) {
+            .section-composition--logo-strip .wp-block-group.logo-strip {
+                justify-content: center;
+                column-gap: var(--wp--preset--spacing--md, 1.5rem);
+            }
+        }
+
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover {
+            aspect-ratio: 4 / 3;
+            min-height: 0;
+            border-radius: var(--shape-radius-media, 0);
+            overflow: hidden;
+            padding: var(--wp--preset--spacing--md, 1.5rem);
+        }
+
+        .section-composition--project-grid-2x2 .wp-block-column.project-tile--wide > .wp-block-cover {
+            aspect-ratio: 21 / 9;
+        }
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .wp-block-heading {
+            margin-block: 0 0.25em;
+        }
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .project-meta {
+            margin: 0;
+            font-size: var(--wp--preset--font-size--caption, 0.875rem);
+            opacity: 0.85;
+        }
+        .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover .wp-block-cover__image-background {
+            transition: scale 700ms ease;
+        }
+        @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+            .section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover:hover .wp-block-cover__image-background {
+                scale: 1.04;
+            }
+        }
+
+        .section-composition--zigzag-steps .wp-block-columns {
+            align-items: center;
+        }
+        .section-composition--zigzag-steps .wp-block-group.step-plate,
+
+        .section-composition--zigzag-steps .wp-block-column:not(:has(*)) {
+            min-block-size: 14rem;
+            border-radius: var(--shape-radius-media, 0);
+            background-color: color-mix(in srgb, currentColor 6%, transparent);
+        }
+        .section-composition--zigzag-steps .wp-block-column > figure.wp-block-image img {
+            width: 100%;
+            height: auto;
+            border-radius: var(--shape-radius-media, 0);
+        }
+        @media (max-width: 781px) {
+            .section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {
+                order: -1;
+            }
+        }
+
+        /* One axis: the hairline runs the full width of the group, so a
+           centered line above it reads as a second axis. The two-class
+           selector outranks core's `has-text-align-center`, so a centered
+           heading from the generator cannot split the section. */
+        .section-composition--statement-lines :is(.wp-block-heading, p) {
+            text-align: start;
+        }
+        /* Keep one size rule at all viewport widths. The 1.25rem minimum
+           keeps narrow statements readable without a jump at 600px. */
+        /* The statement ledger carries its own register. The line sits one
+           ramp step under the section title, so the title still leads, and
+           the size follows the group's own width, so a long statement holds
+           the one line the archetype promises. The case comes from the
+           type-treatment kit, which drops the site's caps here. */
+        .section-composition--statement-lines .wp-block-group.statement-lines {
+            gap: 0;
+            container-type: inline-size;
+        }
+        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
+            margin: 0;
+            padding-block: var(--wp--preset--spacing--md, 1.5rem);
+            border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+            font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));
+            line-height: 1.15;
+            text-wrap: balance;
+        }
+        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
+            border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        }
+
+        .wp-block-group.cta-panel {
+            border-radius: var(--shape-radius-panel, 0);
+            overflow: hidden;
+        }
+        .wp-block-group.cta-panel > .wp-block-columns {
+            align-items: center;
+        }
+
+        .wp-block-group.cta-panel :is(h1, h2, h3) {
+            overflow-wrap: anywhere;
+        }
+        @media (max-width: 600px) {
+            .wp-block-group.cta-panel {
+                padding-inline: 1.25rem !important;
+            }
+
+            .wp-block-group.cta-panel :is(h1, h2, h3) {
+                font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important;
+                overflow-wrap: normal;
+            }
+        }
+
+        /* Flush panel media: the closing cta-panel follows the site's card
+           construction. Under every card style except `framed` the build
+           marks a panel that holds a copy column and an image column with
+           `cta-panel--flush`, `cta-panel__copy`, and `cta-panel__media`. The
+           image then bleeds to the panel's top, bottom, and end edges, and
+           only the copy column carries the panel's padding. The zeroed panel
+           padding must beat the authored inline padding, exactly like
+           .card-flush. */
+        .wp-block-group.cta-panel.cta-panel--flush {
+            padding: 0 !important;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns {
+            max-width: none;
+            align-items: stretch;
+            gap: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .wp-block-column {
+            align-self: stretch;
+            min-width: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: var(--wp--preset--spacing--xl) var(--wp--preset--spacing--lg);
+        }
+        /* The copy column sets the row height. The image covers its column
+           from an absolute box, so a tall source image cannot inflate the
+           panel; the floor keeps a short message from squeezing it to a strip. */
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media {
+            position: relative;
+            min-height: 18rem;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media > figure.wp-block-image {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+        }
+        .wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: auto;
+            object-fit: cover;
+            border-radius: 0 !important;
+        }
+        /* Core stacks the columns below 782px: the image then spans the panel
+           width at the ordinary card ratio, above or below the copy. */
+        @media (max-width: 781px) {
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media {
+                min-height: 0;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__media > figure.wp-block-image {
+                position: static;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {
+                aspect-ratio: 3 / 2;
+                height: auto;
+            }
+        }
+        @media (max-width: 600px) {
+            .wp-block-group.cta-panel.cta-panel--flush {
+                padding-inline: 0 !important;
+            }
+            .wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {
+                padding-inline: 1.25rem;
             }
         }
 

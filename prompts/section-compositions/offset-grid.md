@@ -19,7 +19,8 @@ the items.
 - Identity: the one top-level group carries the assigned root marker class.
 - Media: at least two images, and one image per grid item. Use group,
   columns/column, image, gallery, heading, and paragraph. For more than six
-  mixed-aspect items prefer one `masonry-3` group over repeated rows.
+  mixed-aspect items prefer one `masonry-3` group over repeated rows. Keep
+  internal row margins at md/lg, never xl/xxl on top of outer section spacing.
 - Surface/width: the band runs wide or full, and the `wp:columns` row takes
   `"align":"wide"` itself.
 - Objective failure: level tops on every column, equal column widths, fewer

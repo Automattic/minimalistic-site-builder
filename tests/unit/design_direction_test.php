@@ -5,6 +5,7 @@ use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
+use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
@@ -1396,10 +1397,10 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
         'description' => 'x',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ];
-    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
-            $base + ['depth' => strtoupper($depth)],
+            $base + ['depth' => strtoupper($depth), 'palette' => ['base' => '#101010']],
             'cinematic-safe-zone',
             '',
             warnings: $warnings,
@@ -2286,6 +2287,7 @@ test('normalize commits a catalog surface and falls unknown textures back to non
     $direction = DesignDirectionStep::normalize([
         'description' => 'Paper ground.',
         'surface' => 'Paper',
+        'surface_reason' => 'The process section presents a paper recipe journal.',
     ], 'cinematic-safe-zone');
     assert_eq('paper', $direction['surface']);
     assert_contains('**Surface**: paper', DesignDirectionStep::format($direction));
@@ -2361,6 +2363,49 @@ test('normalize commits a catalog device', function () {
     $warnings = [];
     assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
     assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('header chrome normalizes actionably and the accessor falls back to transient (BIGR-998)', function () {
+    // Persistent chrome is an explicit commitment. An absent field says
+    // nothing and delivers the transient default without a warning; a value
+    // outside the vocabulary lost authored intent and is durable-warning
+    // material, exactly like the sibling bounded axes.
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A header that stays.',
+        'header_chrome' => 'Persistent',
+    ], 'cinematic-safe-zone');
+    assert_eq('persistent', $direction['header_chrome']);
+
+    $absent = DesignDirectionStep::normalize([
+        'description' => 'Nothing committed.',
+    ], 'cinematic-safe-zone');
+    assert_eq(HeaderChrome::TRANSIENT, $absent['header_chrome']);
+
+    $warnings = [];
+    assert_eq('transient', HeaderChrome::normalize('always-on', $warnings));
+    assert_eq(1, count($warnings));
+    foreach (['field header_chrome', 'always-on', 'delivered "transient"', 'invalid header chrome'] as $part) {
+        assert_contains($part, $warnings[0]);
+    }
+
+    $blank = [];
+    assert_eq('transient', HeaderChrome::normalize('', $blank));
+    assert_eq([], $blank, 'an empty commitment is the documented default, not a defect');
+
+    assert_eq('persistent', HeaderChrome::explicit(' PERSISTENT '));
+    assert_eq(null, HeaderChrome::explicit(['persistent']));
+    assert_true(HeaderChrome::isPersistent('persistent'));
+    assert_true(!HeaderChrome::isPersistent('transient'));
+    assert_true(!HeaderChrome::isPersistent(null), 'an uncommitted axis never asks for chrome');
+
+    $tmp = sys_get_temp_dir() . '/builder_header_chrome_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project), 'a missing artifact commits nothing');
+    $project->writeJson('designDirection.json', ['header_chrome' => ['persistent']]);
+    assert_eq('transient', DesignDirectionStep::headerChromeFor($project));
+    $project->writeJson('designDirection.json', ['header_chrome' => ' Persistent ']);
+    assert_eq('persistent', DesignDirectionStep::headerChromeFor($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('the direction description is never edited to remove motif words', function () {
@@ -2771,4 +2816,103 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_eq('', $generic['tension']);
     assert_eq('', $generic['subject_anchor']);
+});
+
+test('the direction persists the seed register as a bounded token and re-reads it (frm W1a)', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x'],
+        'cinematic-safe-zone',
+        'committed seed',
+        $repairs,
+        $warnings,
+        '',
+        '',
+        '',
+        'Modernist',
+    );
+    assert_eq('modernist', $direction['register']);
+
+    // A second pass without the seed axis keeps the persisted value.
+    $again = DesignDirectionStep::normalize($direction, 'cinematic-safe-zone', 'committed seed');
+    assert_eq('modernist', $again['register']);
+
+    // An unknown tradition is not persisted as a stray string.
+    $stray = DesignDirectionStep::normalize(
+        ['description' => 'x', 'register' => 'corporate-memphis'],
+        'cinematic-safe-zone',
+    );
+    assert_eq('', $stray['register']);
+
+    // A brief-only extra tradition counts too.
+    $extra = DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone', '', $repairs, $warnings, '', '', '', 'luxury');
+    assert_eq('luxury', $extra['register']);
+
+    assert_eq('', DesignDirectionStep::fallbackDirection('seed', 'cinematic-safe-zone')['register']);
+
+    with_project('frm-register', function ($project) use ($direction): void {
+        assert_eq('', DesignDirectionStep::registerFor($project), 'no artifact reads as no tradition');
+        $project->writeJson('designDirection.json', $direction);
+        assert_eq('modernist', DesignDirectionStep::registerFor($project));
+        $project->writeJson('designDirection.json', ['description' => 'pre-field artifact']);
+        assert_eq('', DesignDirectionStep::registerFor($project));
+    });
+});
+
+test('a glass depth on a light ground degrades to the ring it is built on, and stays on a dark one', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'depth' => 'glass',
+    ];
+    foreach ([['#0B0B0F', 'glass', 'dark'], ['#FFFFFF', 'ring', 'light']] as [$hex, $expected, $ground]) {
+        $warnings = [];
+        $repairs = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['palette' => ['base' => $hex, 'contrast' => $hex === '#FFFFFF' ? '#111111' : '#F5F5F5']],
+            'cinematic-safe-zone',
+            '',
+            $repairs,
+            $warnings,
+        );
+        assert_eq($expected, $direction['depth'], "glass on a {$ground} ground");
+        $glassRepairs = array_values(array_filter($warnings, fn (string $r): bool => str_contains($r, 'field depth authored "glass"')));
+        assert_eq($expected === 'ring' ? 1 : 0, count($glassRepairs), "warning recorded only on the {$ground} ground");
+    }
+});
+
+test('glass fallback writes a durable warning and retains the direction', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $authored = designdir_direction();
+    $authored['depth'] = 'glass';
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $llm->queueJson(['direction' => $authored]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $delivered = $project->readJson('designDirection.json');
+    assert_eq('ring', $delivered['depth']);
+    assert_eq($authored['description'], $delivered['description']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('designDirection.json: field depth authored "glass"; delivered "ring"', $warnings);
+    assert_contains('disposition', $warnings);
+    $repairs = $secondWarnings = [];
+    $again = DesignDirectionStep::normalize($delivered, $delivered['hero_blueprint']['recipe'], '', $repairs, $secondWarnings);
+    assert_eq('ring', $again['depth']);
+    assert_true(!str_contains(implode("\n", $secondWarnings), 'field depth'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize requires a concept reason for an optional texture', function () {
+    foreach ([null, '', '  ', [], 7] as $reason) {
+        $warnings = [];
+        $repairs = [];
+        $out = DesignDirectionStep::normalize(
+            ['description' => 'A plain site.', 'surface' => 'film', 'surface_reason' => $reason],
+            'cinematic-safe-zone', '', $repairs, $warnings,
+        );
+        assert_eq('none', $out['surface']);
+        assert_eq('', $out['surface_reason']);
+        assert_contains('path=surface; authored=film; delivered=none', implode(' ', $warnings));
+    }
 });
