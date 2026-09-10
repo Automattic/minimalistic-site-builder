@@ -1592,6 +1592,56 @@ test('generate-images drops the site-logo role when Imagick is unavailable', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images ships a site icon from a mark it could not key', function () {
+    if (\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick is loaded; this pin is the no-extension path');
+    }
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    // The Dotcom case: no imagick module, so the key never runs and the render
+    // arrives opaque. It is still a mark on a white ground, which is exactly
+    // what a browser tab wants.
+    (new GenerateImagesStep(new FakeImageClient(gd_mark_png(1264, 848))))->run($project);
+
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']), 'no logo: an opaque mark would paint a box over the header bar');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'the unkeyed mark is not shipped as a logo');
+
+    assert_true($project->exists('theme/assets/site-icon.png'), 'the icon is cut from the render');
+    assert_true($project->exists('plugin/images/site-icon.png'), 'and shipped to the seeder');
+    $rows = $project->readJson('plugin/images.json')['images'];
+    $roles = array_map(static fn (array $row): string => (string) ($row['role'] ?? ''), $rows);
+    assert_true(in_array('site-icon', $roles, true), 'the seeder gets a site-icon row without a logo row beside it');
+    assert_true(!in_array('site-logo', $roles, true), 'and no logo row');
+
+    [$width, $height] = array_slice(
+        (array) getimagesizefromstring($project->readText('theme/assets/site-icon.png')),
+        0,
+        2
+    );
+    assert_eq(512, $width, 'square, at the size WordPress resizes from');
+    assert_eq(512, $height);
+
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('site icon cut from the render', $warnings, 'the warning says what was salvaged');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images keeps a missing content image in the plugin manifest', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('plugin/images.json', ['images' => [

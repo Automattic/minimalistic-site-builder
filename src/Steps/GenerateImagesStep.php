@@ -19,6 +19,7 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SiteIcon;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
@@ -410,18 +411,18 @@ final class GenerateImagesStep implements Step
             $kept[] = $image;
         }
 
-        // The icon is derived here, after the mark survived keying, so it has
-        // no images.json spec and assemble-pages never saw it. Add its row now
-        // — only alongside a logo row that survived, since an icon without a
-        // usable mark would be a flat rectangle of header background.
+        // The icon is derived in finish(), so it has no images.json spec and
+        // assemble-pages never saw it. Add its row now, whenever the file is
+        // there: the two ways it gets written are a keyed mark flattened over
+        // the header ground and an unkeyed render squared by GD, and either is
+        // a picture of the mark. It no longer waits on a surviving logo row,
+        // which a host without Imagick can never produce.
         $addedIcon = false;
-        $hasLogo = false;
         $hasIcon = false;
         foreach ($kept as $image) {
-            $hasLogo = $hasLogo || ($image['role'] ?? '') === 'site-logo';
             $hasIcon = $hasIcon || ($image['role'] ?? '') === 'site-icon';
         }
-        if ($hasLogo && !$hasIcon && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
+        if (!$hasIcon && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
             $project->writeText(
                 'plugin/images/' . self::SITE_ICON_FILE,
                 $project->readText('theme/assets/' . self::SITE_ICON_FILE),
@@ -739,12 +740,25 @@ final class GenerateImagesStep implements Step
             );
             if ($genSpec['mime'] === 'image/png' && ($specs[$i]['role'] ?? '') === 'site-logo') {
                 if (!ImageTransparency::isKeyed($bytes)) {
+                    // No transparency, so no logo: the header composites the
+                    // mark over its own bar, and an opaque render would paint a
+                    // white box across it. A tab is the opposite case — it
+                    // wants an opaque square — so the icon is still cut from
+                    // this render, by GD, which the Dotcom host does have.
                     unset($specs[$i]['role']);
+                    $iconBytes = SiteIcon::fromMark($bytes);
+                    if ($iconBytes === null && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
+                        // run() is resumable, and shipping now keys off this
+                        // file alone: an icon from an earlier attempt would
+                        // outlive the render that disowned it.
+                        @unlink($project->path('theme/assets/' . self::SITE_ICON_FILE));
+                    }
                     $project->addWarnings($this->id(), [
                         "file='theme/assets/{$filename}'; asset='site-logo.png'; authored role=site-logo; "
                         . 'delivered unkeyed opaque PNG kept as a theme asset only; '
                         . 'disposition=the white-background key wiped out or never ran, so the mark is not a usable logo; '
-                        . 'role dropped, plugin manifest row will be removed, title stays visible',
+                        . 'role dropped, title stays visible, '
+                        . ($iconBytes === null ? 'and no site icon could be cut from it' : 'site icon cut from the render'),
                     ]);
                 } else {
                     $bytes = ImageTransparency::padToSquare($bytes);
