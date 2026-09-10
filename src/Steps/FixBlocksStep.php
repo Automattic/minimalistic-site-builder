@@ -675,6 +675,7 @@ final class FixBlocksStep implements Step
             );
             $normalized = $result['markup'];
             if ($role === LayoutFixer::ROLE_SECTION
+                && !\Automattic\SiteBuild\HeroComposition::isAuthoredMarkup($normalized)
                 && !self::keepsStagger(
                     $rel,
                     $normalized,

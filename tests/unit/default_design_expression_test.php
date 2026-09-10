@@ -69,6 +69,66 @@ test('default CSS author receives inner-page and shared markup and preserves saf
     });
 });
 
+test('default multipage sections brief every opening without fixed recipes and retain shared context', function (): void {
+    [$project, $tmp] = sections_fixture();
+    try {
+        $direction = $project->readJson('designDirection.json');
+        $direction['hero_blueprint'] = \Automattic\SiteBuild\HeroBlueprint::defaultFor('authored');
+        $direction['requested_style'] = 'Bauhaus';
+        $project->writeJson('designDirection.json', $direction);
+        $plan = $project->readJson('pages.json');
+        $plan['pages'][0]['sections'][0]['layout_archetype'] = 'authored';
+        $sections = $plan['pages'][0]['sections'];
+        $sections[0]['layout_archetype'] = 'full-bleed-cover';
+        $plan['pages'][] = sections_page('about', $sections);
+        $plan['pages'][] = sections_page('contact', $sections);
+        $project->writeJson('pages.json', $plan);
+        $requests = (new \Automattic\SiteBuild\Steps\SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->requests($project);
+        assert_eq(8, count($requests));
+        foreach ($requests as $request) {
+            foreach (['Eyebrows are banned', 'Decorative numbering is banned', 'Lines and borders need a structural purpose'] as $rule) {
+                assert_contains($rule, sections_request_text($request));
+            }
+        }
+        foreach (['home', 'about', 'contact'] as $page) {
+            $prompt = sections_request_text($requests['page-' . $page . '--hero']);
+            assert_contains('at least one image', $prompt);
+            assert_contains('design-*', $prompt);
+            assert_contains('Bauhaus', $prompt);
+            assert_true(!str_contains($prompt, 'Build exactly this one recipe'));
+            assert_true(!str_contains($prompt, 'headline_line_target'));
+            assert_contains($page === 'home' ? '(/)' : '(/' . $page . '/)', $prompt);
+        }
+        foreach (['header', 'footer', 'page-about--about'] as $key) {
+            assert_contains('SHARED DESIGN CHANNEL', sections_request_text($requests[$key]));
+        }
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('authored inner opening keeps its own framing and palette through delivery and normalization', function (): void {
+    $input = section_unit_input();
+    $input['authored_opening'] = true;
+    $input['section']['primary_action'] = null;
+    $unit = new \Automattic\SiteBuild\Units\SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group {"anchor":"unit-section","align":"wide","backgroundColor":"accent","layout":{"type":"flex","flexWrap":"wrap"}} -->'
+        . '<div id="unit-section" class="wp-block-group alignwide has-accent-background-color has-background">'
+        . '<!-- wp:heading {"level":1,"fontSize":"heading"} --><h1 class="wp-block-heading has-heading-font-size">About our work</h1><!-- /wp:heading -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="AI_IMAGE:composition" alt="Purposeful artwork"/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->';
+    $first = $unit->finish($raw, $input);
+    assert_contains('hero-composition--authored', $first->markup);
+    assert_contains('"backgroundColor":"accent"', $first->markup);
+    assert_contains('"align":"wide"', $first->markup);
+    assert_contains('"type":"flex"', $first->markup);
+    assert_true(!str_contains($first->markup, 'wp:cover'));
+    assert_eq($first->markup, $unit->finish($first->markup, $input)->markup);
+    $fixed = \Automattic\SiteBuild\LayoutFixer::fix($first->markup, 'hero');
+    assert_contains('"type":"flex"', $fixed['markup']);
+    assert_contains('"align":"wide"', $fixed['markup']);
+});
+
 test('requested style is not subordinated to an industry material palette or forced creative tension', function (): void {
     $seed = file_get_contents(repo_path('prompts/design-direction-seeds.md'));
     $direction = file_get_contents(repo_path('prompts/design-direction.md'));

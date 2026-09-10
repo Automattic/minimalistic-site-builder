@@ -152,7 +152,7 @@ final class LayoutFixer
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
-        if (!$pageWidth || !$htmlFirst) {
+        if ((!$pageWidth || !$htmlFirst) && !HeroComposition::isAuthoredMarkup($markup)) {
             self::addMissingRootLayout($roots, $notes, $wideMeasureRootClasses);
         }
         self::promoteAlignClassNames($all, $notes);
@@ -165,10 +165,11 @@ final class LayoutFixer
             self::evenOutFooterRows($all, $notes);
         }
         if ($pageWidth && !$htmlFirst) {
+            $widthNodes = array_values(array_filter($all, static fn (object $node): bool => !self::insideAuthoredHero($node)));
             self::freeGridsFromNarrowWrappers($roots, $notes);
-            self::restoreCoverMeasure($all, $contentSize, $notes);
-            self::normalizeTextMeasure($all, $contentSize, $notes);
-            self::flushCopyToGridEdge($all, $notes);
+            self::restoreCoverMeasure($widthNodes, $contentSize, $notes);
+            self::normalizeTextMeasure($widthNodes, $contentSize, $notes);
+            self::flushCopyToGridEdge($widthNodes, $notes);
         }
         // Last: the rules above rewrite "align" attributes, and an align class
         // left behind in the saved HTML is not derivable from the new
@@ -1185,6 +1186,9 @@ final class LayoutFixer
      */
     private static function widenGridPaths(object $container, array &$notes): bool
     {
+        if (self::insideAuthoredHero($container)) {
+            return false;
+        }
         $foundGrid = false;
         foreach ($container->children as $child) {
             if ((self::is($child, 'columns') && self::columnCount($child) >= 2)
@@ -1222,6 +1226,17 @@ final class LayoutFixer
             }
         }
         return $foundGrid;
+    }
+
+    private static function insideAuthoredHero(object $node): bool
+    {
+        for ($current = $node; $current !== null; $current = $current->parent) {
+            $classes = $current->attrs->className ?? '';
+            if (is_string($classes) && in_array('hero-composition--authored', preg_split('/\s+/', trim($classes)) ?: [], true)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

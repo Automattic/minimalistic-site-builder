@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
@@ -30,6 +31,8 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
+ * - authored_opening: true only for an inner-page opening on the authored
+ *   blocks path; uses concept-led composition instead of the catalog recipe
  * - form_placeholders: true when the host owns a form backend and wants the
  *   section to reserve a form's place with a JP_FORM placeholder block instead
  *   of the default no-form-markup rule; absent/false keeps the default
@@ -66,6 +69,9 @@ final class SectionUnit extends AbstractPageSectionUnit
      */
     public function request(array $input): array
     {
+        if (($input['authored_opening'] ?? false) === true) {
+            return $this->authoredOpeningRequest($input);
+        }
         // Validate the machine-readable execution input before spending an LLM
         // call. Missing means flush for standalone callers whose persisted
         // design direction predates the field; SectionsStep always supplies it.
@@ -160,6 +166,30 @@ final class SectionUnit extends AbstractPageSectionUnit
         return $request;
     }
 
+    /** Inner-page openings share the site's concept, not the home topology. */
+    private function authoredOpeningRequest(array $input): array
+    {
+        $section = $this->section($input);
+        $this->sectionRole($section);
+        return $this->siteLayeredRequest('hero.md', $this->commonVars($input) + [
+            'site_pages' => $this->inputString($input, 'site_pages'),
+            'page_title' => $this->pageString($input, 'title'),
+            'page_path' => $this->pageString($input, 'path', '/'),
+            'section_title' => $this->sectionString($section, 'title'),
+            'section_slug' => $this->sectionString($section, 'slug'),
+            'section_purpose' => $this->sectionString($section, 'purpose'),
+            'content_notes' => $this->sectionString($section, 'content_notes'),
+            'neighbors' => $this->inputString($input, 'neighbors'),
+            'hero_blueprint' => 'Compose a page-specific opening from the notes above and the shared design direction. '
+                . 'Preserve the same visual language, with at least one image, without copying the home page. '
+                . 'The page-plan archetype and background are suggestions, not a fixed block recipe.',
+            'above_fold_contract' => $this->inputString($input, 'header_contract')
+                . "\nThis page's primary action (exact label and destination; null means no primary button):\n"
+                . json_encode($section['primary_action'] ?? null, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            'image_instructions' => $this->renderer->render('image-generation.md', []),
+        ]);
+    }
+
     private function motionInstructions(array $input): string
     {
         $profile = $input['motion_profile'] ?? 'none';
@@ -177,6 +207,21 @@ final class SectionUnit extends AbstractPageSectionUnit
 
     public function finish(string $raw, array $input): MarkupResult
     {
+        if (($input['authored_opening'] ?? false) === true) {
+            $warnings = $repairs = [];
+            $key = $this->key($input);
+            $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+            foreach (['hero-composition--', 'hero-mobile--'] as $prefix) {
+                $markup = GeneratedMarkup::withRootClassMarker(
+                    $markup, $prefix, $prefix . HeroComposition::AUTHORED, $key, $repairs,
+                );
+            }
+            $action = GeneratedMarkup::reconcilePrimaryAction($markup, $input['section']['primary_action'] ?? null, $key);
+            $markup = $action['markup'];
+            array_push($repairs, ...$action['repairs']);
+            array_push($warnings, ...$action['warnings'], ...HeroComposition::markupWarnings($markup, HeroComposition::AUTHORED, $key));
+            return new MarkupResult($markup, $repairs, $warnings);
+        }
         $cardStyle = $this->cardStyle($input);
         $archetype = $this->assignedArchetype($input);
         $itemPattern = $this->assignedItemPattern($input);

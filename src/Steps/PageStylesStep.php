@@ -11,6 +11,8 @@ use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CssContrastAdjuster;
 use Automattic\SiteBuild\CssContrastCheck;
 use Automattic\SiteBuild\CssScrub;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -111,6 +113,7 @@ h1, h2, h3, h4, h5, h6,
 p, li, dt, dd, blockquote, figcaption, caption, th, td,
 .hero-composition__copy .wp-block-heading,
 .hero-composition--layered-poster .wp-block-heading,
+.hero-composition--authored .wp-block-heading,
 .wp-block-heading,
 .wp-block-post-title,
 .wp-block-button__link {
@@ -341,6 +344,7 @@ CSS;
             return;
         }
 
+        $openingIntent = self::openingIntent($project);
         $used = self::usedClasses($project);
         if ($used === []) {
             echo "  no layout utility classes referenced; nothing to style\n";
@@ -351,6 +355,7 @@ CSS;
         $markup = self::deliveredMarkup($project);
         $rendered = $this->renderer->render('page-styles.md', [
             'design_direction' => DesignDirectionStep::readFor($project),
+            'opening_intent'   => $openingIntent,
             'theme_json'       => $project->readText('theme/theme.json'),
             'used_classes'     => self::classList($used),
             'delivered_markup' => $markup,
@@ -3943,6 +3948,46 @@ CSS;
             $resolved[$semanticSlug] = $artifactSlug;
         }
         return $resolved;
+    }
+
+    /** Scope intent per page and check the assembled front opening, without another AI call. */
+    private static function openingIntent(Project $project): string
+    {
+        $direction = $project->exists('designDirection.json') ? $project->readJson('designDirection.json') : [];
+        $blueprint = $direction['hero_blueprint'] ?? null;
+        $pages = $project->exists('pages.json') ? $project->readJson('pages.json')['pages'] ?? [] : [];
+        $intents = [];
+        foreach ($pages as $page) {
+            $opening = SectionsStep::openingSection($page);
+            if ($opening === null) {
+                continue;
+            }
+            $intent = [
+                'page' => $page['path'] ?? $page['slug'] ?? '',
+                'opening' => $opening['slug'] ?? '',
+                'purpose' => $opening['purpose'] ?? '',
+                'content_notes' => $opening['content_notes'] ?? '',
+            ];
+            if (($page['front'] ?? false) === true && is_array($blueprint)) {
+                $intent['front_page_blueprint'] = HeroBlueprint::promptValues($blueprint);
+                $slug = (string) ($page['slug'] ?? '');
+                $file = 'plugin/pages/' . $slug . '.html';
+                if (HeroComposition::isAuthored((string) ($blueprint['recipe'] ?? ''))
+                    && preg_match('/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/', $slug) === 1
+                    && $project->exists($file)) {
+                    $warnings = HeroComposition::sourceOrderWarnings(
+                        $project->readText($file), $blueprint['source_order'] ?? [], $file,
+                        (string) ($opening['slug'] ?? ''),
+                    );
+                    if ($warnings !== []) {
+                        $project->addWarnings('page-styles', $warnings);
+                    }
+                }
+            }
+            $intents[] = $intent;
+        }
+        return $intents === [] ? 'Use the delivered opening markup and shared direction.'
+            : json_encode($intents, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 
     /** Final theme and content-plugin markup in deterministic path order. */

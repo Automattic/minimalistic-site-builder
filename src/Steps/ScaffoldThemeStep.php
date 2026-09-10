@@ -694,6 +694,29 @@ final class ScaffoldThemeStep implements Step
             hyphens: auto;
         }
 
+        /* Authored heroes retain deliberate <br> breaks, never accidental
+           mid-word wrapping. The trusted heading fitter handles a word that
+           exceeds its rendered column without imposing a line-count target. */
+        .hero-composition--authored .wp-block-heading {
+            overflow-wrap: normal;
+            word-break: normal;
+            hyphens: none;
+        }
+        .hero-composition--authored {
+            container-type: inline-size;
+        }
+        .hero-composition--authored :is(.wp-block-column, .wp-block-group) {
+            min-width: 0;
+        }
+        /* Post content uses flow layout, where a top-level alignwide alone
+           does not produce a mat. Honor an authored frame at that boundary. */
+        .hero-composition--authored.alignwide {
+            box-sizing: border-box;
+            width: calc(100% - 2 * var(--wp--preset--spacing--md));
+            max-width: var(--wp--style--global--wide-size);
+            margin-inline: auto;
+        }
+
         /* Blueprint-selected mobile transformations. These rules act only on
            the exact root marker normalized by HeroUnit; CSS never guesses a
            quiet image region or changes the selected recipe at runtime. */

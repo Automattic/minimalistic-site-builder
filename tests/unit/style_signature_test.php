@@ -33,6 +33,9 @@ test('style prompts direct the image choice rather than asking for decorative sh
     assert_contains('Style signature', $images);
     assert_contains('subject and composition', $images);
     assert_contains('site-wide grade', $images);
+    $hero = file_get_contents(repo_path('prompts/hero.md'));
+    assert_contains('image choice', $hero);
+    assert_contains('palette', $hero);
     $direction = file_get_contents(repo_path('prompts/design-direction.md'));
     assert_true(!str_contains($direction, 'Do not promise assets this channel cannot create'));
     assert_contains('illustration', $direction);

@@ -177,7 +177,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'type'             => ['type' => 'string'],
             'purpose'          => ['type' => 'string'],
             'content_notes'    => ['type' => 'string'],
-            'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
+            'layout_archetype' => ['type' => 'string', 'enum' => [...self::ARCHETYPES, HeroComposition::AUTHORED]],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
             'item_pattern'     => [
@@ -373,7 +373,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $backgrounds
             )) . ".\n"
             . "- Prefer `{$default}` when no other allowed surface better serves the real following section.\n"
-            . '- Do not reinterpret or replace this topology. Design the following section around the locked opening.';
+            . ($archetype === HeroComposition::AUTHORED
+                ? '- Authored means a concept-led opening, not a layout template. Preserve its composition brief and complement it below.'
+                : '- Do not reinterpret or replace this topology. Design the following section around the locked opening.');
     }
 
     public function consume(Project $project, array $results): void
@@ -1094,7 +1096,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $errors[] = "page-plan: section '{$slug}' is missing 'type' — provide a short semantic label";
             }
             $archetype = trim((string) ($section['layout_archetype'] ?? ''));
-            if (!in_array($archetype, self::ARCHETYPES, true)) {
+            if (!in_array($archetype, self::ARCHETYPES, true)
+                && !($front && $out === [] && $archetype === HeroComposition::AUTHORED)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
                     . implode(', ', self::ARCHETYPES);
             } elseif (
@@ -1332,7 +1335,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             static fn (mixed $value): bool => is_string($value) && in_array($value, self::BACKGROUNDS, true),
         )));
         $default = trim((string) ($projection['default_background'] ?? ''));
-        if (!in_array($archetype, self::ARCHETYPES, true)
+        if ((!in_array($archetype, self::ARCHETYPES, true) && $archetype !== HeroComposition::AUTHORED)
             || $allowed === []
             || !in_array($default, $allowed, true)
         ) {

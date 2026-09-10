@@ -210,6 +210,7 @@ final class SiteSpecStep implements Step
         $project->writeJson('siteSpec.json', $spec);
     }
 
+
     /**
      * A deterministic site name derived from the user prompt, for specs whose
      * model output carried none: the prompt's first few words, cleaned up.

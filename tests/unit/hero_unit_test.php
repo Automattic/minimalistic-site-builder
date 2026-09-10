@@ -322,7 +322,7 @@ test('HeroUnit generate returns a JSON-serializable repairs and warnings envelop
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
-test('HeroUnit warns for removed eyebrow and separator content while preserving headline-first copy', function () {
+test('HeroUnit preserves an optional caption, divider and authored copy order', function () {
     $eyebrow = '<!-- wp:paragraph {"fontSize":"caption"} -->'
         . '<p class="has-caption-font-size">Tbilisi Old Town</p><!-- /wp:paragraph -->';
     $support = '<!-- wp:paragraph --><p>The exact support paragraph survives.</p><!-- /wp:paragraph -->';
@@ -338,22 +338,9 @@ test('HeroUnit warns for removed eyebrow and separator content while preserving 
 
     $first = $unit->finish($raw, hero_unit_contract_input('foreground-split', null));
 
-    assert_true(!str_contains($first->markup, 'Tbilisi Old Town'));
-    assert_true(!str_contains($first->markup, 'wp:separator'));
-    assert_true(!str_contains($first->markup, 'has-accent-background-color'), 'the emptied shell is removed');
-    assert_contains($headline . $support, $first->markup, 'the sole support block moves intact behind the H1');
-    assert_eq(['hero-support-moved-after-headline'], array_column($first->repairs, 'code'));
-    assert_eq(2, count($first->warnings));
-    $warnings = implode("\n", $first->warnings);
-    foreach ([
-        "file='theme/parts/page-home--hero.html'",
-        'Tbilisi Old Town',
-        'is-style-wide',
-        'delivered=removed',
-        'disposition=',
-    ] as $context) {
-        assert_contains($context, $warnings);
-    }
+    assert_contains($eyebrowShell . $support . $headline, $first->markup);
+    assert_eq([], $first->repairs);
+    assert_eq([], $first->warnings);
 
     $second = $unit->finish($first->markup, hero_unit_contract_input('foreground-split', null));
     assert_eq($first->markup, $second->markup);

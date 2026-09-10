@@ -2,67 +2,51 @@
 {{site_context}}
 
 <!-- cache-layer:unit -->
-You are a WordPress block-theme developer AND the design lead. Build ONLY the front-page HERO section as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters). The DESIGN DIRECTION above is the global visual language; it does not override the hero topology assigned below.
+You are the design lead and a WordPress block-theme developer. Compose ONLY this page's opening hero as Gutenberg block markup. The site's concept and requested visual language determine this opening, not a catalog layout. Inner pages belong to the same visual family but need not repeat the home page's arrangement or headline.
 
-FRONT PAGE: "{{page_title}}" ({{page_path}})
-
-FRONT-PAGE OUTLINE:
+THIS PAGE: "{{page_title}}" ({{page_path}})
+OUTLINE:
 {{outline}}
 
-SITE PAGES (the complete set of valid internal page paths):
+VALID SITE PAGES:
 {{site_pages}}
 
-HERO SECTION BRIEF:
+HERO BRIEF:
 - Title: {{section_title}}
 - Slug: {{section_slug}}
-- Role: {{section_role}}
-- Type: {{section_type}}
 - Purpose: {{section_purpose}}
-- Notes: {{content_notes}}
+- Content: {{content_notes}}
 
-NORMALIZED HERO BLUEPRINT (structured creative parameters; execute every compatible value exactly):
+CONCEPT-LED COMPOSITION:
 {{hero_blueprint}}
 
-AUTHORITATIVE ABOVE-FOLD CONTRACT (canonical facts shared byte-for-byte with the independent header author):
+SHARED HEADER AND ACTION CONTRACT:
 {{above_fold_contract}}
 
-LOWER-EDGE NEIGHBOR CONTRACT:
+FOLLOWING SECTION:
 {{neighbors}}
 
-{{composition_assignment}}
+Design decisions:
+- The requested style must be recognizable in composition, image choice, type and color together. Do not substitute a generic business-site treatment or repeat decorative ::before/::after shapes. Photography, illustration and generated artwork are all available; choose a medium that carries this visual language.
+- Execute the blueprint's primary impression, focal point and essential content through the site's typography, palette and image language. Group and align image, headline and action as a coherent composition; supporting facts or detail images earn their place by strengthening that impression. For an inner page, derive this intent from its own purpose and notes, not the home arrangement.
+- Include at least one image that meaningfully supports the site's concept. Choose its placement, scale and relationship to the copy; it need not sit beside the text or fill the background. Multiple images may have different supported aspect ratios. Compose each requested image for its actual slot.
+- Keep the image placeholder's subject, page-context and aspect ratio consistent with that slot. For a full-hero background, place the subject and text-safe negative space within the complete hero frame. For a separate image panel, describe that panel's frame, not a second full-page composition with another empty copy zone. Preserve the focal subject when choosing desktop and mobile crops; do not reserve the same copy space both inside the image and outside its container.
+- Choose alignment, grouping and spacing deliberately. A framed hero, typography-led opening, ordered image sequence or coordinated content groups are valid, not a menu or a requirement to be unusual. Whitespace should clarify relationships; do not insert empty blocks merely to balance columns.
+- Let useful content determine the text arrangement. Credits below the heading, a secondary heading or several short paragraphs are valid when grounded in the brief. Follow the shared anti-tell guardrails: no eyebrow above the H1, decorative numbering or gratuitous dividers. Avoid filler, redundant claims and invented proof. Use one clear H1; choose its theme font-size preset for the composition rather than always forcing display scale.
+- Readability and responsive behavior are requirements, not a universal first-screen height. Establish the main idea promptly; a deliberately longer opening is valid. Keep meaningful reading order in the DOM, use wrapping/stacking core layouts on narrow screens, and avoid clipped words, accidental overflow or fixed-height containers that hide content. Do not rely on essential absolute positioning or rotated reading text.
 
-ASSIGNED RECIPE:
-{{composition_recipe}}
+Before returning markup, check the composition at desktop and narrow widths: what leads, what supports it, and does the DOM order preserve that hierarchy when columns stack? Revise within this response if supporting details delay the intended focal point or unrelated alignments disconnect the copy and media. This is not a universal image-first rule. When the blueprint supplies `source_order`, apply each named design-* class once to its corresponding disjoint element in both block attributes and saved HTML, and preserve their listed relative DOM order; do not add empty wrappers to satisfy it. Do not depend on later CSS reordering to repair the reading sequence. Return only the finished markup, not this check.
 
-Rules:
-- Return exactly ONE top-level `wp:group`. It MUST declare `"layout":{"type":"constrained"}`, carry `"anchor":"{{section_slug}}"` with matching saved HTML `id="{{section_slug}}"`, and carry the assigned `hero-composition--...` root class marker. A deterministic finish pass repairs only this objective envelope and marker; it does not rewrite a valid composition toward a generic aesthetic.
-- Build section content only. Never emit site title, wordmark, navigation, header/footer landmarks, a template part, `<html>`, or `<body>`. Header identity/navigation are independently generated and owned by the canonical contract.
-- Execute the ONE assigned recipe. Preserve its topology, media count/mode, copy capacity, safe/focal regions, width behavior, and mobile transformation. The root carries the assigned `hero-mobile--...` marker. Give the recipe's primary copy region the helper class `hero-composition__copy` and each topology-owned media region the helper class `hero-composition__media` so the reviewed responsive stylesheet can enact that transformation. Preserve those helper classes in both block `className` and saved HTML. Do not substitute a generic centered hero or a different recipe.
-- The canonical contract is authoritative for the exact header relation, header archetype, foreground/protection tokens, viewport budget, physical safe/focal regions, ownership split, primary action, and following seam. Do not infer competing values from prose.
-- First-viewport discipline: the headline, its supporting line, and the planned action (when one exists) must all land inside the first desktop viewport together with a meaningful share of the recipe's media. Size media so this holds — never author an image plate or column so tall that bottom- or center-anchored copy is pushed below the fold, and never open the section with a viewport-scale empty band.
-- Sit tight under the header: when the recipe leads with media, the media is the section's first visual element and the root group's top padding is at most the `sm` spacing preset; large breathing room belongs inside the composition, not between the header and the hero. A copy-led solid-surface hero is the opposite case — give its root the `lg` preset top AND bottom so the composition breathes between the header and the following section; a deterministic rhythm pass enforces both edges.
-- The hero is exempt from a framed canvas: even when the DESIGN DIRECTION commits to a framed mat, the hero's full-width band and cover media run `"align":"full"` edge-to-edge — never capped at `"align":"wide"`. The mat begins with the following section; a hero stopped short of the viewport edge reads as a rendering bug. (A deterministic finish pass upgrades cover-band heroes to full alignment.)
-- The hero H1 always authors `"fontSize":"display"`; `display` is the masthead token and no lower heading preset belongs on this one headline. Do not step down to `section-title` or `heading` for a narrow copy rail. Hold the blueprint's line target through copy length: nothing downstream shortens the headline copy, so an over-long headline keeps every word and loses scale instead. A deterministic finish pass bounds the rendered display token to the copy measure and to the blueprint's desktop line target, so a headline that overruns the target renders below the committed display scale.
-- When `primary_action` in the canonical contract is non-null, reproduce its visitor-facing label and destination exactly once in one `wp:button`; never paraphrase the label, use the planning intent as copy, invent a destination, or add another primary action. When it is null, do not fabricate a CTA.
-- The DESIGN DIRECTION's **CTA style** is authoritative. Emit that required action as a plain `wp:button`; do not add local fill/text colors, gradient, width, border, padding, custom CSS, or button style-variation classes. The theme supplies the complete construction and interaction states. A button may fill its container only when that container is at most one third of the content width (a narrow column or a card); in any wider container it keeps its intrinsic width, so never set `"width":100` on a hero, band, or half-column button. The hero copy region is always wider than that, so its button is never full width and its `wp:buttons` container never uses `"justifyContent":"stretch"`.
-- The main headline is one level-1 `wp:heading` with `"fontSize":"display"`. Follow the blueprint's headline register and line target through copy length and composition; never hardcode `font-size`, `clamp()`, or rotated reading text.
-- The contract's ownership split gives identity to the header and the proposition to the hero: when the header already displays the site name or tagline, NO hero text — headline or standfirst — may repeat either verbatim; the same words twice within one viewport read as a mistake, not a brand gesture. When the contract's `header.tagline_text` is non-null, that exact sentence renders in the header ~150px above your copy: no hero line may restate it, verbatim OR paraphrased — the tagline already tells the visitor what the site is, so the hero must say something the tagline does not. Lead with the proposition; the name may appear inside a longer sentence only when it still works without the header's copy.
-- The supporting line adds information the headline does not carry — audience, offer, place, proof. Never restate or paraphrase the H1 as the standfirst; if the support line could replace the headline without losing anything, write a different support line.
-- NO EYEBROW — the level-1 headline is the copy region's FIRST text line, always. Never open with an eyebrow/kicker: no caption-scale, uppercase, or tracked line above the H1, and no small heading standing in for one. Orientation copy (place, dates, category, audience) belongs in the standfirst below the headline — or is already rendered by the header as the site tagline when the contract's `header.tagline_text` is non-null. A deterministic finish pass removes eyebrow-position text above the headline.
-- TEXT BUDGET — the copy region holds the level-1 headline plus AT MOST ONE supporting paragraph, and at most one planned button. Never stack a second paragraph, caption line, credit line, or second standfirst. The standfirst itself is SHORT — one sentence, about two set lines, and no more than roughly 180 characters; it orients, it does not explain. Story-length copy belongs to the first content section, not the hero: preserve one orienting thought and move the rest there or cut it. Do not fold overflow into the standfirst.
-- HEADLINE PUNCTUATION — the H1 is a short phrase, not a sentence joined by punctuation. Never use an em dash or en dash ("—", "–") inside the headline; when the thought needs a second half, that half is the standfirst.
-- HEADLINE REGISTER — the H1 expresses a proposition specific to THIS brand and grounded in the supplied SITE SPEC and section brief. Never open with "Welcome to" (in any language) and never let the headline be a bare category label ("Vegetarian Argentine Cuisine", "Construction Management Software") — those are the two template registers every generated site defaults to. Name a grounded experience, offer, or idea; the category is the standfirst's job, or is already carried by the header tagline. Specificity is not permission to invent a differentiator such as history, provenance, awards, superlatives, a proprietary method, or promised outcomes.
-- Use valid core blocks only: group, cover, columns/column, heading, paragraph, buttons/button, image, media-text, spacer. Use only blocks the assigned recipe needs. Never use `wp:separator` anywhere in the hero — a hairline rule slicing the copy stack reads as clutter, and a deterministic finish pass strips it.
-- PROTECTION DIM IN TOKEN FORM — when the contract assigns a `top_protection_token` to this opening and the composition dims its cover, author the dim as `"dimRatio"` of at least 40 in a 10-point increment (40, 50, 60, …) with `"overlayColor":"<that token slug>"`. Never spell the same color as `customOverlayColor` hex or substitute a gradient for the dim: the build verifies the overlay header against the exact token, and an unverifiable dim silently costs the whole site its overlay header.
-- Reference theme presets by slug. Mirror every saved HTML class/style in supported block attributes. Keep text readable against its actual surface and the exact protection tokens in the contract. Never add a shadow preset: the committed **Depth** fact is already wired once onto cards and contained media by the build; full-bleed hero media deliberately stays unelevated.
-- Internal links use SITE PAGES paths or valid planned anchors exactly. No `href="#"`, invented route, form markup, script-capable markup, emoji, or placeholder UI.
-- Write all visitor-facing copy in {{language}} while preserving proper nouns and exact identity/action values.
-- Hard facts — dates, times, prices, street addresses, phone numbers, email addresses, URLs, capacities — come only from the SITE SPEC, verbatim. Never invent an email, street address, phone number, or URL. Sections are authored independently, so an invented specific WILL contradict a sibling section. When the spec lacks the value, write copy that does not need it instead of inventing one.
-
-Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
-- `none` means no motion classes; `minimal` permits only a quiet hover response. Otherwise, `hero-entrance` may appear once on the primary copy group, and `reveal-up`, `reveal-scale`, `reveal-blur`, or `reveal-zoom` may be used instead when that better fits the committed profile.
-- At most one ambient effect may appear in the hero: `ken-burns` on image media, `gradient-shift` on a gradient surface, or `ambient-drift` on one decorative visual. Do NOT automatically pair `hero-entrance` with `ken-burns`; zero motion classes is valid.
-- Add these only through block `className`; never write animation CSS, runtime `is-visible`/`motion-*` state, or more than one motion class on a block.
+Delivery requirements:
+- Return one root wp:group with matching anchor/id "{{section_slug}}", a layout suited to the composition, and className "hero-composition--authored hero-mobile--authored" in both block attributes and saved HTML. Add semantic design-* classes where the shared CSS step should realize custom composition. These identify ownership, not a prescribed shape. Nested groups may use supported flex, grid, flow or constrained layouts. Use supported block attributes and theme presets; mirror attributes into the saved markup.
+- Use valid core blocks: group, cover, columns/column, heading, paragraph, buttons/button, image, media-text, spacer, separator, list/list-item, quote. Do not emit navigation, header/footer landmarks, template parts, html/body, forms, scripts or event handlers. The header is authored separately.
+- Coordinate with the header contract's actual mode, foreground/protection tokens and safe top region. An overlay header requires an uninterrupted, verifiably protected top surface; never place essential text underneath it. Use the assigned token as overlayColor with dimRatio at least 40 in ten-point increments when that protection is required. Otherwise choose image protection for readability against the actual pixels.
+- The contract owns the primary action's exact label and destination: include it once when non-null, and do not invent an action when null. Use the site's CTA treatment and accessible link text. CTA construction is global: do not add local fill, ink, border or padding. A committed block-style CTA may span its hero container when intentional; other CTA styles keep their intrinsic construction. Ordinary content links may reference valid site pages. No dead href="#" links or invented routes.
+- Use the supplied brand identity intentionally. It may be the hero statement when that is the concept; avoid accidental repetition of the header's copy. Supporting text should add information.
+- Use `<br>` only for an intentional headline grouping, not incidental wrapping at one width. Choose a theme font-size preset that fits the copy region and those groups together; a narrow paragraph-sized wrapper is not automatically appropriate for display type. The runtime may shrink explicit groups while they remain readable, then allow natural wrapping on narrower screens. No specific line count or text alignment is required.
+- Facts, dates, prices, addresses, contact details, URLs and claims must come from the supplied SITE SPEC. Never invent an email, street address, phone number, or URL. Do not invent credibility or business facts. Write all visitor-facing copy in {{language}}.
+- Keep readable foreground/background contrast, keyboard access and the site's motion commitment. Optional bundled motion classes may support the composition; none means no motion, minimal means hover only. Do not author animation CSS or script. Motion must never be necessary to access content.
+- Optional `hero-entrance` belongs on one primary group. Do NOT automatically pair `hero-entrance` with `ken-burns`. At most two entrances and one ambient effect; choose only the bundled classes named in the design direction. Never combine effects that compete for the same transform.
 
 {{image_instructions}}
 
