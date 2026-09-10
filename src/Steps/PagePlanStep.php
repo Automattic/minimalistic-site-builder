@@ -38,8 +38,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * which the sections step then generates independently and in parallel and
  * the assemble step composes per page. Because the sections are built blind
  * to each other, this step is also each page's art director: it assigns every
- * section a layout archetype and background treatment (validated below, with
- * an adjacency rule) so every page has a deliberate visual rhythm.
+ * section a layout archetype and background treatment, validated against the
+ * supported catalog, so every page can have a deliberate visual rhythm.
  */
 final class PagePlanStep implements GeneratedJsonFallbackStep
 {
@@ -59,12 +59,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
 
-    /**
-     * Semantic type words whose items are name/value rows: a menu line, a
-     * price tier, a schedule slot, a spec. These are the only types the
-     * ruled ledger (`rule-row`) may dress. Together with PROSE_LIST_TYPES
-     * they make an item-pattern assignment mandatory.
-     */
+    /** Per-section copy positions assigned against the site-level intent. */
+    public const TEXT_PLACEMENTS = DesignDirectionStep::TEXT_PLACEMENTS;
+
+    private const CARDLESS_ARCHETYPES = [
+        'statement-lines', 'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel',
+    ];
+
     private const TABULAR_LIST_TYPES = [
         'amenities', 'archive', 'catalog', 'categories', 'collections',
         'directory', 'events', 'genres', 'hours', 'index', 'ingredients',
@@ -73,73 +74,20 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'tiers', 'timeline',
     ];
 
-    /**
-     * Semantic type words whose items are short paragraphs: a feature, a
-     * process step, a team bio, a service. They repeat, so they take the
-     * committed idiom, but never the ruled ledger — a hairline under every
-     * paragraph is the "lines everywhere" look the audit found in 43 of 53
-     * directions (BIGR-978).
-     */
     private const PROSE_LIST_TYPES = [
         'articles', 'benefits', 'faq', 'features', 'posts', 'process',
         'projects', 'services', 'steps', 'studies', 'team', 'workshops',
     ];
 
-    /**
-     * The idioms that paint a rule between items. Both are rationed to one
-     * ledger per page: the seven-demo rebuild for BIGR-978 showed a
-     * `spec-table` commitment filling the gap the `rule-row` cap had closed.
-     *
-     * @var list<string>
-     */
-    private const RULED_IDIOMS = ['rule-row', 'spec-table'];
-
-    /**
-     * Semantic type words for quote-led sections. A testimonial repeats, but
-     * its item is a voice with an attribution, not a label/value fact, so the
-     * tabular idioms (rule-row, index, spec-table, tag-cluster) never fit it.
-     * Only the card idiom may dress a quote (BIGR-953).
-     */
     private const QUOTE_LED_TYPES = ['testimonials', 'reviews', 'quotes', 'endorsements'];
 
-    /** Per-section copy positions assigned against the site-level intent. */
-    public const TEXT_PLACEMENTS = DesignDirectionStep::TEXT_PLACEMENTS;
-
-    /** The card grid is capped tighter than the others — it reads as filler in bulk. */
-    private const MAX_EQUAL_CARD_GRIDS = 2;
-
-    /**
-     * Every OTHER archetype is capped by archetypeCap(), which works out to a
-     * flat "at most twice" for every page length the planner actually produces
-     * (front pages aim 5-8 sections, interior 3-6) and only loosens beyond
-     * eight — this divisor is what makes it loosen.
-     *
-     * The adjacency rule cannot do this job: "no two ADJACENT sections share an
-     * archetype" is fully satisfied by A,B,A,B,A,B, which is half a page in one
-     * composition. Across 1,924 audited planned sections the planner spent 77%
-     * of its archetype budget on `mixed-width-editorial` while never once
-     * breaking adjacency — the rule held and the page was uniform anyway. Only
-     * a count over the whole page catches that.
-     *
-     * BIGR-945 retired `mixed-width-editorial` into `asymmetric-split`, so that
-     * name no longer exists. The measurement stands and the cap still earns its
-     * place: a merge removes the vaguest option, it does not decide who picks.
-     * Watch the same share on the merged name — if 77% simply moves there, the
-     * concentration was never about having two names for one shape.
-     */
-    private const ARCHETYPE_SHARE_DIVISOR = 3;
 
     private const LIST_SPLIT_TYPES = [
         'accolades', 'awards', 'capabilities', 'disciplines', 'expertise', 'honours', 'honors', 'practices', 'recognition',
     ];
-
-    private const CARDLESS_ARCHETYPES = [
-        'statement-lines', 'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel', 'centered-stack',
-    ];
-
     /**
      * Level replacements for an ineligible offset-grid. Matches the page-plan
-     * prompt: never a cover, prefer a card row, honor the grid cap.
+     * prompt: never a cover, prefer a card row.
      */
     private const LEVEL_ROW_ARCHETYPES = [
         'equal-card-grid',
@@ -148,42 +96,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'bento-grid',
     ];
 
-    /** Whitespace-led pauses are accents, not a page's default cadence. */
-    private const MAX_SPACIOUS_SECTIONS = 2;
-
-    /**
-     * A page of at least this many sections needs one band off the page
-     * background.
-     *
-     * This is a floor, not a cap: `base` SHOULD dominate, and the prompt asks
-     * for "mostly base with 1-2 contrast or image bands placed for pacing".
-     * Audited plans kept the "mostly" and dropped the rest — 271 of 371 pages
-     * (73%) came back with every single section on the page background, and the
-     * rate rose WITH length rather than falling: 59% of 5-section pages, 81% of
-     * 6-section, and 42 of 42 seven-section pages. Long pages are exactly where
-     * pacing bands earn their keep, so a minimum is the only thing that catches
-     * it. Short pages — every contact page is 2 to 4 sections (BIGR-858) — are
-     * left alone, where one uniform ground is a fine answer.
-     */
-    private const MIN_BANDED_SECTIONS = 5;
-
-    /** Long pages may spend at most two deliberate beats off the base surface. */
-    private const MAX_NON_BASE_SECTIONS = 2;
-
-    /**
-     * Content-dense section roles must not compound their height with the
-     * largest edge. "type" is free-form model output, so these are matched as
-     * lowercase word tokens ("Gallery" and "image-gallery" both count), not
-     * as exact strings.
-     */
-    private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
-
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
-    private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
-        . ' energy: an opening hero, at least 3 distinct, image-rich content sections, and a closing next step that follows from this page\'s purpose.'
-        . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . " sections so the page is richer and flows well. Let the design direction's mood"
-        . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
+    private const FRONT_EMPHASIS = "Design this front page as a complete composition serving the brief's content and requested style."
+        . ' Start with the committed hero, then choose the section count, order and density the content actually needs.'
+        . ' A concise page can be complete; a longer page must earn its length. Do not add sections to fill a quota.'
+        . ' Below the hero, use images where they communicate something; type-led sections and sequences without photographs are welcome.'
+        . ' Cover the requested information without automatically turning it into services, benefits, process, testimonials and a closing CTA.'
+        . ' Give visitors an appropriate next step where it belongs, not necessarily in a separate final band.';
 
     /**
      * Interior default. Contact-like pages use a tighter brief via emphasisFor()
@@ -245,7 +164,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Provider-neutral output contract for one page plan. Cross-section rules
-     * (non-empty plan, adjacency and grid caps) remain in normalize(), where
+     * (non-empty plan and supported opening layouts) remain in normalize(), where
      * they can report useful page-specific validation errors.
      *
      * @return array<string,mixed>
@@ -557,11 +476,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
-        // The art-direction rules are creative constraints the model
-        // occasionally violates. Re-ask ONCE per rejected page, all of them in
+        // Generated plans can miss required fields or supported contracts.
+        // Re-ask ONCE per rejected page, all of them in
         // ONE batch; if a repair still breaks a rule, fix it mechanically
         // instead of aborting the build. recoverSections() is the backstop:
-        // field + variety coercion for every known normalize rejection, and a
+        // field + layout compatibility repair for every known rejection, and a
         // single fallback section if a future rule slips past both passes.
         // Empty, missing, and terminally malformed repairs degrade per page;
         // valid siblings and every already-paid-for plan still ship.
@@ -690,35 +609,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out[] = $page;
         }
 
-        // The plan prompt demands a hero, at least 3 content sections, and a
-        // closing — a 1-2 section front page is a degenerate plan (observed:
-        // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
-        // Pad below the delivered sections with reviewed generic briefs so
-        // the sections step still writes a whole page, and record the loss.
-        $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings, $allowOffsetGrid);
+        // Valid short pages are authored compositions, not missing content.
+        // Empty/unusable plans already receive the scoped fallback above.
         foreach ($out as $i => $page) {
             if (is_array($page)) {
                 $out[$i] = self::capContactPage($page, $warnings);
             }
         }
 
-        // The direction's item idiom is a site-wide commitment. The planner
-        // decides only WHETHER a section is list-like; once it assigns a
-        // pattern, the exact value cannot drift. Obvious list-like semantic
-        // types that omitted the field are repaired onto the same commitment.
         $out = self::withStatedHighlightCards(
             $out,
             SectionComposition::statedHighlightFor($project->readJson('meta.json')),
             $successfulRepairs,
         );
         $out = self::withListsOffTheSplit($out, $successfulRepairs);
-
-        $out = self::reconcileItemPatternAssignments(
-            $out,
-            DesignDirectionStep::itemPatternFor($project),
-            $successfulRepairs,
-        );
-
+        $out = self::reconcileRecipeItemPatterns($out, $successfulRepairs);
         // Anchors cannot be judged until every normal, repair, and fallback
         // path has produced its final page/section set. Recheck the sole
         // eligible action now and null it atomically when its target vanished.
@@ -812,270 +717,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Reconcile per-section assignments with the one site-wide commitment.
-     *
-     * A non-null planner value says the section is list-like. Its value is not
-     * another creative choice, so drift is repaired without a warning. The
-     * type vocabulary is open-ended, but the common catalog/list identities
-     * are objective enough to repair when the planner omitted its assignment.
-     *
-     * The ruled ledger is rationed (BIGR-978). Audited plans put `rule-row`
-     * on contact, location, benefits and feature sections alike, so every
-     * page arrived striped with hairlines. Under a `rule-row` or `spec-table`
-     * commitment:
-     * a prose-led type takes `card`; at most ONE section per page keeps the
-     * ledger — the first tabular type, or the first planner-authored section
-     * when the page has no tabular type; every other tabular section takes
-     * `card`, and every other authored non-list section is released to null.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     * @param list<string> $repairs
-     * @return array<int,array<string,mixed>>
-     */
-    public static function reconcileItemPatternAssignments(
-        array $pages,
-        string $committed,
-        array &$repairs = [],
-    ): array {
-        ItemPattern::assertKnown($committed);
-        foreach ($pages as $pageIndex => $page) {
-            if (!is_array($page)) {
-                continue;
-            }
-            $slug = (string) ($page['slug'] ?? '');
-            $sections = (array) ($page['sections'] ?? []);
-            $ledgerKeeper = in_array($committed, self::RULED_IDIOMS, true) ? self::ledgerKeeper($sections) : null;
-            foreach ($sections as $sectionIndex => $section) {
-                if (!is_array($section)) {
-                    continue;
-                }
-                $authored = $section['item_pattern'] ?? null;
-                $explicit = ItemPattern::explicit($authored);
-                $type = strtolower(trim((string) ($section['type'] ?? '')));
-                $listLike = self::isListLikeType($type);
-                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
-                if (in_array($archetype, self::CARDLESS_ARCHETYPES, true)) {
-                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
-                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
-                    if ($authoredValue) {
-                        if ($explicit !== null) {
-                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
-                                $section['content_notes'] ?? '',
-                                $explicit,
-                                null,
-                            );
-                        }
-                        $repairs[] = self::successfulRepair(
-                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
-                            $authored,
-                            null,
-                            "released the '{$archetype}' section from the item idiom: its recipe defines the content structure",
-                        );
-                    }
-                    continue;
-                }
-                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
-                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
-                    if ($explicit !== ItemPattern::DEFAULT) {
-                        if ($explicit !== null) {
-                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
-                                $section['content_notes'] ?? '',
-                                $explicit,
-                                ItemPattern::DEFAULT,
-                            );
-                        }
-                        $repairs[] = self::successfulRepair(
-                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
-                            $authored,
-                            ItemPattern::DEFAULT,
-                            "the '{$archetype}' recipe requires cards",
-                        );
-                    }
-                    continue;
-                }
-                if (self::isQuoteLedType($type) && $committed !== 'card') {
-                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
-                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
-                    if ($authoredValue) {
-                        $repairs[] = self::successfulRepair(
-                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
-                            $authored,
-                            null,
-                            "released quote-led section type '{$type}' from the '{$committed}' idiom: "
-                            . 'a quote-led section repeats voices with attributions, not label/value facts, '
-                            . 'so only the card idiom may dress it',
-                        );
-                    }
-                    continue;
-                }
-                if ($explicit === null && !$listLike) {
-                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
-                    continue;
-                }
-                [$target, $disposition] = self::itemPatternTarget(
-                    $committed,
-                    $type,
-                    $explicit,
-                    $ledgerKeeper === (int) $sectionIndex,
-                    $ledgerKeeper,
-                );
-                if ($explicit === $target) {
-                    continue;
-                }
-                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $target;
-                if ($explicit !== null) {
-                    $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
-                        $section['content_notes'] ?? '',
-                        $explicit,
-                        $target,
-                    );
-                }
-                $repairs[] = self::successfulRepair(
-                    self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
-                    $authored,
-                    $target,
-                    $disposition,
-                );
-            }
-        }
-        return $pages;
-    }
-
-    /**
-     * Tell the section author that the planner's idiom did not survive.
-     *
-     * The planner writes content_notes and item_pattern in one pass, so a
-     * note like "a rule-row list with four steps" outlives the repair that
-     * released the section to `card`. The atlas rebuild for BIGR-978 shipped
-     * `is-style-rule-row` on every item of such a section: the request said
-     * card, the notes said rule-row, and the notes won. The correction is
-     * appended the way seam corrections already are for backgrounds.
-     */
-    public static function withItemPatternCorrection(mixed $notes, string $authored, ?string $delivered): string
-    {
-        $notes = trim((string) $notes);
-        $correction = $delivered === null
-            ? "this section has no assigned item pattern (the planner authored \"{$authored}\"); compose it freely"
-            : "this section's item pattern is now \"{$delivered}\" (the planner authored \"{$authored}\"); "
-                . "follow the assigned {$delivered} recipe";
-        return trim($notes . ' Build correction: ' . $correction
-            . ' and draw no ' . $authored . ' rows, hairlines, separators, or ruled block styles.');
-    }
-
-    /**
-     * The idiom a section delivers under the site-wide commitment, with the
-     * repair disposition that explains it.
-     *
-     * @return array{0:?string,1:string}
-     */
-    private static function itemPatternTarget(
-        string $committed,
-        string $type,
-        ?string $explicit,
-        bool $keepsLedger,
-        ?int $ledgerKeeper,
-    ): array {
-        $restored = $explicit === null
-            ? "assigned the committed item idiom to list-like section type '{$type}'"
-            : 'restored the site-wide repeated-item commitment';
-        if (!in_array($committed, self::RULED_IDIOMS, true)) {
-            return [$committed, $restored];
-        }
-        if (self::isProseLedType($type) && !self::isTabularType($type)) {
-            return [
-                ItemPattern::DEFAULT,
-                "released prose-led section type '{$type}' from the {$committed} ledger: its items are short "
-                . 'paragraphs, not name/value rows, so a hairline under each one is decoration; the card idiom '
-                . 'dresses them',
-            ];
-        }
-        if ($keepsLedger) {
-            return [$committed, $restored];
-        }
-        $keeper = $ledgerKeeper === null ? 'no section' : "sections[{$ledgerKeeper}]";
-        if (self::isTabularType($type)) {
-            return [
-                ItemPattern::DEFAULT,
-                "one ruled ledger per page: {$keeper} keeps the {$committed} idiom, so tabular section type "
-                . "'{$type}' takes the card idiom instead of a second run of hairlines",
-            ];
-        }
-        return [
-            null,
-            "released section type '{$type}' from the {$committed} ledger: one ruled ledger per page ({$keeper} "
-            . 'keeps it) and this type is not a name/value list, so the section author composes it freely',
-        ];
-    }
-
-    /**
-     * The one section on a page that may keep the ruled ledger: the first
-     * tabular type in display order, else the first planner-authored
-     * assignment on a type that is not prose-led, else none.
-     *
-     * @param array<int,mixed> $sections
-     */
-    private static function ledgerKeeper(array $sections): ?int
-    {
-        $firstAuthored = null;
-        foreach ($sections as $index => $section) {
-            if (!is_array($section)) {
-                continue;
-            }
-            $type = strtolower(trim((string) ($section['type'] ?? '')));
-            if (self::isQuoteLedType($type)) {
-                continue;
-            }
-            if (self::isTabularType($type)) {
-                return (int) $index;
-            }
-            if (
-                $firstAuthored === null
-                && !self::isProseLedType($type)
-                && ItemPattern::explicit($section['item_pattern'] ?? null) !== null
-            ) {
-                $firstAuthored = (int) $index;
-            }
-        }
-        return $firstAuthored;
-    }
-
-    private static function isTabularType(string $type): bool
-    {
-        return self::matchesTypeCatalog($type, self::TABULAR_LIST_TYPES);
-    }
-
-    private static function isProseLedType(string $type): bool
-    {
-        return self::matchesTypeCatalog($type, self::PROSE_LIST_TYPES);
-    }
-
-    private static function isQuoteLedType(string $type): bool
-    {
-        return self::matchesTypeCatalog($type, self::QUOTE_LED_TYPES);
-    }
-
-    private static function isListLikeType(string $type): bool
-    {
-        return self::isTabularType($type) || self::isProseLedType($type);
-    }
-
-    /** @param list<string> $catalog */
-    private static function matchesTypeCatalog(string $type, array $catalog): bool
-    {
-        $tokens = preg_split('/[^a-z0-9]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        foreach ($tokens as $token) {
-            $singular = str_ends_with($token, 's') ? substr($token, 0, -1) : $token;
-            foreach ($catalog as $candidate) {
-                $candidateSingular = str_ends_with($candidate, 's') ? substr($candidate, 0, -1) : $candidate;
-                if ($token === $candidate || $singular === $candidateSingular) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
      * Normalize model results for a page SUBSET (HTML-first mixed fallback) and
      * return complete entries in the given order, without writing pages.json or
      * running the whole-site front/contract finalization. Subset pages are
@@ -1129,11 +770,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $page['sections'] = $sections;
             $out[] = $page;
         }
-        $out = self::reconcileItemPatternAssignments(
-            $out,
-            DesignDirectionStep::itemPatternFor($project),
-            $repairs,
-        );
         $project->addWarnings($this->id(), $warnings);
         return $out;
     }
@@ -1221,10 +857,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             . json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             . "\n\nIT WAS REJECTED FOR THESE REASONS:\n{$errors}\n"
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
-            . 'For an adjacent-duplicate rejection, change only ONE of the two sections, and re-check the whole '
-            . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
-            . 'violation is rejected too. If the front-page context locks the FIRST section, preserve it exactly '
-            . 'and change the conflicting following section. '
+            . 'Preserve valid authored composition, surface, density and item-pattern choices. '
+            . 'If the front-page context locks the FIRST section, preserve that contract exactly. '
             . 'If you change a section\'s layout_archetype, background, vertical_density, text_placement, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
@@ -1391,8 +1025,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * The structural role is stamped deterministically from each section's
      * position rather than trusted to model output. Art-direction fields
      * (layout_archetype, background, vertical_density, text_placement, handoff) are strict:
-     * unknown values, a missing handoff, adjacent duplicate archetypes, too
-     * many card grids, or an interior page opening at homepage-cover scale
+     * unknown values, a missing handoff, or an interior page opening at homepage-cover scale
      * are collected and thrown together in ONE message, so the single repair
      * call sees every violation at once. One pairing is coerced instead of
      * rejected: a non-opening 'full-bleed-cover' section is forced onto the
@@ -1488,10 +1121,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     . implode(', ', self::VERTICAL_DENSITIES);
             }
             $type = trim((string) ($section['type'] ?? 'content'));
-            if ($verticalDensity === 'spacious' && self::isDenseType($type)) {
-                $errors[] = "page-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
-                    . "use vertical_density 'compact' or 'standard', not 'spacious'";
-            }
             $textPlacement = trim((string) ($section['text_placement'] ?? ''));
             if (!in_array($textPlacement, self::TEXT_PLACEMENTS, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid text_placement '{$textPlacement}' — use one of: "
@@ -1631,7 +1260,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         // Report every violation at once so the single repair call can fix them all.
-        $errors = array_merge($errors, self::varietyErrors($out));
         if ($errors !== []) {
             throw new \RuntimeException(implode("\n", $errors));
         }
@@ -1640,7 +1268,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Reconcile the delivered homepage opening with the code-owned recipe
-     * projection before variety validation. The recipe topology is locked;
+     * projection before field validation. The recipe topology is locked;
      * the plan still chooses among its reviewed compatible surfaces.
      *
      * @param array<mixed> $raw
@@ -2201,10 +1829,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             static fn (array $section): string => trim((string) ($section['layout_archetype'] ?? '')),
             $kept,
         );
-        $varietyWarnings = [];
-        $kept = self::repairVariety($kept, false, null, $varietyWarnings, $pageSlug);
-        $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $varietyWarnings, $pageSlug);
-        array_push($warnings, ...$varietyWarnings);
+        $layoutWarnings = [];
+        $kept = self::repairLayoutCompatibility($kept, false, null, $layoutWarnings, $pageSlug);
+        $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $layoutWarnings, $pageSlug);
+        array_push($warnings, ...$layoutWarnings);
         // Last, so the seam prose names the archetypes that actually ship.
         $kept = self::rewriteSeamHandoffs($kept);
         $count = count($kept);
@@ -2258,11 +1886,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * The adjacency repair returns the first archetype clearing both
-     * neighbors, and 'full-bleed-cover' leads that list — an image-led band
-     * is the wrong answer on the page this cap exists to keep brief. Only a
-     * cover the repair introduced is demoted; an authored one is the plan's
-     * own choice.
+     * Keep contact-page trimming from acquiring new image requirements.
+     * Only a cover introduced by a repair is demoted; an authored cover is
+     * the plan's own choice.
      *
      * @param list<array<string,mixed>> $sections
      * @param list<string> $authoredArchetypes indexed alongside $sections
@@ -2365,125 +1991,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $score += 2;
         }
         return $score;
-    }
-
-    /**
-     * Append reviewed generic section briefs below a front page whose
-     * delivered plan has fewer than three sections. The appended briefs are
-     * re-normalized together with the delivered ones so slug uniqueness,
-     * enum, and variety rules hold; positional roles then make the final
-     * appended section the page's closing anchor (which the primary-action
-     * retarget can use). Interior pages are never padded.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     * @param list<string> $warnings
-     * @param bool $allowOffsetGrid
-     * @return array<int,array<string,mixed>>
-     */
-    public static function padThinFrontPlan(
-        array $pages,
-        ?array $frontProjection,
-        array $actionContext,
-        array &$warnings = [],
-        bool $allowOffsetGrid = true,
-    ): array {
-        foreach ($pages as $index => $page) {
-            if (!is_array($page) || empty($page['front'])) {
-                continue;
-            }
-            $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
-            $missing = 3 - count($sections);
-            if ($missing <= 0) {
-                return $pages;
-            }
-
-            // A delivered plan of 2+ sections keeps its own final section in
-            // the closing position; the generic briefs slot in above it. A
-            // hero-only plan appends, so the appended tail takes the role.
-            // Each inserted archetype avoids both neighbors so the adjacency
-            // variety rule holds by construction.
-            $briefs = [
-                [
-                    'slug'          => 'overview',
-                    'title'         => 'Overview',
-                    'type'          => 'content',
-                    'purpose'       => 'Substantiate the hero promise with the core offering, grounded in the site spec.',
-                    'content_notes' => 'Two or three short paragraphs or a compact list; every claim comes from the site spec, nothing invented.',
-                    'background'    => 'contrast',
-                    'handoff'       => 'Sits between the hero above and the closing section below.',
-                ],
-                [
-                    'slug'          => 'closing',
-                    'title'         => 'Next Step',
-                    'type'          => 'cta',
-                    'purpose'       => 'Close the page with the one next step a visitor should take.',
-                    'content_notes' => 'One heading, one short supporting line, and the conversion or contact path stated in the site spec.',
-                    'background'    => 'base',
-                    'handoff'       => 'Sits between the previous section and the site footer.',
-                ],
-            ];
-            $insertAt = count($sections) >= 2 ? count($sections) - 1 : count($sections);
-            $above = $insertAt > 0
-                ? (string) ($sections[$insertAt - 1]['layout_archetype'] ?? '')
-                : '';
-            $below = isset($sections[$insertAt])
-                ? (string) ($sections[$insertAt]['layout_archetype'] ?? '')
-                : '';
-            $inserted = [];
-            foreach (array_slice($briefs, 0, $missing) as $brief) {
-                // Only the final invitation has a known short content budget.
-                $safeArchetypes = $brief['type'] === 'cta'
-                    ? ['centered-stack', 'cta-panel', 'asymmetric-split']
-                    : ['asymmetric-split', 'equal-card-grid', 'list-with-thumbnails'];
-                $archetype = $safeArchetypes[0];
-                foreach ($safeArchetypes as $candidate) {
-                    if ($candidate !== $above && $candidate !== $below) {
-                        $archetype = $candidate;
-                        break;
-                    }
-                }
-                $above = $archetype;
-                $inserted[] = $brief + [
-                    'layout_archetype' => $archetype,
-                    'vertical_density' => 'standard',
-                    'text_placement'   => 'left-column',
-                    'primary_action'   => null,
-                ];
-            }
-            $padded = array_merge(
-                array_slice($sections, 0, $insertAt),
-                $inserted,
-                array_slice($sections, $insertAt),
-            );
-            $repairs = [];
-            try {
-                $pages[$index]['sections'] = self::normalize(
-                    $padded,
-                    true,
-                    $frontProjection,
-                    $actionContext,
-                    $warnings,
-                    (string) ($page['slug'] ?? ''),
-                    $repairs,
-                    $allowOffsetGrid,
-                );
-            } catch (\Throwable) {
-                // Padding must never make a deliverable plan worse: keep the
-                // thin-but-valid delivered sections when the padded list
-                // cannot be normalized.
-                return $pages;
-            }
-            $warnings[] = self::valueLossWarning(
-                "pages[slug='" . (string) ($page['slug'] ?? '') . "'].sections",
-                count($sections) . ' delivered section(s)',
-                count($pages[$index]['sections']) . ' section(s) after padding',
-                'front-page plan was thinner than the contract minimum of a hero plus supporting and closing '
-                    . 'sections; reviewed generic briefs were appended below the delivered ones',
-                valuesAlreadyRendered: true,
-            );
-            return $pages;
-        }
-        return $pages;
     }
 
     /**
@@ -2654,7 +2161,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Mechanical backstop after the LLM repair round still fails normalize().
      *
-     * Runs repairFields(), repairVariety(), and the smallest-unit action-anchor
+     * Runs repairFields(), repairLayoutCompatibility(), and the smallest-unit action-anchor
      * backstop before normalize(). Those passes cover every rejection
      * normalize() can raise today bar an empty section list. If a future rule
      * slips past them, the residual failure is recorded as a warning and the
@@ -2691,7 +2198,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $repairs,
             $pageSlug,
         );
-        $mechanically = self::repairVariety(
+        $mechanically = self::repairLayoutCompatibility(
             self::repairFields($prepared, $warnings, $pageSlug, $allowOffsetGrid),
             $front,
             $frontProjection,
@@ -2824,7 +2331,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Accept a field+variety-repaired section list, or degrade to one section.
+     * Accept a field+layout-repaired section list, or degrade to one section.
      *
      * Separated from recoverSections() so the residual path is unit-testable
      * without inventing a normalize rule the two passes cannot answer: pass an
@@ -2911,8 +2418,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * Mechanical fix for the field-level rules on a raw section list: unknown
      * enum values and missing required fields.
      *
-     * These are not creative-constraint violations like the variety rules — they
-     * are the model mis-filling a slot, and the commonest shape is cross-wiring
+     * These are not matters of taste: the model has mis-filled a slot. The
+     * commonest shape is cross-wiring
      * two adjacent enum fields ('contrast' is a valid `background`, so it turns
      * up as a `layout_archetype`). One such slip on one section otherwise ends a
      * multi-minute build, because the repair round is the only thing that can
@@ -2920,14 +2427,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * Coerced archetypes avoid both neighbours, and never become a full-bleed
      * cover or a card grid — the two that carry their own rules — so this pass
-     * hands repairVariety() a list it has no new work to do on. Prose
+     * hands repairLayoutCompatibility() a list it has no new work to do on. Prose
      * (content_notes, handoff) may then lag the coerced assignment, the same
-     * accepted trade repairVariety() makes.
+     * accepted trade repairLayoutCompatibility() makes.
      *
-     * Together with repairVariety(), covers every rejection normalize() can
+     * Together with repairLayoutCompatibility(), covers every rejection normalize() can
      * raise except an empty section list, which no amount of mechanical repair
      * can invent. Interior-page rules (leading full-bleed cover) belong to
-     * repairVariety(), which still receives the page's $front flag. Residual
+     * repairLayoutCompatibility(), which still receives the page's $front flag. Residual
      * failures after both passes are handled by recoverSections(). Pure —
      * unit-testable.
      *
@@ -3007,7 +2514,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     self::sectionPath($pageSlug, (int) $i) . '.item_pattern',
                     $itemPattern,
                     null,
-                    "removed unknown repeated-item assignment for section '{$slug}'; the final site-wide reconciliation will assign the committed idiom when this semantic type is list-like",
+                    "removed unknown repeated-item assignment for section '{$slug}'; delivered null so this section can be composed freely",
                 );
             }
 
@@ -3053,17 +2560,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Last-resort mechanical fix for the variety rules on a raw section list:
-     * an interior page's leading full-bleed cover, excess equal-card-grids,
-     * and the later section of each adjacent duplicate pair are reassigned to
-     * the first archetype that differs from both neighbors (never a card
-     * grid, so the cap holds and no new grids appear); spacious pauses on
-     * content-dense sections, adjacent to another pause, or beyond the cap
-     * are demoted to 'standard'. The reassigned section's prose
-     * (content_notes, handoff) may then lag its assignment slightly — an
-     * accepted trade against aborting the whole build. Only touches VALID
-     * values: run repairFields() first, which is the companion pass that makes
-     * them valid, or enum and missing-field errors still reject in normalize().
+     * Repair layouts that conflict with supported opening/recipe contracts.
+     * Preserve valid repetition, surfaces and density exactly as authored.
+     *
      * Pure — unit-testable.
      *
      * @param mixed $raw
@@ -3074,7 +2573,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
-    public static function repairVariety(
+    public static function repairLayoutCompatibility(
         $raw,
         bool $front = true,
         ?array $frontProjection = null,
@@ -3124,155 +2623,25 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
         // Interior-opening pass: normalize() rejects an interior page whose
         // first section is a full-bleed cover, so demote it to a compact
-        // archetype before the variety passes run.
+        // archetype before the final normalization.
         if (!$front && ($archetypes[0] ?? '') === 'full-bleed-cover') {
             $archetypes[0] = $pick(0, 'full-bleed-cover');
-        }
-
-        // Cap pass: keep the first MAX card grids, reassign the rest.
-        $grids = 0;
-        foreach ($archetypes as $i => $archetype) {
-            if ($archetype === 'equal-card-grid' && ++$grids > self::MAX_EQUAL_CARD_GRIDS) {
-                $archetypes[$i] = $pick($i);
-            }
-        }
-
-        // Adjacency pass, left to right, judging only valid archetypes (like
-        // varietyErrors). $pick avoids both neighbors, so a fix never breaks
-        // the pair behind it or pre-duplicates the one ahead.
-        foreach ($archetypes as $i => $archetype) {
-            if ($i > 0 && $archetype === $archetypes[$i - 1]
-                && in_array($archetype, self::ARCHETYPES, true)
-            ) {
-                $archetypes[$i] = $pick($i);
-            }
-        }
-
-        // Dominance pass, last so it sees settled neighbors. Keeps the first
-        // $cap uses of an archetype and re-homes the rest onto the page's
-        // least-used eligible composition, which is what stops the excess
-        // simply piling onto one replacement. Excluding the over-used value and
-        // both neighbors means this cannot reintroduce an adjacent duplicate,
-        // so the adjacency pass above does not need re-running.
-        $cap = self::archetypeCap(count($archetypes));
-        $used = [];
-        foreach ($archetypes as $i => $archetype) {
-            if (!in_array($archetype, self::ARCHETYPES, true)) {
-                continue;
-            }
-            $used[$archetype] = ($used[$archetype] ?? 0) + 1;
-            // The card grid answers to MAX_EQUAL_CARD_GRIDS and its own pass.
-            if ($archetype === 'equal-card-grid' || $used[$archetype] <= $cap) {
-                continue;
-            }
-            $exclude = [$archetype];
-            if (!$front && $i === 0) {
-                $exclude[] = 'full-bleed-cover';
-            }
-            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used, ...$exclude);
-            if ($replacement === $archetype) {
-                // Nothing eligible left. normalize() still reports it, so the
-                // model repair loop gets the last word rather than the build
-                // shipping a page silently over cap.
-                continue;
-            }
-            $used[$archetype]--;
-            $used[$replacement] = ($used[$replacement] ?? 0) + 1;
-            $archetypes[$i] = $replacement;
         }
 
         foreach ($archetypes as $i => $archetype) {
             $sections[$i]['layout_archetype'] = $archetype;
             if ($archetype !== ($authoredArchetypes[$i] ?? $archetype)) {
                 $path = self::sectionPath($pageSlug, (int) $i) . '.layout_archetype';
-                $disposition = $front && $frontProjection !== null && $i === 1
-                    ? 'changed the following section to preserve the locked hero projection and adjacency variety'
-                    : 'mechanically repaired page-level composition variety';
-                if ($front && $frontProjection !== null && $i === 1) {
-                    $repairs[] = self::successfulRepair(
-                        $path,
-                        $authoredArchetypes[$i] ?? '',
-                        $archetype,
-                        $disposition,
-                    );
-                } else {
-                    $warnings[] = self::valueLossWarning(
-                        $path,
-                        $authoredArchetypes[$i] ?? '',
-                        $archetype,
-                        $disposition,
-                    );
-                }
-            }
-        }
-
-        $sections = self::withPacingBand($sections, $pageSlug, $warnings);
-        $sections = self::withSurfaceRestraint($sections, $pageSlug, $warnings, $front);
-
-        // When the recipe-locked hero and its following section collided,
-        // the following section—not the hero—moved. Replace only the now-stale
-        // seam prose with neutral facts derived from the delivered assignment.
-        if ($front && $frontProjection !== null
-            && isset($sections[1])
-            && ($authoredArchetypes[1] ?? null) !== ($archetypes[1] ?? null)
-        ) {
-            $heroTitle = trim((string) ($sections[0]['title'] ?? 'Hero')) ?: 'Hero';
-            $nextTitle = trim((string) ($sections[1]['title'] ?? 'the following section'))
-                ?: 'the following section';
-            $heroHandoff = "Sits below the site header and above the {$sections[1]['background']} "
-                . "{$sections[1]['layout_archetype']} section \"{$nextTitle}\".";
-            $followingHandoff = "Sits below the {$sections[0]['background']} "
-                . "{$sections[0]['layout_archetype']} front-page hero \"{$heroTitle}\""
-                . (isset($sections[2])
-                    ? " and above the {$sections[2]['background']} {$sections[2]['layout_archetype']} section."
-                    : ' and above the site footer.');
-            foreach ([0 => $heroHandoff, 1 => $followingHandoff] as $i => $deliveredHandoff) {
-                $authoredHandoff = (string) ($sections[$i]['handoff'] ?? '');
-                if ($authoredHandoff === $deliveredHandoff) {
-                    continue;
-                }
-                $sections[$i]['handoff'] = $deliveredHandoff;
-                $repairs[] = self::successfulRepair(
-                    self::sectionPath($pageSlug, $i) . '.handoff',
-                    $authoredHandoff,
-                    $deliveredHandoff,
-                    'replaced stale seam prose after following-section variety repair',
-                );
-            }
-        }
-
-        // Density passes, mirroring the varietyErrors rules: demote a
-        // spacious pause on a content-dense section, the later of two
-        // adjacent pauses, and any pause beyond the page cap to 'standard'.
-        // Only valid 'spacious' values are touched; enum errors still reject.
-        $densities = array_map(
-            fn (array $s) => trim((string) ($s['vertical_density'] ?? '')),
-            $sections
-        );
-        $authoredDensities = $densities;
-        $spacious = 0;
-        foreach ($densities as $i => $density) {
-            if ($density !== 'spacious') {
-                continue;
-            }
-            if (self::isDenseType(trim((string) ($sections[$i]['type'] ?? 'content')))
-                || ($i > 0 && $densities[$i - 1] === 'spacious')
-                || ++$spacious > self::MAX_SPACIOUS_SECTIONS
-            ) {
-                $densities[$i] = 'standard';
-            }
-        }
-        foreach ($densities as $i => $density) {
-            $sections[$i]['vertical_density'] = $density;
-            if ($density !== ($authoredDensities[$i] ?? $density)) {
+                $disposition = 'repaired a layout incompatible with the page opening or committed rhythm';
                 $warnings[] = self::valueLossWarning(
-                    self::sectionPath($pageSlug, (int) $i) . '.vertical_density',
-                    $authoredDensities[$i] ?? '',
-                    $density,
-                    'mechanically repaired page-level density limits',
+                    $path,
+                    $authoredArchetypes[$i] ?? '',
+                    $archetype,
+                    $disposition,
                 );
             }
         }
+
         return $sections;
     }
 
@@ -3323,17 +2692,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private static function pickLevelRow(array $archetypes, int $i, string ...$exclude): string
     {
-        $grids = 0;
-        foreach ($archetypes as $j => $archetype) {
-            if ($archetype === 'equal-card-grid' && $j !== $i) {
-                $grids++;
-            }
-        }
         foreach (self::LEVEL_ROW_ARCHETYPES as $candidate) {
             if (in_array($candidate, $exclude, true)) {
-                continue;
-            }
-            if ($candidate === 'equal-card-grid' && $grids >= self::MAX_EQUAL_CARD_GRIDS) {
                 continue;
             }
             if ($candidate === ($archetypes[$i - 1] ?? null)) {
@@ -3407,183 +2767,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * The page-level variety violations of the rules the prompt states: no
-     * archetype on two adjacent sections, the equal card grid at most twice
-     * per page, and no adjacent / excessive spacious-density pauses. Adjacency
-     * is only judged between VALID values so an enum error above doesn't
-     * cascade into a misleading adjacency error too.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     * @return string[]
-     */
-    private static function varietyErrors(array $sections): array
-    {
-        $errors = [];
-        foreach ($sections as $i => $section) {
-            if ($i === 0) {
-                continue;
-            }
-            $prev = $sections[$i - 1];
-            if ($section['layout_archetype'] === $prev['layout_archetype']
-                && in_array($section['layout_archetype'], self::ARCHETYPES, true)
-            ) {
-                $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
-                    . "layout_archetype '{$section['layout_archetype']}' — adjacent sections must use different archetypes";
-            }
-            if ($section['vertical_density'] === 'spacious' && $prev['vertical_density'] === 'spacious') {
-                $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
-                    . "vertical_density 'spacious' — spacious pauses must be isolated";
-            }
-        }
-
-        $grids = count(array_filter($sections, fn (array $s) => $s['layout_archetype'] === 'equal-card-grid'));
-        if ($grids > self::MAX_EQUAL_CARD_GRIDS) {
-            $errors[] = "page-plan: 'equal-card-grid' is used {$grids} times — use it at most "
-                . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
-        }
-
-        // Dominance: the adjacency rule above permits one archetype every other
-        // section, so a page can satisfy it and still be carried by a single
-        // composition. equal-card-grid is excluded because its own tighter cap
-        // is reported just above; two errors for one section would only confuse
-        // the repair prompt.
-        $cap = self::archetypeCap(count($sections));
-        $counts = [];
-        foreach ($sections as $section) {
-            $archetype = $section['layout_archetype'];
-            if (in_array($archetype, self::ARCHETYPES, true) && $archetype !== 'equal-card-grid') {
-                $counts[$archetype] = ($counts[$archetype] ?? 0) + 1;
-            }
-        }
-        foreach ($counts as $archetype => $used) {
-            if ($used > $cap) {
-                $errors[] = "page-plan: layout_archetype '{$archetype}' is used {$used} times across "
-                    . count($sections) . " sections — no archetype may carry more than {$cap} of them; "
-                    . 'give the excess sections different compositions';
-            }
-        }
-
-        // Background floor and cap — see MIN_BANDED_SECTIONS and
-        // MAX_NON_BASE_SECTIONS. Neither is a cap on 'base': base should
-        // dominate, and capping it would produce the alternating stripes the
-        // prompt rejects.
-        $banded = self::bandedCount($sections);
-        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded === 0) {
-            $errors[] = 'page-plan: all ' . count($sections) . " sections use background 'base' — a page this "
-                . "long needs at least one 'contrast', 'tinted' or 'image' band to pace it; place one for "
-                . 'pacing (under the hero\'s fold, or before the closing next step)';
-        }
-        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded > self::MAX_NON_BASE_SECTIONS) {
-            $errors[] = "page-plan: {$banded} of " . count($sections) . " sections sit on a non-base background — "
-                . 'a page this long may spend at most ' . self::MAX_NON_BASE_SECTIONS
-                . " 'contrast', 'tinted' or 'image' beats; move the rest back to 'base' and keep the two "
-                . 'transitions that matter most';
-        }
-
-        $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
-        if ($spacious > self::MAX_SPACIOUS_SECTIONS) {
-            $errors[] = "page-plan: vertical_density 'spacious' is used {$spacious} times — use it at most "
-                . self::MAX_SPACIOUS_SECTIONS . ' times per page and use standard/compact elsewhere';
-        }
-        return $errors;
-    }
-
-    /**
-     * How many of a page's sections sit on something other than the page
-     * background. Blank counts as base: an unstated background renders as one.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     */
-    private static function bandedCount(array $sections): int
-    {
-        $banded = 0;
-        foreach ($sections as $section) {
-            $background = strtolower(trim((string) ($section['background'] ?? '')));
-            $cover = trim((string) ($section['layout_archetype'] ?? '')) === 'full-bleed-cover';
-            if ($cover || ($background !== '' && $background !== 'base')) {
-                $banded++;
-            }
-        }
-        return $banded;
-    }
-
-    /**
-     * Demote excess bands by kind (tinted, then contrast, then image), top to
-     * bottom within a kind, so a page keeps at most MAX_NON_BASE_SECTIONS
-     * planner-chosen beats. A locked front hero and image-backed full-bleed
-     * covers stay. This is the deterministic backstop for the validate() cap,
-     * the same pairing as withPacingBand() and the floor; it runs before
-     * withClosingBandOffFooterSurface(), whose one closing correction is
-     * structural and sits outside the budget.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     * @param list<string> $warnings
-     * @return array<int,array<string,mixed>>
-     */
-    public static function withSurfaceRestraint(
-        array $sections,
-        string $pageSlug,
-        array &$warnings = [],
-        bool $frontHeroLocked = false,
-    ): array {
-        if (count($sections) < self::MIN_BANDED_SECTIONS) {
-            return $sections;
-        }
-        $excess = self::bandedCount($sections) - self::MAX_NON_BASE_SECTIONS;
-        if ($excess <= 0) {
-            return $sections;
-        }
-
-        foreach (['tinted', 'contrast', 'image'] as $background) {
-            foreach ($sections as $index => $section) {
-                if ($excess <= 0) {
-                    break 2;
-                }
-                if (($section['background'] ?? null) !== $background
-                    || ($frontHeroLocked && $index === 0)
-                    || ($background === 'image'
-                        && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
-                ) {
-                    continue;
-                }
-
-                $title = trim((string) ($section['title'] ?? '')) ?: "section {$index}";
-                $sections[$index]['background'] = 'base';
-                $sections[$index]['handoff'] = self::withSeamCorrection(
-                    $section['handoff'] ?? '',
-                    'this section now uses the page base so non-base surfaces remain limited to two purposeful beats',
-                );
-                $sections = self::withNeighborSeamCorrections(
-                    $sections,
-                    (int) $index,
-                    'the "' . $title . '" section beside it now uses the page base',
-                );
-                $warnings[] = self::valueLossWarning(
-                    self::sectionPath($pageSlug, (int) $index) . '.background',
-                    $background,
-                    'base',
-                    'demoted an excess color band so the page keeps at most two purposeful non-base surface beats',
-                );
-                $excess--;
-            }
-        }
-
-        $remaining = self::bandedCount($sections);
-        if ($remaining > self::MAX_NON_BASE_SECTIONS) {
-            $path = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
-            $warnings[] = self::valueLossWarning(
-                $path,
-                "{$remaining} non-base surfaces",
-                "{$remaining} non-base surfaces",
-                'surface budget could not be met without changing a locked hero or a structural full-bleed '
-                    . 'image; delivered those sections intact',
-            );
-        }
-
-        return $sections;
-    }
-
-    /**
      * Each neighbor's handoff names the section's background, and both the
      * section author and its neighbors' authors read that line. Correcting
      * it in place beats regenerating every seam and losing the planner's
@@ -3606,131 +2789,120 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         return $sections;
     }
 
-    /**
-     * Give a long all-base page one contrast band, so it is not one unbroken
-     * scroll of page background. See MIN_BANDED_SECTIONS for the audit.
-     *
-     * Promotes exactly ONE section, and never an end of the page. The first is
-     * off limits because the site header renders above — sometimes floating
-     * over — it, and on the front page the hero projection may lock its
-     * background outright. The last is off limits because
-     * withClosingBandOffFooterSurface() pins it against the footer's own
-     * surface later, and a promotion here would just be undone there.
-     *
-     * `contrast` rather than `tinted` because the point is to break the scroll
-     * and a subtle tint may not read at all; `image` is never chosen because it
-     * would demand an asset this plan never budgeted for.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     * @param list<string> $warnings
-     * @return array<int,array<string,mixed>>
-     */
-    private static function withPacingBand(array $sections, string $pageSlug, array &$warnings): array
-    {
-        $count = count($sections);
-        if ($count < self::MIN_BANDED_SECTIONS || self::bandedCount($sections) > 0) {
-            return $sections;
-        }
-
-        // The midpoint, so the one band breaks the longest run. Placing it just
-        // under the hero would leave everything below it uniform, which is the
-        // shape the audit found in the first place.
-        $target = max(1, min($count - 2, intdiv($count, 2)));
-        $title = trim((string) ($sections[$target]['title'] ?? '')) ?: 'this section';
-
-        $sections[$target]['background'] = 'contrast';
-        $sections[$target]['handoff'] = self::withSeamCorrection(
-            $sections[$target]['handoff'] ?? '',
-            'this section\'s background is now "contrast" to pace a page that planned every band on the page '
-                . 'background; this supersedes any background named earlier in this line',
-        );
-
-        $sections = self::withNeighborSeamCorrections(
-            $sections,
-            $target,
-            'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
-                . 'named for it earlier in this line',
-        );
-
-        $warnings[] = self::valueLossWarning(
-            self::sectionPath($pageSlug, $target) . '.background',
-            'base',
-            'contrast',
-            'promoted one mid-page band because every section planned the page background',
-        );
-
-        return $sections;
-    }
-
     /** Append one build correction to a seam line, preserving the planner's prose. */
     private static function withSeamCorrection(mixed $handoff, string $correction): string
     {
         return trim(trim((string) $handoff) . ' Build correction: ' . $correction . '.');
     }
 
-    /**
-     * The most times one archetype may appear on a page of `$sections`.
-     *
-     * Never below 2, so short pages (a 2-to-4-section contact page) are governed
-     * by the adjacency rule alone and are not handed an unsatisfiable cap.
-     */
-    public static function archetypeCap(int $sections): int
-    {
-        return max(2, intdiv($sections, self::ARCHETYPE_SHARE_DIVISOR));
-    }
 
-    /**
-     * The eligible archetype the page uses LEAST, for the dominance pass.
-     *
-     * pickArchetype() returns the first eligible value in catalog order, which
-     * is right for a one-off adjacency fix but wrong here: several reassignments
-     * in one pass would all land on the same replacement and simply move the
-     * dominance somewhere else. Ties break on catalog order, so this stays
-     * deterministic.
-     *
-     * @param list<string> $archetypes
-     * @param array<string,int> $used
-     */
-    private static function pickLeastUsed(
-        array $archetypes,
-        int $i,
-        bool $allowOffsetGrid,
-        array $used,
-        string ...$exclude,
-    ): string {
-        $best = null;
-        $bestCount = PHP_INT_MAX;
-        foreach (self::ARCHETYPES as $candidate) {
-            // Card grids have a separate cap. Centered stacks require a short message.
-            if (in_array($candidate, ['equal-card-grid', 'centered-stack'], true)) {
+    /** Enforce only a selected recipe's structure, never a site-wide item idiom. */
+    public static function reconcileRecipeItemPatterns(
+        array $pages,
+        array &$repairs = [],
+    ): array {
+        foreach ($pages as $pageIndex => $page) {
+            if (!is_array($page)) {
                 continue;
             }
-            if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
-                continue;
-            }
-            if (in_array($candidate, $exclude, true)) {
-                continue;
-            }
-            if ($candidate === ($archetypes[$i - 1] ?? null)) {
-                continue;
-            }
-            if ($candidate === ($archetypes[$i + 1] ?? null)) {
-                continue;
-            }
-            $count = $used[$candidate] ?? 0;
-            if ($count < $bestCount) {
-                $best = $candidate;
-                $bestCount = $count;
+            $slug = (string) ($page['slug'] ?? '');
+            $sections = (array) ($page['sections'] ?? []);
+            foreach ($sections as $sectionIndex => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $authored = $section['item_pattern'] ?? null;
+                $explicit = ItemPattern::explicit($authored);
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (in_array($archetype, self::CARDLESS_ARCHETYPES, true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                null,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            null,
+                            "released the '{$archetype}' section from the item idiom: its recipe defines the content structure",
+                        );
+                    }
+                    continue;
+                }
+                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
+                    if ($explicit !== ItemPattern::DEFAULT) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                ItemPattern::DEFAULT,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            ItemPattern::DEFAULT,
+                            "the '{$archetype}' recipe requires cards",
+                        );
+                    }
+                    continue;
+                }
             }
         }
-        return $best ?? $archetypes[$i];
+        return $pages;
     }
 
-    /** Word-token match against DENSE_SECTION_TYPES for free-form model types. */
-    private static function isDenseType(string $type): bool
+    public static function withItemPatternCorrection(mixed $notes, string $authored, ?string $delivered): string
     {
-        $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
+        $notes = trim((string) $notes);
+        $correction = $delivered === null
+            ? "this section has no assigned item pattern (the planner authored \"{$authored}\"); compose it freely"
+            : "this section's item pattern is now \"{$delivered}\" (the planner authored \"{$authored}\"); "
+                . "follow the assigned {$delivered} recipe";
+        return trim($notes . ' Build correction: ' . $correction
+            . ' and draw no ' . $authored . ' rows, hairlines, separators, or ruled block styles.');
+    }
+
+    private static function isTabularType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::TABULAR_LIST_TYPES);
+    }
+
+    private static function isProseLedType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::PROSE_LIST_TYPES);
+    }
+
+    private static function isQuoteLedType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::QUOTE_LED_TYPES);
+    }
+
+    private static function isListLikeType(string $type): bool
+    {
+        return self::isTabularType($type) || self::isProseLedType($type);
+    }
+
+    /** @param list<string> $catalog */
+    private static function matchesTypeCatalog(string $type, array $catalog): bool
+    {
+        $tokens = preg_split('/[^a-z0-9]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($tokens as $token) {
+            $singular = str_ends_with($token, 's') ? substr($token, 0, -1) : $token;
+            foreach ($catalog as $candidate) {
+                $candidateSingular = str_ends_with($candidate, 's') ? substr($candidate, 0, -1) : $candidate;
+                if ($token === $candidate || $singular === $candidateSingular) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Give repeated items a row or grid, while preserving the front hero. */
@@ -3758,19 +2930,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
                 $type = strtolower(trim((string) ($section['type'] ?? '')));
 
-                $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
-                if (!$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
+                $quoteLed = self::isQuoteLedType($type);
+                $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !$quoteLed;
+                $listType = self::isListLikeType($type) || self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES);
+                if (!$repeats && !$listType) {
                     continue;
                 }
-                $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
-                $neighbourGrid = ($archetypes[$position - 1] ?? null) === 'equal-card-grid'
-                    || ($archetypes[$position + 1] ?? null) === 'equal-card-grid';
-                $replacement = $neighbourGrid || $grids >= self::MAX_EQUAL_CARD_GRIDS
-                    ? 'list-with-thumbnails'
-                    : 'equal-card-grid';
-                if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
-                    continue;
-                }
+                // Content compatibility only: adjacent layouts and counts do not
+                // constrain an otherwise valid repeated composition.
+                $replacement = in_array(ItemPattern::explicit($section['item_pattern'] ?? null), [null, 'card'], true)
+                    ? 'equal-card-grid' : 'list-with-thumbnails';
                 $archetypes[$position] = $replacement;
                 $sections[$key]['layout_archetype'] = $replacement;
                 $handoff = trim((string) ($section['handoff'] ?? ''));

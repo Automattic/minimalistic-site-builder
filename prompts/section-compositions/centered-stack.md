@@ -2,7 +2,8 @@
 
 Build one constrained column for one simple message: a brief standalone
 statement or invitation. This is an occasional quiet pause, never a generic
-container for the page's content. Do not add a rule, a box, or a decorative motif.
+container for the page's content. Do not add a divider or motif to decorate it,
+or a box around its copy.
 
 - Structure: one heading, one short paragraph of two or three lines at the
   reading measure, optionally one action. The theme

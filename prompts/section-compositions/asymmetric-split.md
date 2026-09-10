@@ -44,3 +44,6 @@ Choose the region count from the content, and commit to it:
 - Objective failure: equal widths; a single stacked column on desktop; a tall
   media plate beside two lines of copy that strand a blank quadrant; three
   regions at one type scale; a row rebuilt as a uniform card grid.
+
+3. `editorial-row` — one dominant card plus supporting cards, for curated/selected-work sections:
+   - `wp:columns` with mixed widths that sum to 100% (e.g. 50/25/25 or 60/40); the dominant column gets the bigger image (`"className":"card-media-tall"` → the committed dominant-card crop) and a larger heading; supporting cards stay on `"className":"card-media"` (the committed ordinary-card crop).

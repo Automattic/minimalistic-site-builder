@@ -136,15 +136,15 @@ test('skipped-heading fires on h2 to h4 and not on h2 to h3', function () {
     assert_true(!design_floor_has_rule(DesignFloor::check($ok, []), DesignFloor::RULE_SKIPPED_HEADING));
 });
 
-test('kicker-above-heading fires on a caption kicker and skips a standfirst', function () {
+test('captions and standfirsts above headings are not automatically design defects', function () {
     $kicker = '<!-- wp:paragraph {"fontSize":"caption","style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.2em"}}} -->'
         . '<p class="has-caption-font-size">Studio hours</p><!-- /wp:paragraph -->'
         . '<!-- wp:heading {"level":2} --><h2>Visit</h2><!-- /wp:heading -->';
-    assert_true(design_floor_has_rule(DesignFloor::check($kicker, []), DesignFloor::RULE_KICKER_ABOVE_HEADING));
+    assert_true(!design_floor_has_rule(DesignFloor::check($kicker, []), 'kicker-above-heading'));
 
     $standfirst = '<!-- wp:paragraph --><p>A mixed-case standfirst under nothing, then a heading.</p><!-- /wp:paragraph -->'
         . '<!-- wp:heading {"level":2} --><h2>Visit</h2><!-- /wp:heading -->';
-    assert_true(!design_floor_has_rule(DesignFloor::check($standfirst, []), DesignFloor::RULE_KICKER_ABOVE_HEADING));
+    assert_true(!design_floor_has_rule(DesignFloor::check($standfirst, []), 'kicker-above-heading'));
 });
 
 test('tiny-text fires when body is under 0.75rem and skips caption-only tininess', function () {
@@ -219,11 +219,13 @@ test('empty theme.json and empty markup yield no findings', function () {
     assert_eq([], DesignFloor::check('', []));
 });
 
-test('section prompt bans kickers above headings', function () {
+test('section prompt bans decorative labels numbers and rules without banning content', function () {
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
     assert_contains('Eyebrows are banned', $section);
-    assert_contains('no brief earns it back', $section);
-    assert_true(!str_contains($section, 'Eyebrows are rationed'));
+    assert_contains('Decorative numbering is banned', $section);
+    assert_contains('Lines and borders need a structural purpose', $section);
+    assert_contains('prices, dates, addresses', $section);
+    assert_true(!str_contains($section, 'Optional orientation labels'));
     $input = section_unit_input();
     $input['section']['layout_archetype'] = 'list-with-thumbnails';
     $request = (new \Automattic\SiteBuild\Units\SectionUnit(
@@ -247,7 +249,40 @@ test('design-direction offers no numeral device and no numbered-index idiom', fu
             'the item_pattern vocabulary must not offer a bare index token',
         );
     }
-    assert_contains('banned unless the SITE BRIEF explicitly asks for visible numbering', $direction);
+    assert_contains('explicitly requested visible numbering', $direction);
+});
+
+test('planning and CSS prompts retain anti-tell guardrails', function () {
+    foreach (['design-direction.md', 'page-plan.md', 'page-styles.md'] as $file) {
+        $prompt = (string) file_get_contents(repo_path('prompts/' . $file));
+        foreach (['Eyebrows are banned', 'Decorative numbering is banned', 'Lines and borders need a structural purpose'] as $rule) {
+            assert_contains($rule, $prompt, $file);
+        }
+        assert_contains('explicitly requested visible numbering', $prompt, $file);
+    }
+    $css = (string) file_get_contents(repo_path('prompts/page-styles.md'));
+    assert_contains('CSS counters', $css);
+    assert_contains('do not hide or delete real content', $css);
+});
+
+test('section recipes do not reopen decorative label and divider exceptions', function () {
+    $stack = (string) file_get_contents(repo_path('prompts/section-compositions/centered-stack.md'));
+    assert_true(!str_contains($stack, 'A divider or motif is'));
+    assert_contains('Do not add a divider or motif', $stack);
+    $rows = (string) file_get_contents(repo_path('prompts/section-compositions/list-with-thumbnails.md'));
+    assert_contains('Never put a label above a row heading', $rows);
+    assert_true(!str_contains($rows, 'label is optional'));
+    assert_contains('because the index reading is what the rule serves', $rows);
+});
+
+test('shared chrome does not reopen decorative border exceptions', function () {
+    $header = (string) file_get_contents(repo_path('prompts/header.md'));
+    $footer = (string) file_get_contents(repo_path('prompts/footer.md'));
+    assert_true(!str_contains($header, 'a hairline bottom border'));
+    assert_true(!str_contains($header, 'a deliberate divider'));
+    assert_true(!str_contains($footer, "carry the concept's graphic language"));
+    assert_contains('Do not add a decorative boundary line', $header);
+    assert_contains('functional grouping', $footer);
 });
 
 test('side-tab skips an unnamed group with a thick left border', function () {

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\SectionUnit;
@@ -48,13 +49,36 @@ function section_unit_request_text(array $request): string
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
-test('section prompt keeps dash-free headings semantically lossless', function () {
+test('SectionUnit sends a profile-safe motion palette and only the assigned layout recipe', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    foreach (Motion::PROFILES as $profile) {
+        $input = section_unit_input();
+        $input['motion_profile'] = $profile;
+        $input['motion_classes'] = ['reveal-fade', 'hover-lift', 'hero-entrance', 'invented-wobble'];
+        $prompt = section_unit_request_text($unit->request($input));
+        $allowed = Motion::validateNote($input['motion_classes'], $profile)['classes'];
+        $palette = $allowed === [] ? 'Use no motion-kit classes.'
+            : 'Choose effects from this site\'s palette: `' . implode('`, `', $allowed) . '`.';
+        assert_contains($palette, $prompt);
+        assert_true(!str_contains($prompt, 'invented-wobble'));
+        assert_true(!str_contains($prompt, 'hero-entrance'));
+        assert_true(!str_contains($prompt, '### equal-card-grid'));
+        assert_contains('### full-bleed-cover', $prompt);
+    }
+    $input = section_unit_input();
+    $input['motion_profile'] = 'calm';
+    $input['motion_classes'] = [];
+    $prompt = section_unit_request_text($unit->request($input));
+    foreach (array_intersect(Motion::allowedClasses('calm'), Motion::noteClasses()) as $class) {
+        assert_contains('`' . $class . '`', $prompt, 'an empty preference uses the profile vocabulary');
+    }
+});
+
+test('section prompt permits meaningful punctuation without losing ranges', function () {
     $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
 
-    assert_contains('no em or en dashes', $prompt, 'all section heading levels reject dash-joined labels');
-    assert_contains('preserve both endpoints', $prompt, 'semantic ranges cannot lose a bound');
-    assert_contains('From 2004 to 2024', $prompt, 'ranges have a dash-free heading form');
-    assert_contains('move the intact range into supporting copy', $prompt, 'ranges may move without losing meaning');
+    assert_contains('Punctuation, including dashes and ranges, is allowed', $prompt);
+    assert_true(!str_contains($prompt, 'no em or en dashes'));
 });
 
 test('section prompt keeps unbreakable contact tokens out of display type', function () {
@@ -309,6 +333,7 @@ test('SectionUnit documents the selected card body and geometry contracts', func
     }
 });
 
+
 test('SectionUnit documents the complete list-thumb delivery contract', function () {
     $input = section_unit_input();
     $input['section']['layout_archetype'] = 'list-with-thumbnails';
@@ -350,7 +375,7 @@ test('SectionUnit gives standalone requests the authoritative machine card style
 
     assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): framed', $prompt);
     assert_contains(
-        'overrides absent or conflicting prose in the DESIGN DIRECTION',
+        '`card-style--framed`',
         $prompt,
     );
     assert_true(
@@ -417,7 +442,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
     $rules = new \Automattic\SiteBuild\Units\SectionPromptRules($renderer);
     $rendered = $renderer->render('section.md', [
         'card_instructions' => $rules->card($input['card_style']),
-        'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
+        'motion_instructions' => $rules->motion($input['motion_profile'] ?? null) . "\nUse no motion-kit classes.",
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
             'theme_json'       => $input['theme_json'],

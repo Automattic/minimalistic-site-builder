@@ -23,3 +23,11 @@ same construction and the same crop, so the row reads as one system.
 {{highlight_directive}}
 - Objective failure: unequal card widths, widths that do not sum to 100%, one
   card built differently from its siblings, or mixed image crops in one row.
+
+`equal-grid` construction — uniform card row, for flat hierarchies (pricing tiers, a trio of equally weighted features):
+   - `wp:columns` with `"className":"equal-cards"`.
+   - Each `wp:column` with `"verticalAlignment":"stretch"` and `"width":"X%"` where X = 100 / number_of_cards (2 cards → 50%, 3 → 33.33%, 4 → 25%). All widths MUST sum to exactly 100%.
+   - Inside each column a single `wp:group` card wrapper holding the content (heading, paragraph, image, list), built per the card anatomy above.
+   - Any card image: add `"className":"card-media"` to the wp:image and copy that hook alone to its wrapper (`<figure class="card-media">`) — the build crops it to the ordinary-card ratio committed by the **Image crop** fact. NEVER write the cropping as an inline style or `aspectRatio` block attribute.
+   - For a bottom-aligned action, add a `wp:paragraph` with `"className":"text-action cta-bottom"` holding one link — never a `wp:buttons` (see "Buttons are budgeted" above).
+     (The supporting `.equal-cards` / `.card-body` / `.cta-bottom` / `.text-action` / `.card-media*` / `.card-flush` CSS already ships in the theme's style.css — just use these class hooks.)

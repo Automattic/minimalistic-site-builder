@@ -245,16 +245,15 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
 test('motion vocabulary agrees between the static kit and its isolated authoring prompts', function () {
     $rules = new \Automattic\SiteBuild\Units\SectionPromptRules(new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
     $sectionPrompt = implode("\n", array_map($rules->motion(...), ['calm', 'energetic', 'dramatic']));
+    $directionPrompt = file_get_contents(repo_path('prompts/design-direction.md'));
     $heroPrompt = file_get_contents(repo_path('prompts/hero.md'));
     $kitCss = file_get_contents(repo_path('assets/motion/motion.css'));
     foreach (Motion::kitClasses() as $class) {
-        $authoringPrompt = $class === 'hero-entrance' ? $heroPrompt : $sectionPrompt;
+        $authoringPrompt = $class === 'hero-entrance' ? $heroPrompt : $directionPrompt;
         assert_contains("`{$class}`", $authoringPrompt, "{$class} documented at its authoring boundary");
         assert_contains(".{$class}", $kitCss, "{$class} implemented by the kit");
     }
-    foreach (['`calm`:', '`energetic`:', '`dramatic`:'] as $profileGuidance) {
-        assert_contains($profileGuidance, $sectionPrompt, "{$profileGuidance} choreography is explicit");
-    }
+    assert_contains('site\'s motion palette', $sectionPrompt, 'section keeps the selected palette preference');
     assert_contains(
         'Do NOT automatically pair `hero-entrance` with `ken-burns`',
         $heroPrompt,
@@ -265,5 +264,5 @@ test('motion vocabulary agrees between the static kit and its isolated authoring
         $sectionPrompt,
         'prompt documents the transform conflict enforced by motion-sanity'
     );
-    assert_contains('keeps only the first two', $sectionPrompt, 'prompt states the enforced section entrance cap');
+    assert_contains('at most one or two entrances per section', $sectionPrompt, 'prompt states the enforced section entrance cap');
 });

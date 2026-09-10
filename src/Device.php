@@ -7,8 +7,8 @@ namespace Automattic\SiteBuild;
  * Optional site-wide CSS device. One reviewed utility, used on at most one
  * band per page. Motifs that are not in this list are not promises.
  *
- * A numeral mark is not a device: sequence numbers on bands or items are
- * banned unless the site brief asks for them (BIGR-949).
+ * A numeral mark is not a device; meaningful sequence numbers belong to
+ * ordinary authored content rather than a generated CSS ornament.
  *
  * Selectors target the marked section root so a nested heading is not
  * required — a 1px rule on a nested h2 is easy to miss.

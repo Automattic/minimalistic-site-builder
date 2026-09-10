@@ -10,7 +10,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Enforce the reviewed hero copy budget at block boundaries.
  *
  * Generated copy is intentionally repaired after primary-action reconciliation:
- * one headline, one supporting paragraph, and the one authoritative action may
+ * one headline, one caption label, one supporting paragraph, and the authoritative action may
  * survive. Every other copy/action block is removed independently and reported
  * as delivered-value loss; unrelated media and sibling layout bytes are never
  * rewritten.
@@ -160,6 +160,7 @@ final class HeroCopyBudget
                         'end' => $end,
                         'markup' => substr($markup, $offset, $end - $offset),
                         'authored' => self::readingText($document->innerHtml($index)),
+                        'caption' => ($attrs['fontSize'] ?? null) === 'caption',
                         'raw_survivor' => self::hasRawNonTextPayload($document, $index),
                     ];
                 }
@@ -220,18 +221,31 @@ final class HeroCopyBudget
             }
         }
 
-        $headlineEnd = null;
+        $headlineEnd = $headlineStart = null;
         foreach ($text as $candidate) {
             if ($candidate['index'] === $keepHeading) {
                 $headlineEnd = $candidate['end'];
+                $headlineStart = $candidate['offset'];
+                break;
+            }
+        }
+
+        // A concise pre-headline caption can supply meaningful orientation.
+        // Keep at most one, independently of the standfirst's reading role.
+        $keepCaption = null;
+        foreach ($text as $candidate) {
+            if ($headlineStart !== null && $candidate['end'] <= $headlineStart
+                && $candidate['name'] === 'paragraph' && $candidate['caption']
+                && $candidate['authored'] !== '' && mb_strlen($candidate['authored'], 'UTF-8') <= 80
+            ) {
+                $keepCaption = $candidate['index'];
                 break;
             }
         }
 
         // Prefer the first paragraph already authored after the retained
         // headline. A plain pre-H1 line is the support paragraph only when no
-        // post-headline standfirst exists; headlineFirstHeroCopy can then move
-        // that sole block without changing its bytes. This ordering prevents
+        // post-headline standfirst exists. Preserve authored order. This prevents
         // budget enforcement from retaining an ambiguous pre-H1 line while
         // deleting the model's correctly placed standfirst.
         $keepParagraph = null;
@@ -249,6 +263,8 @@ final class HeroCopyBudget
         foreach ($text as $candidate) {
             if ($keepParagraph === null
                 && $candidate['name'] === 'paragraph'
+                && $candidate['index'] !== $keepCaption
+                && !$candidate['caption']
                 && $candidate['authored'] !== ''
             ) {
                 $keepParagraph = $candidate['index'];
@@ -257,7 +273,7 @@ final class HeroCopyBudget
         }
         if ($keepParagraph === null) {
             foreach ($text as $candidate) {
-                if ($candidate['name'] === 'paragraph') {
+                if ($candidate['name'] === 'paragraph' && !$candidate['caption']) {
                     $keepParagraph = $candidate['index'];
                     break;
                 }
@@ -276,7 +292,7 @@ final class HeroCopyBudget
         foreach ($text as $candidate) {
             $keep = $candidate['name'] === 'heading'
                 ? $candidate['index'] === $keepHeading
-                : $candidate['index'] === $keepParagraph;
+                : in_array($candidate['index'], [$keepParagraph, $keepCaption], true);
             if (!$keep) {
                 $removals[] = $candidate + ['kind' => 'text'];
             }
@@ -404,8 +420,8 @@ final class HeroCopyBudget
             }
             $warnings[] = "file='theme/parts/{$part}.html'; block='{$removal['path']}'; authored="
                 . self::value($authored)
-                . '; delivered=removed; disposition=hero copy budget retained one headline, one supporting '
-                . 'paragraph, and only the authoritative primary action; this excess block was removed while '
+                . '; delivered=removed; disposition=hero copy budget retained one headline, one optional caption, '
+                . 'one supporting paragraph, and only the authoritative primary action; this excess block was removed while '
                 . 'preserving its siblings';
         }
         foreach ($buttonWrappers as $wrapper) {
