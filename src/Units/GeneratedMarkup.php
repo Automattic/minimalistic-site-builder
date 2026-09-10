@@ -5017,11 +5017,11 @@ final class GeneratedMarkup
                 $dropped[] = "{$key} '{$value}'";
             }
             if (isset($attrs['style']['typography'])) {
+                $dropped[] = 'style.typography ' . json_encode($attrs['style']['typography']);
                 unset($attrs['style']['typography']);
                 if ($attrs['style'] === []) {
                     unset($attrs['style']);
                 }
-                $dropped[] = 'style.typography';
             }
             $own = $document->ownHtml($index);
             $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $match) use ($classDrops): string {
@@ -5040,7 +5040,7 @@ final class GeneratedMarkup
             }, $clean) ?? $clean;
             if ($clean !== $own) {
                 $document->spliceOwnHtml($index, 0, strlen($own), $clean);
-                $dropped[] = 'inline typography';
+                $dropped[] = 'inline typography in ' . $own;
             }
             if ($dropped === []) {
                 continue;
@@ -5048,7 +5048,7 @@ final class GeneratedMarkup
             $document->setAttrs($index, $attrs);
             $repairs[] = [
                 'part' => $part,
-                'block' => 'paragraph.marquee',
+                'block' => 'paragraph.marquee[' . $index . ']',
                 'authored' => implode(', ', $dropped),
                 'delivered' => 'removed',
                 'note' => 'the motion kit sets the marquee scale; an authored size or face would fight it',

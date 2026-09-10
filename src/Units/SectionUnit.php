@@ -198,7 +198,6 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
-        $markup = GeneratedMarkup::ownMarqueeScale($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markFigures(
             $markup,

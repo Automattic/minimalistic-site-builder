@@ -212,8 +212,9 @@ async function settleMotion(page, timeout) {
     const root = document.documentElement;
     while (Date.now() < deadline
       && root.classList.contains('motion-js')
-      && targets.some((target) => target.classList.contains('motion-target')
-        && !target.classList.contains('is-visible'))) {
+      && targets.some((target) => (target.classList.contains('motion-target')
+        && !target.classList.contains('is-visible'))
+        || target.getAttribute('data-count-running') === 'true')) {
       await sleep(50);
     }
 

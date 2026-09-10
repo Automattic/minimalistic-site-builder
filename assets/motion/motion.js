@@ -90,7 +90,7 @@
         var target = event.target;
         while (target && target !== root) {
             if (typeof target.matches === 'function'
-                && (target.matches(ENTRANCE_SELECTOR) || target.matches('.hero-entrance'))) {
+                && (target.matches(ENTRANCE_SELECTOR) || target.matches('.hero-entrance, .word-reveal'))) {
                 revealFocused(target);
             }
             target = target.parentElement;
@@ -143,6 +143,7 @@
                 marquee.textContent = '';
                 originalNodes.forEach(function (node) { marquee.appendChild(node); });
                 marquee.classList.remove('marquee--built');
+                marquee.classList.add('marquee--static');
                 if (addedTabIndex) { marquee.removeAttribute('tabindex'); }
                 if (restoreFocus) { focused.focus({ preventScroll: true }); }
             });
@@ -186,6 +187,60 @@
         });
     }
 
+    // Transparent cards need the same solid surface they were readable on,
+    // not a new palette color that can fight authored or nested text colors.
+    // If that surface is an image or translucent paint, keep the normal layout.
+    function buildStacks() {
+        function transparent(color) {
+            return color === 'transparent' || /^rgba\([^)]*,\s*0\s*\)$/.test(color);
+        }
+        function opaque(color) {
+            return /^rgb\(/.test(color) || /^rgba\([^)]*,\s*1\s*\)$/.test(color);
+        }
+        function backingSurface(card) {
+            var ancestor = card.parentElement;
+            while (ancestor) {
+                var style = window.getComputedStyle(ancestor);
+                if (style.backgroundImage !== 'none') { return null; }
+                if (opaque(style.backgroundColor)) { return style.backgroundColor; }
+                if (!transparent(style.backgroundColor)) { return null; }
+                ancestor = ancestor.parentElement;
+            }
+            return null; // The browser canvas may follow a different color scheme.
+        }
+        Array.prototype.forEach.call(document.querySelectorAll('.sticky-stack'), function (stack) {
+            var backing = [];
+            var cards = Array.prototype.slice.call(stack.children);
+            if (cards.length < 2 || cards.length > 6) { return; }
+            var ready = cards.every(function (card) {
+                var color = window.getComputedStyle(card).backgroundColor;
+                if (opaque(color)) { return true; }
+                if (!transparent(color)) { return false; }
+                var surface = backingSurface(card);
+                if (surface === null) { return false; }
+                backing.push({ card: card, surface: surface });
+                return true;
+            });
+            if (!ready) { return; }
+            backing.forEach(function (entry) {
+                entry.card.style.setProperty('--motion-stack-background', entry.surface);
+                entry.card.classList.add('motion-stack-backed');
+            });
+            stack.classList.add('sticky-stack--ready');
+            // Authored !important paint can still win. Roll back the whole
+            // stack rather than pinning even one transparent card over text.
+            if (!backing.every(function (entry) {
+                return window.getComputedStyle(entry.card).backgroundColor === entry.surface;
+            })) {
+                stack.classList.remove('sticky-stack--ready');
+                backing.forEach(function (entry) {
+                    entry.card.classList.remove('motion-stack-backed');
+                    entry.card.style.removeProperty('--motion-stack-background');
+                });
+            }
+        });
+    }
+
     function reveal() {
         // The preference can change between script loading and DOM readiness.
         if (motionPreference.matches) {
@@ -196,6 +251,7 @@
         try {
             splitWords();
             buildMarquees();
+            buildStacks();
             targets = Array.prototype.slice.call(document.querySelectorAll(ENTRANCE_SELECTOR));
             targets.forEach(function (target) {
                 target.classList.add('motion-target');
@@ -328,6 +384,7 @@
             function finishCount() {
                 if (!running) { return; }
                 running = false;
+                target.removeAttribute('data-count-running');
                 if (frame !== null) { window.cancelAnimationFrame(frame); }
                 target.textContent = '';
                 originalNodes.forEach(function (node) { target.appendChild(node); });
@@ -355,6 +412,7 @@
                 frame = window.requestAnimationFrame(step);
             };
             activeCounters.push(finishCount);
+            target.setAttribute('data-count-running', 'true');
             target.textContent = format(0);
             frame = window.requestAnimationFrame(step);
         }

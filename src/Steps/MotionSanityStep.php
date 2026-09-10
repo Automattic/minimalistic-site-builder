@@ -27,7 +27,7 @@ use Automattic\SiteBuild\SurfaceMarkup;
  * three effects while four take none, or every section could claim the one
  * ambient "signature" slot. The section prompt states the budget; this step
  * is the deterministic backstop. It only ever REMOVES class tokens, never
- * adds them:
+ * adds them. Retained marquees also shed typography that fights the kit:
  *  - unknown motion-flavored classes (invented `reveal-left` variants and the
  *    JS-owned `is-visible` state class) — they have no CSS, or fight the kit;
  *  - classes the committed motion profile disallows (`minimal` keeps hover
@@ -144,7 +144,7 @@ final class MotionSanityStep implements Step
         $project->addWarnings($this->id(), array_map(
             static fn (string $row): string => $isDeviceNote($row)
                 ? "device class stripped: {$row}"
-                : "motion class stripped: {$row}",
+                : (str_contains($row, 'marquee typography:') ? "motion typography repaired: {$row}" : "motion class stripped: {$row}"),
             $report,
         ));
 
@@ -388,7 +388,19 @@ final class MotionSanityStep implements Step
             }
         }
 
-        return ['markup' => $doc->render(), 'notes' => $notes];
+        $markup = $doc->render();
+        // Only a retained marquee owns its type. Custom targets and classes
+        // rejected by the profile or page budget keep their authored styling.
+        if (!$deviceOnly) {
+            $repairs = [];
+            $markup = GeneratedMarkup::ownMarqueeScale($markup, '', $repairs);
+            foreach ($repairs as $repair) {
+                $notes[] = 'marquee typography: block=' . $repair['block']
+                    . '; authored=' . $repair['authored']
+                    . '; delivered=removed; disposition=removed; ' . $repair['note'];
+            }
+        }
+        return ['markup' => $markup, 'notes' => $notes];
     }
 
     /**

@@ -310,3 +310,27 @@ test('the marquee keeps its own one-per-page slot beside the ambient budget and 
     $minimal = MotionSanityStep::sanitize($paragraph('Quiet'), 'minimal', MotionSanityStep::newBudget());
     assert_true(!str_contains($minimal['markup'], 'marquee'), 'the minimal profile allows hover only');
 });
+
+
+test('retained marquee typography removals reach durable warnings with their location and value', function () {
+    $tmp = sys_get_temp_dir() . '/builder_motion_type_' . uniqid();
+    try {
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'dramatic']);
+        $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'hero', 'type' => 'hero']]]]]);
+        $sibling = '<!-- wp:paragraph --><p>Keep this sibling.</p><!-- /wp:paragraph -->';
+        $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph {"className":"marquee","fontSize":"caption"} --><p class="marquee has-caption-font-size">More projects</p><!-- /wp:paragraph -->' . $sibling);
+        quietly(fn () => (new MotionSanityStep())->run($project));
+        $out = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('<p class="marquee">More projects</p>', $out);
+        assert_contains($sibling, $out);
+        $warnings = implode(' ', $project->readJson('warnings.json')['motion-sanity'] ?? []);
+        foreach (['page-home--hero.html', 'paragraph.marquee[0]', "fontSize 'caption'", 'delivered=removed', 'disposition=removed'] as $context) {
+            assert_contains($context, $warnings);
+        }
+        quietly(fn () => (new MotionSanityStep())->run($project));
+        assert_eq($out, $project->readText('theme/parts/page-home--hero.html'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});

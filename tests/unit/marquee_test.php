@@ -93,7 +93,7 @@ test('a marquee wraps whole under reduced motion or without the script, never an
     assert_contains('white-space: normal;', $reduced, 'the line wraps');
     assert_contains('text-overflow: clip;', $reduced, 'no ellipsis');
     assert_contains('text-wrap: balance;', $reduced);
-    assert_contains('html:not(.motion-js) .marquee {', $css, 'no script, no loop: the line wraps too');
+    assert_contains('html:not(.motion-js) .marquee,', $css, 'no script, no loop: the line wraps too');
     $js = (string) file_get_contents(repo_path('assets/motion/motion.js'));
     assert_contains("matchMedia('(prefers-reduced-motion: reduce)')", $js, 'the script never builds a track under reduced motion');
 });
@@ -102,4 +102,42 @@ test('the marquee note has a separate budget from ambient motion', function () {
     $result = Motion::validateNote('ken-burns, marquee', 'dramatic');
     assert_eq(['ken-burns', 'marquee'], $result['classes']);
     assert_eq([], $result['dropped']);
+});
+
+
+test('marquee scale repair preserves explicit custom-motion typography through the section boundary', function () {
+    $unit = (new ReflectionClass(\Automattic\SiteBuild\Units\SectionUnit::class))->newInstanceWithoutConstructor();
+    $finish = new ReflectionMethod($unit, 'finish');
+    foreach (['custom-motion marquee', 'marquee custom-motion'] as $classes) {
+        $markup = '<!-- wp:paragraph {"className":"' . $classes . '","fontSize":"section-title","fontFamily":"heading","style":{"typography":{"fontWeight":"700"}}} -->'
+            . '<p class="' . $classes . ' has-section-title-font-size has-heading-font-family" style="font-weight:700">More projects</p><!-- /wp:paragraph -->';
+        $result = $finish->invoke($unit, $markup, ['page' => ['slug' => 'home'], 'section' => ['slug' => 'test']]);
+        $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+        $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($result->markup, 'dramatic', $budget)['markup'];
+        assert_contains('"fontSize":"section-title"', $out);
+        assert_contains('"fontFamily":"heading"', $out);
+        assert_contains('font-weight:700', $out);
+        assert_contains('class="custom-motion has-section-title-font-size has-heading-font-family"', $out);
+        assert_eq([], $result->warnings);
+    }
+});
+
+
+test('only retained marquees surrender their typography and report the removal', function () {
+    $markup = '<!-- wp:paragraph {"className":"marquee","fontSize":"caption"} --><p class="marquee has-caption-font-size">More projects</p><!-- /wp:paragraph -->';
+    foreach (['none', 'minimal'] as $profile) {
+        $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+        $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($markup, $profile, $budget);
+        assert_contains('"fontSize":"caption"', $out['markup']);
+        assert_contains('has-caption-font-size', $out['markup']);
+    }
+    $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+    $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($markup . $markup, 'dramatic', $budget);
+    assert_eq(1, substr_count($out['markup'], '"fontSize":"caption"'), 'over-budget marquee keeps its size');
+    assert_contains('marquee typography: block=paragraph.marquee[0]; authored=fontSize', implode(' ', $out['notes']));
+    assert_contains('delivered=removed; disposition=removed', implode(' ', $out['notes']));
+    $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+    $again = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($out['markup'], 'dramatic', $budget);
+    assert_eq($out['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
 });

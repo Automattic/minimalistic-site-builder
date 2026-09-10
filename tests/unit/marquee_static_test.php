@@ -6,7 +6,7 @@ test('a static marquee inside a column reads at section-title scale (frm PR-8m)'
     $flat = preg_replace('/\s+/', ' ', $css);
     assert_contains('@media screen and (prefers-reduced-motion: reduce) { .marquee { white-space: normal;', $flat, 'the reduced-motion branch still wraps the line');
     assert_contains('.wp-block-column .marquee, .marquee.is-long-line { font-size: var(--wp--preset--font-size--section-title, 2rem); }', $flat);
-    assert_contains('html:not(.motion-js) .wp-block-column .marquee, html:not(.motion-js) .marquee.is-long-line { font-size: var(--wp--preset--font-size--section-title, 2rem); }', $flat, 'the no-script branch matches');
+    assert_contains('html:not(.motion-js) .wp-block-column .marquee, html:not(.motion-js) .marquee.is-long-line, .wp-block-column .marquee.marquee--static, .marquee.marquee--static.is-long-line { font-size: var(--wp--preset--font-size--section-title, 2rem); }', $flat, 'the no-script branch matches');
 });
 
 

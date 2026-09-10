@@ -110,14 +110,17 @@
         font-size: var(--wp--preset--font-size--section-title, 2rem);
     }
 }
-html:not(.motion-js) .marquee {
+html:not(.motion-js) .marquee,
+.marquee.marquee--static {
     white-space: normal;
     text-overflow: clip;
     text-wrap: balance;
     text-align: center;
 }
 html:not(.motion-js) .wp-block-column .marquee,
-html:not(.motion-js) .marquee.is-long-line {
+html:not(.motion-js) .marquee.is-long-line,
+.wp-block-column .marquee.marquee--static,
+.marquee.marquee--static.is-long-line {
     font-size: var(--wp--preset--font-size--section-title, 2rem);
 }
 
@@ -525,14 +528,15 @@ html:not(.motion-js) .marquee.is-long-line {
     /* Sticky stack (frm W8d): the direct children of a marked container
        pin under the header one after another as the page scrolls, each a
        little lower than the last, so the cards pile up (Cohesion's stack).
-       Pure CSS, vertical only; the container is a plain column so every
-       card has room to travel. Inert under reduced motion (this block). */
-    .sticky-stack.sticky-stack {
+       The driver first resolves a readable solid backing for every card;
+       then CSS pins the cards in a single column. Static without that backing,
+       without JavaScript, or under reduced motion (this block). */
+    .sticky-stack.sticky-stack--ready {
         display: grid !important;
         grid-template-columns: minmax(0, 1fr);
         gap: var(--wp--preset--spacing--md, 1.5rem);
     }
-    .sticky-stack > * {
+    .sticky-stack--ready > * {
         position: sticky;
         top: calc(var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px) + var(--stack-offset, 0rem));
         /* A card pins only while its container still has room below it; a
@@ -548,9 +552,10 @@ html:not(.motion-js) .marquee.is-long-line {
     .sticky-stack > :nth-child(5) { --stack-offset: 4rem; }
     .sticky-stack > :nth-child(6) { --stack-offset: 5rem; }
     /* A pinned card must own its surface, or the one beneath shows through. */
-    .sticky-stack > *:not(.has-background) {
-        background-color: var(--wp--preset--color--base, #fff);
-        color: var(--wp--preset--color--contrast, #111);
+    .sticky-stack--ready > .motion-stack-backed {
+        /* Only cards measured as transparent get this runtime class. Beat
+           ordinary inline transparency; the driver verifies the result. */
+        background-color: var(--motion-stack-background) !important;
     }
 
     html.motion-js .marquee { text-overflow: clip; }
