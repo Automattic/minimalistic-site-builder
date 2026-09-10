@@ -22,8 +22,18 @@ namespace Automattic\SiteBuild;
  */
 final class HostPlaceholder
 {
+    /** Any paragraph block: comment attributes, wrapper attributes, inner HTML. */
+    private const PARAGRAPH = '/<!--\s*wp:paragraph\b([^>]*?)-->\s*<p([^>]*)>(.*?)<\/p>'
+        . '\s*<!--\s*\/wp:paragraph\s*-->/is';
+
     /**
      * Every placeholder block of one kind, whole block and spec text.
+     *
+     * The class counts whether it is on the `<p>` or only in the block
+     * comment's `className`. The two are the same authored intent, and the
+     * re-serializer turns the second into the first — but it runs after the
+     * pass that deletes markers no placeholder claims, so reading only the
+     * `<p>` would throw the block away one step before it was repaired.
      *
      * @param string $markerName The bare marker, e.g. `JP_FORM`.
      * @param string $className  The class the host locates the block by.
@@ -31,16 +41,24 @@ final class HostPlaceholder
      */
     public static function find(string $markup, string $markerName, string $className): array
     {
-        $pattern = '/<!--\s*wp:paragraph\b[^>]*?-->\s*<p[^>]*class="[^"]*\b'
-            . preg_quote($className, '/')
-            . '\b[^"]*"[^>]*>(.*?)<\/p>\s*<!--\s*\/wp:paragraph\s*-->/is';
-        if (preg_match_all($pattern, $markup, $matches, PREG_SET_ORDER) < 1) {
+        if (preg_match_all(self::PARAGRAPH, $markup, $matches, PREG_SET_ORDER) < 1) {
             return [];
         }
 
+        $quoted = preg_quote($className, '/');
+        $onWrapper = '/\bclass\s*=\s*"[^"]*\b' . $quoted . '\b[^"]*"/i';
+        $inComment = '/"className"\s*:\s*"[^"]*\b' . $quoted . '\b[^"]*"/i';
+
         $found = [];
         foreach ($matches as $match) {
-            $spec = trim(PlainText::fromMarkup($match[1]));
+            [, $commentAttrs, $wrapperAttrs, $inner] = $match;
+            if (
+                preg_match($onWrapper, $wrapperAttrs) !== 1
+                && preg_match($inComment, $commentAttrs) !== 1
+            ) {
+                continue;
+            }
+            $spec = trim(PlainText::fromMarkup($inner));
             if (str_starts_with($spec, $markerName . ':')) {
                 $found[] = ['block' => $match[0], 'spec' => $spec];
             }
@@ -80,10 +98,9 @@ final class HostPlaceholder
             $placeholders[$found['block']] = true;
         }
 
-        $pattern = '/<!--\s*wp:paragraph\b[^>]*?-->\s*<p[^>]*>.*?<\/p>\s*<!--\s*\/wp:paragraph\s*-->/is';
         $removed = 0;
         $stripped = preg_replace_callback(
-            $pattern,
+            self::PARAGRAPH,
             static function (array $match) use ($placeholders, $markerName, &$removed): string {
                 if (isset($placeholders[$match[0]]) || !str_contains($match[0], $markerName)) {
                     return $match[0];

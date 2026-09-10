@@ -248,9 +248,8 @@ test('stripping loose map markers keeps the placeholder and drops the rest', fun
 
 test('the map placeholder block survives the passes that rewrite generated markup', function () {
     // The whole design rests on this: the marker has to still be there when
-    // the host looks for it. A deterministic pass re-serializes every block
-    // from its comment JSON and drops classes the attributes do not produce,
-    // so pin that `className` is one it does keep.
+    // the host looks for it. Pin the two passes that rewrite section markup
+    // before delivery, and the re-serializer fix-blocks runs it through.
     $spec = 'JP_MAP: 14 Rue de Rivoli, 75004 Paris, France | Atelier Rivoli | street';
     $markup = '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->' . "\n"
         . '<p class="jetpack-map-placeholder">' . $spec . '</p>' . "\n"
@@ -265,4 +264,46 @@ test('the map placeholder block survives the passes that rewrite generated marku
 
     assert_contains('jetpack-map-placeholder', $fixed, 'the class the host locates the block by');
     assert_contains($spec, $fixed, 'the spec text, pipes and all, reaches the host unaltered');
+
+    $serialized = (new Automattic\SiteBuild\BlockSerializer\Serializer())->transform($fixed)->html;
+    assert_eq(1, count(MapPlaceholder::find($serialized)), 'and the re-serializer keeps it findable');
+});
+
+test('a placeholder whose class lives only in the block comment still counts', function () {
+    // The re-serializer copies `className` onto the <p>, but it runs after the
+    // pass that deletes markers no placeholder claims. Reading only the <p>
+    // would throw this block away one step before it was repaired — and a map
+    // has no injected fallback to bring it back.
+    $spec = 'JP_MAP: 1 Main St | The Shop | street';
+    $markup = '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"className":"jetpack-map-placeholder"} -->'
+        . '<p>' . $spec . '</p><!-- /wp:paragraph -->';
+
+    $found = MapPlaceholder::find($markup);
+    assert_eq(1, count($found), 'the class in the comment locates the block');
+    assert_eq($spec, $found[0]['spec']);
+
+    $warnings = [];
+    $out = SectionsStep::stripLooseMapMarkers(['parts/x.html' => $markup], $warnings);
+    assert_contains($spec, $out['parts/x.html'], 'and the strip leaves it alone');
+    assert_eq([], $warnings, 'a claimed placeholder is not a loose marker');
+
+    // What the re-serializer then makes of it is what the host reads.
+    $serialized = (new Automattic\SiteBuild\BlockSerializer\Serializer())->transform($markup)->html;
+    assert_contains('<p class="jetpack-map-placeholder">', $serialized);
+    assert_eq(1, count(MapPlaceholder::find($serialized)));
+});
+
+test('a marker in a paragraph that claims no placeholder class is still loose', function () {
+    // The widening above must not swallow the case it was never about: a bare
+    // marker with no class anywhere is body copy the host never reads.
+    $markup = '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>JP_MAP: 1 Main St | The Shop | street</p><!-- /wp:paragraph -->';
+
+    assert_eq([], MapPlaceholder::find($markup), 'no class, no placeholder');
+
+    $warnings = [];
+    $out = SectionsStep::stripLooseMapMarkers(['parts/x.html' => $markup], $warnings);
+    assert_eq(0, MapPlaceholder::markerCount($out['parts/x.html']), 'and the strip removes it');
+    assert_contains('outside a jetpack-map-placeholder block', implode(' ', $warnings));
 });

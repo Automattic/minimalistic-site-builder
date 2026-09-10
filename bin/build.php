@@ -102,7 +102,8 @@ use Automattic\SiteBuild\TransportUnavailable;
  * because it is a separate host capability: it says the host can turn an
  * address into coordinates. With it, a section that shows where the place is
  * reserves a JP_MAP placeholder carrying the address the site spec stated.
- * Without it the build emits no map, and never an address it invented.
+ * The contract forbids an address the spec does not state, so a site that gave
+ * none gets no map. Without the flag the build says nothing about maps at all.
  *
  * After a full build it boots the site in WordPress Playground and prints the
  * URL. --no-serve skips that (build only); --until=... also skips it (the build

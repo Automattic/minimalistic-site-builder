@@ -74,7 +74,8 @@ host substitutes after the build, instead of the default of emitting no form
 markup at all. `--use-jetpack-maps` is the same arrangement for hosts that can
 geocode: a section showing where the place is reserves a `JP_MAP` placeholder
 carrying the address the site spec stated, and the host turns it into a real
-map. Both are off by default, and the map one never invents an address.
+map. Both are off by default, and the map contract forbids an address the
+site spec does not state.
 `--writing-direction=ltr|rtl`
 is an explicit caller override; otherwise the site language determines logical
 direction. The selected recipe and normalized blueprint are persisted in
