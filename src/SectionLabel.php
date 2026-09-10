@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+
 /**
  * Bounded section-label device: how a non-hero section names itself above
  * its heading. Eyebrows stay banned by default; this is the one committed
@@ -254,8 +256,9 @@ final class SectionLabel
         if (in_array($class, preg_split('/\s+/', $classes) ?: [], true)) {
             return true;
         }
-        preg_match('/\bclass=["\']([^"\']*)["\']/', $document->ownHtml($index), $match);
-        return in_array($class, preg_split('/\s+/', $match[1] ?? '') ?: [], true);
+        $paragraph = HtmlFragment::parse($document->ownHtml($index))->root()->elementChildren()[0] ?? null;
+        $htmlClasses = $paragraph?->tagName() === 'p' ? ($paragraph->attribute('class') ?? '') : '';
+        return in_array($class, preg_split('/\s+/', $htmlClasses) ?: [], true);
     }
 
     /** Remove an empty label column and preserve the content blocks. */
@@ -276,19 +279,34 @@ final class SectionLabel
             $children = $document->children($index);
             $empty = array_values(array_filter($children, static fn (int $child): bool =>
                 $document->name($child) === 'column' && $document->children($child) === []
-                && trim(strip_tags($document->ownHtml($child))) === ''
+                // Only an empty div shell is disposable; text-free media is content.
+                && preg_match('/^\s*<div\b[^>]*>\s*<\/div>\s*$/is', $document->ownHtml($child)) === 1
+                && self::isLayoutOnlyWrapper($document, $child)
             ));
             $kept = array_values(array_diff($children, $empty));
             if ($empty === []) {
                 continue;
             }
-            if (count($kept) !== 1 || $document->name($kept[0]) !== 'column') {
+            $single = count($kept) === 1 && $document->name($kept[0]) === 'column';
+            if (!$single || !self::isLayoutOnlyWrapper($document, $index) || !self::isLayoutOnlyWrapper($document, $kept[0])) {
+                $edits = [];
+                if ($single) {
+                    $start = $document->openingOffset($kept[0]);
+                    $end = $document->endOffset($kept[0]);
+                    if ($end !== null) {
+                        $edits[] = [$start, $end, self::widenColumn(substr($markup, $start, $end - $start))];
+                    }
+                }
                 foreach (array_reverse($empty) as $column) {
                     $start = $document->openingOffset($column);
                     $end = $document->endOffset($column);
                     if ($end !== null) {
-                        $markup = substr_replace($markup, '', $start, $end - $start);
+                        $edits[] = [$start, $end, ''];
                     }
+                }
+                usort($edits, static fn (array $a, array $b): int => $b[0] <=> $a[0]);
+                foreach ($edits as [$start, $end, $replacement]) {
+                    $markup = substr_replace($markup, $replacement, $start, $end - $start);
                 }
                 continue;
             }
@@ -304,6 +322,67 @@ final class SectionLabel
             }
         }
         return $markup;
+    }
+
+    /** Unknown wrapper attributes or raw content must survive label cleanup. */
+    private static function isLayoutOnlyWrapper(BlockMarkup $document, int $index): bool
+    {
+        $column = $document->name($index) === 'column';
+        $attrs = $document->attrs($index) ?? [];
+        if ($column) {
+            unset($attrs['width']);
+        }
+        if ($attrs !== []) {
+            return false;
+        }
+        $shell = $document->innerHtml($index);
+        $innerStart = $document->openingOffset($index) + $document->openingLength($index);
+        foreach (array_reverse($document->children($index)) as $child) {
+            $start = $document->openingOffset($child);
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                return false;
+            }
+            $shell = substr_replace($shell, '', $start - $innerStart, $end - $start);
+        }
+        $class = $column ? 'wp-block-column' : 'wp-block-columns';
+        $width = $column ? '(?:\s+style="\s*flex-basis:\s*[0-9.]+%\s*;?\s*")?' : '';
+        return preg_match('/^\s*<div\s+class="' . $class . '"' . $width . '\s*>\s*<\/div>\s*$/s', $shell) === 1;
+    }
+
+    /** Keep wrapper semantics and child bytes while repairing the obsolete split width. */
+    private static function widenColumn(string $markup): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $html = $document->ownHtml(0);
+        $wrapper = HtmlFragment::parse($html)->root()->elementChildren()[0] ?? null;
+        if ($wrapper?->tagName() !== 'div') {
+            return $markup;
+        }
+        $start = $wrapper->startOffset();
+        $tag = substr($html, $start, $wrapper->innerStartOffset() - $start);
+        [$style] = CssChecks::dropDeclarations(
+            $wrapper->attribute('style') ?? '',
+            static fn (array $declaration): bool => $declaration['property'] === 'flex-basis' && $declaration['structurallySafe'],
+            bareDeclarationList: true,
+        );
+        $style = rtrim($style, "; \t\r\n") . ($style === '' ? '' : ';') . 'flex-basis:100%';
+        $styleAttribute = 'style="' . htmlspecialchars($style, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
+        $found = false;
+        foreach (array_reverse(MarkupSanitizer::openingTagAttributes($tag)) as $attribute) {
+            if ($attribute['name'] === 'style') {
+                $tag = substr_replace($tag, ' ' . $styleAttribute, $attribute['start'], $attribute['end'] - $attribute['start']);
+                $found = true;
+            }
+        }
+        if (!$found) {
+            $tag = substr_replace($tag, ' ' . $styleAttribute, -1, 0);
+        }
+        $document->spliceOwnHtml(0, $start, $wrapper->innerStartOffset() - $start, $tag);
+        $attrs = $document->attrs(0) ?? [];
+        $attrs['width'] = '100%';
+        $document->setAttrs(0, $attrs);
+        return $document->render();
     }
 
     /**

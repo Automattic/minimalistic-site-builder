@@ -224,7 +224,10 @@ test('a badge uses a block flex box so auto margins can center it', function () 
 test('a removed side label leaves full-width content and preserves sibling bytes', function () {
     foreach (['none', 'section-badge', 'side-label'] as $label) {
         $result = SectionLabel::normalize(side_label_split(), $label, 'opening', true);
-        assert_true(!str_contains($result['markup'], 'wp:column'));
+        assert_contains('"align":"wide"', $result['markup'], 'the authored row alignment survives');
+        assert_eq(1, substr_count($result['markup'], '<!-- wp:column '));
+        assert_contains('"width":"100%"', $result['markup']);
+        assert_contains('style="flex-basis:100%"', $result['markup']);
         assert_contains('<p>Three moves, one room.</p>', $result['markup']);
         assert_eq(1, count($result['warnings']));
         assert_eq($result['markup'], SectionLabel::normalize($result['markup'], $label, 'opening', true)['markup']);
@@ -276,4 +279,106 @@ test('nested label column removals preserve neighboring content and closing mark
         assert_eq($expected, $again['markup'], 'normalization reaches a fixed point');
         assert_eq([], $again['warnings']);
     }
+});
+
+
+test('label column cleanup preserves raw images in affected and neighboring columns', function () {
+    $column = static fn (string $content): string => '<!-- wp:column --><div class="wp-block-column">' . $content . '</div><!-- /wp:column -->';
+    $row = static fn (string $content): string => '<!-- wp:columns --><div class="wp-block-columns">' . $content . '</div><!-- /wp:columns -->';
+    $group = static fn (string $content): string => '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . $content . '</div><!-- /wp:group -->';
+    $label = '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">Process</p><!-- /wp:paragraph -->';
+    $image = '<img src="assets/portrait.jpg" alt="Portrait"/>';
+    $neighbor = '<img src="assets/team.jpg" alt="The team"/>';
+    $body = '<!-- wp:paragraph --><p>Our complete description.</p><!-- /wp:paragraph -->';
+    $unit = new \Automattic\SiteBuild\Units\SectionUnit(new \Automattic\SiteBuild\Tests\FakeLlm(), new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+    $input = ['page' => ['slug' => 'home'], 'section' => ['slug' => 'about'], 'section_label' => 'none'];
+    foreach (['', $image] as $labelColumnContent) {
+        $source = $group($row($column($label . $labelColumnContent) . $column($body) . $column($neighbor)));
+        $expected = $group($row(($labelColumnContent === '' ? '' : $column($image)) . $column($body) . $column($neighbor)));
+        $result = $unit->finish($source, $input);
+        assert_eq($expected, $result->markup, 'only the label and a truly empty column may disappear');
+        assert_eq(1, count($result->warnings));
+        assert_contains("block='paragraph.side-label'", $result->warnings[0]);
+        assert_eq($expected, $unit->finish($result->markup, $input)->markup, 'fixed point');
+    }
+});
+
+test('HTML label detection reads only the paragraph wrapper class attribute', function () {
+    foreach (['section-badge', 'side-label'] as $class) {
+        foreach ([
+            '<p data-class="' . $class . '">Ordinary description.</p>',
+            '<p><span class="' . $class . '">New</span> Complete product description.</p>',
+            "<p title='class=\"" . $class . "\"'>Ordinary description.</p>",
+        ] as $html) {
+            $source = '<!-- wp:paragraph -->' . $html . '<!-- /wp:paragraph -->';
+            assert_eq(['markup' => $source, 'warnings' => []], SectionLabel::normalize($source, 'none', 'body'));
+        }
+        foreach (['class="' . $class . '"', 'CLASS = "' . $class . '"', 'class=' . $class] as $attribute) {
+            $source = '<!-- wp:paragraph --><p ' . $attribute . '>Topic</p><!-- /wp:paragraph -->';
+            $result = SectionLabel::normalize($source, 'none', 'body');
+            assert_eq('', $result['markup'], 'actual HTML-only class still identifies the label');
+            assert_eq(1, count($result['warnings']));
+        }
+    }
+});
+
+test('removing label columns preserves wrapper anchors and styling and widens the survivor', function () {
+    $label = '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">Process</p><!-- /wp:paragraph -->';
+    $empty = '<!-- wp:column {"width":"25%"} --><div class="wp-block-column" style="flex-basis:25%">' . $label . '</div><!-- /wp:column -->';
+    $body = '<!-- wp:paragraph --><p><a href="#service-details">Details</a> Important body.</p><!-- /wp:paragraph -->';
+    $neighbor = '<!-- wp:paragraph --><p>Outside the row.</p><!-- /wp:paragraph -->';
+    $row = '<!-- wp:columns {"anchor":"service-details","style":{"color":{"background":"#000000"}}} --><div id="service-details" class="wp-block-columns has-background" style="background-color:#000000">';
+    foreach (['color:#ffffff;flex-basis:75%', 'color:#ffffff;--note:&quot;flex-basis:75%;&quot;;flex-basis:75%!important', 'color:#ffffff'] as $style) {
+        $column = '<!-- wp:column {"width":"75%","anchor":"service-body","style":{"color":{"text":"#ffffff"}}} --><div id="service-body" class="wp-block-column has-text-color" style="' . $style . '">';
+        $source = $row . $empty . $column . $body . '</div><!-- /wp:column --></div><!-- /wp:columns -->' . $neighbor;
+        $result = SectionLabel::normalize($source, 'none', 'page-home--process');
+        assert_true(str_starts_with($result['markup'], $row), 'row anchor and background survive byte-for-byte');
+        assert_contains('id="service-body"', $result['markup']);
+        assert_contains('"width":"100%"', $result['markup']);
+        assert_contains('color:#ffffff', $result['markup']);
+        assert_contains('flex-basis:100%', $result['markup']);
+        $wrapper = \Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment::parse($result['markup'])->querySelector('#service-body');
+        assert_eq('wp-block-column has-text-color', $wrapper->attribute('class'));
+        assert_contains('flex-basis:100%', $wrapper->attribute('style'));
+        assert_contains($body . '</div><!-- /wp:column --></div><!-- /wp:columns -->' . $neighbor, $result['markup'], 'content, closers, and neighbors survive');
+        assert_true(!str_contains($result['markup'], 'width":"25%'));
+        if (str_contains($style, '--note:')) {
+            assert_contains('--note:&quot;flex-basis:75%;&quot;', $result['markup'], 'CSS strings are not edited as declarations');
+        }
+        assert_eq(1, count($result['warnings']));
+        assert_contains("file='theme/parts/page-home--process.html'", $result['warnings'][0]);
+        assert_contains('delivered=removed', $result['warnings'][0]);
+        assert_eq(['markup' => $result['markup'], 'warnings' => []], SectionLabel::normalize($result['markup'], 'none', 'page-home--process'));
+    }
+    foreach (['class=wp-block-column style="color:red;flex-basis:75%"', 'style="color:red;flex-basis:75%" class=wp-block-column'] as $attributes) {
+        $source = $row . $empty . '<!-- wp:column {"width":"75%"} --><div ' . $attributes . '>' . $body . '</div><!-- /wp:column --></div><!-- /wp:columns -->';
+        $result = SectionLabel::normalize($source, 'none', 'body');
+        $wrapper = \Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment::parse($result['markup'])->querySelector('.wp-block-column');
+        assert_true($wrapper !== null, 'the updated style stays separate from the tag name and unquoted class');
+        assert_eq('div', $wrapper->tagName());
+        assert_contains('color:red', $wrapper->attribute('style'));
+        assert_contains('flex-basis:100%', $wrapper->attribute('style'));
+    }
+});
+
+test('label cleanup preserves HTML-only wrapper semantics and raw content around child blocks', function () {
+    $label = '<!-- wp:paragraph {"className":"side-label"} --><p class="side-label">Process</p><!-- /wp:paragraph -->';
+    $column = static fn (string $content): string => '<!-- wp:column --><div class="wp-block-column">' . $content . '</div><!-- /wp:column -->';
+    $body = '<!-- wp:paragraph --><p>Complete body.</p><!-- /wp:paragraph -->';
+    foreach (['id="details"', 'class="wp-block-columns"'] as $attribute) {
+        $row = '<!-- wp:columns --><div ' . $attribute . '>';
+        $raw = $attribute === 'class="wp-block-columns"' ? '<img src="tail.jpg" alt="Keep"/>' : '';
+        $source = $row . $column($label) . $column($body) . $raw . '</div><!-- /wp:columns -->';
+        $result = SectionLabel::normalize($source, 'none', 'body');
+        assert_true(str_starts_with($result['markup'], $row));
+        assert_contains('"width":"100%"', $result['markup']);
+        assert_contains($body . '</div><!-- /wp:column -->' . $raw . '</div><!-- /wp:columns -->', $result['markup']);
+        assert_eq($result['markup'], SectionLabel::normalize($result['markup'], 'none', 'body')['markup']);
+    }
+    // An empty sibling can still be an authored link target; it is not a disposable shell.
+    $anchored = '<!-- wp:column {"anchor":"details"} --><div class="wp-block-column" id="details"></div><!-- /wp:column -->';
+    $source = '<!-- wp:columns --><div class="wp-block-columns">' . $column($label) . $anchored . $column($body) . '</div><!-- /wp:columns -->';
+    $result = SectionLabel::normalize($source, 'none', 'body');
+    assert_eq(str_replace($column($label), '', $source), $result['markup']);
+    assert_eq(1, count($result['warnings']));
 });
