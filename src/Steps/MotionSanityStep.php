@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Motion;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -26,7 +27,7 @@ use Automattic\SiteBuild\SurfaceMarkup;
  * three effects while four take none, or every section could claim the one
  * ambient "signature" slot. The section prompt states the budget; this step
  * is the deterministic backstop. It only ever REMOVES class tokens, never
- * adds them:
+ * adds them. Retained marquees also shed typography that fights the kit:
  *  - unknown motion-flavored classes (invented `reveal-left` variants and the
  *    JS-owned `is-visible` state class) — they have no CSS, or fight the kit;
  *  - classes the committed motion profile disallows (`minimal` keeps hover
@@ -143,7 +144,7 @@ final class MotionSanityStep implements Step
         $project->addWarnings($this->id(), array_map(
             static fn (string $row): string => $isDeviceNote($row)
                 ? "device class stripped: {$row}"
-                : "motion class stripped: {$row}",
+                : (str_contains($row, 'marquee typography:') ? "motion typography repaired: {$row}" : "motion class stripped: {$row}"),
             $report,
         ));
 
@@ -387,7 +388,19 @@ final class MotionSanityStep implements Step
             }
         }
 
-        return ['markup' => $doc->render(), 'notes' => $notes];
+        $markup = $doc->render();
+        // Only a retained marquee owns its type. Custom targets and classes
+        // rejected by the profile or page budget keep their authored styling.
+        if (!$deviceOnly) {
+            $repairs = [];
+            $markup = GeneratedMarkup::ownMarqueeScale($markup, '', $repairs);
+            foreach ($repairs as $repair) {
+                $notes[] = 'marquee typography: block=' . $repair['block']
+                    . '; authored=' . $repair['authored']
+                    . '; delivered=removed; disposition=removed; ' . $repair['note'];
+            }
+        }
+        return ['markup' => $markup, 'notes' => $notes];
     }
 
     /**
@@ -535,14 +548,68 @@ final class MotionSanityStep implements Step
         if ($token === 'stagger-children' && count($doc->children($i)) < 2) {
             return 'stagger-children needs a container with at least two children';
         }
-        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
-        $isAmbient = in_array($token, Motion::AMBIENT_CLASSES, true);
-        $isHero = $token === 'hero-entrance';
+        // The card stack (frm W8d) is scroll-driven layout: one per page, on
+        // a container of two to six children, never an entrance budget.
+        if (in_array($token, Motion::STACK_CLASSES, true)) {
+            $children = count($doc->children($i));
+            if ($children < 2 || $children > 6) {
+                return 'sticky-stack needs a container of two to six cards';
+            }
+            $budget['stack'] ??= 0;
+            if ($budget['stack'] >= 1) {
+                return 'sticky-stack budget: one stack per page';
+            }
+            $budget['stack']++;
+            $keptKitClass = $token;
+            $kitOnBlock++;
+            return null;
+        }
+        // A count-up figure (frm W8b) is an entrance for observation only: a
+        // stat row counts every figure, so it spends no section budget, and
+        // it needs text to count.
+        $isCountUp = $token === 'count-up';
+        if ($isCountUp && !in_array($doc->name($i), ['heading', 'paragraph'], true)) {
+            return 'count-up runs on a heading or paragraph that starts with a figure';
+        }
+        if ($isCountUp) {
+            // A model-authored count on prose or a date counts nonsense from
+            // zero (zova-like11 counted "2024"). The boundary marker skips
+            // both; the same rule applies to what the model marked itself.
+            $figure = trim(html_entity_decode(strip_tags($doc->innerHtml($i)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match(GeneratedMarkup::FIGURE_PATTERN, $figure) !== 1) {
+                return 'count-up counts a figure-only block; prose keeps its text still';
+            }
+            if (preg_match('/^(?:18|19|20|21)\d{2}$/', $figure) === 1) {
+                return 'count-up never counts a year';
+            }
+            $className = (string) (($doc->attrs($i) ?? [])['className'] ?? '');
+            $classes = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (in_array('step-numeral', $classes, true)
+                || in_array('step-numeral', self::classTokensInOwnHtml($doc, $i), true)) {
+                return 'a step numeral is a label, not a count';
+            }
+        }
+        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true)
+            && !in_array($token, Motion::UNBUDGETED_ENTRANCES, true);
+        // The marquee (frm W8c) is a band, not image motion: it keeps its own
+        // one-per-page slot so a hero ken-burns does not silence the brief's
+        // marquee, and it runs on a paragraph only.
+        $isMarquee = $token === 'marquee';
+        $isAmbient = !$isMarquee && in_array($token, Motion::AMBIENT_CLASSES, true);
+        $isHero = in_array($token, Motion::HERO_CLASSES, true);
+        $budget['marquee'] ??= 0;
+        if ($isMarquee && $doc->name($i) !== 'paragraph') {
+            return 'marquee runs on a paragraph only';
+        }
+        // hero-entrance and word-reveal budget separately: the copy group
+        // may fade in while the headline's words arrive one at a time.
+        $heroKey = $token === 'hero-entrance' ? 'hero' : 'word';
+        $budget[$heroKey] ??= 0;
 
         // Check every budget before consuming any of them: a class rejected
         // by a page-level limit must not steal this section's entrance slot.
         if ($isHero && !$heroAllowed) {
-            return 'hero-entrance is allowed only in the first section';
+            return "{$token} is allowed only in the first section";
         }
         if ($isEntrance && $sectionEntrances >= Motion::MAX_ENTRANCES_PER_SECTION) {
             return 'section entrance budget: at most two entrances per section';
@@ -550,8 +617,11 @@ final class MotionSanityStep implements Step
         if ($isAmbient && $budget['ambient'] >= 1) {
             return 'ambient budget: one signature effect per page';
         }
-        if ($isHero && $budget['hero'] >= 1) {
-            return 'hero-entrance budget: once per page';
+        if ($isMarquee && $budget['marquee'] >= 1) {
+            return 'marquee budget: one loop per page';
+        }
+        if ($isHero && $budget[$heroKey] >= 1) {
+            return "{$token} budget: once per page";
         }
 
         if ($isEntrance) {
@@ -560,8 +630,11 @@ final class MotionSanityStep implements Step
         if ($isAmbient) {
             $budget['ambient']++;
         }
+        if ($isMarquee) {
+            $budget['marquee']++;
+        }
         if ($isHero) {
-            $budget['hero']++;
+            $budget[$heroKey]++;
         }
 
         $keptKitClass = $token;

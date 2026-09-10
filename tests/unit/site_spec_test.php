@@ -968,6 +968,11 @@ test('copy prompts never mint or invent contact details', function () {
             $text,
             $file,
         );
+        assert_contains(
+            'An invented factual claim includes a count of stock',
+            $text,
+            $file,
+        );
         assert_true(
             !preg_match('/mint(?:ed| a short local part)/i', $text),
             "{$file} must not tell the model to mint a contact address",

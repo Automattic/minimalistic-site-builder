@@ -35,8 +35,8 @@ function fakeElement(classes, top, parent, left) {
         classList: fakeClassList(classes),
         computedStyle: { overflowX: 'visible', overflowY: 'visible' },
         matches(selector) {
-            if (selector === '.hero-entrance') {
-                return this.classList.contains('hero-entrance');
+            if (selector === '.hero-entrance, .word-reveal') {
+                return this.classList.contains('hero-entrance') || this.classList.contains('word-reveal');
             }
             return this.classList.contains('reveal')
                 || this.classList.contains('reveal-up')
@@ -150,7 +150,10 @@ function environment(options) {
         documentElement: root,
         body,
         readyState: 'complete',
-        querySelectorAll() { return options.targets; },
+        querySelectorAll(selector) {
+            if (selector === '.sticky-stack' || selector.startsWith('.word-reveal:') || selector.startsWith('.marquee:')) { return []; }
+            return options.targets;
+        },
         addEventListener(type, callback) {
             const callbacks = documentListeners.get(type) || [];
             callbacks.push(callback);

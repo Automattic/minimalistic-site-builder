@@ -131,7 +131,7 @@ test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults'
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => null]),                  // slug derived from title
         plan_section(['slug' => 'Our Story!', 'title' => 'About', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-        plan_section(['title' => 'Another Hero', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']), // duplicate slug -> hero-2
+        plan_section(['title' => 'Another Hero', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']), // duplicate slug -> hero-2
         'not-an-array',                                  // skipped
     ]);
 
@@ -181,7 +181,7 @@ test('PagePlanStep::normalize stamps positional roles and ignores model annotati
     $sections = PagePlanStep::normalize([
         plan_section(['role' => 'closing']),
         plan_section(['slug' => 'middle', 'layout_archetype' => 'asymmetric-split']),
-        plan_section(['slug' => 'end', 'role' => 'sidebar', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'end', 'role' => 'sidebar', 'layout_archetype' => 'bento-grid']),
     ]);
 
     assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
@@ -204,7 +204,7 @@ test('PagePlanStep locks the homepage opening to the code-owned recipe projectio
     $warnings = [];
     $repairs = [];
     $sections = PagePlanStep::normalize([
-        plan_section(['layout_archetype' => 'centered-stack', 'background' => 'image']),
+        plan_section(['layout_archetype' => 'bento-grid', 'background' => 'image']),
         plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
     ], true, $projection, [], $warnings, 'home', $repairs);
 
@@ -249,7 +249,7 @@ test('PagePlanStep recovery preserves a repeated layout beside the locked hero',
     $raw = [
         plan_section([
             'slug' => 'opening',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'base',
             'handoff' => 'Stale hero seam.',
         ]),
@@ -481,7 +481,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'slug'             => 'footerless-closing',
         'title'            => 'Footerless Closing',
         'type'             => 'cta',
-        'layout_archetype' => 'centered-stack',
+        'layout_archetype' => 'bento-grid',
         'background'       => 'contrast',
     ]);
     $copyright = plan_section([
@@ -502,7 +502,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'slug' => 'site-details',
         'title' => 'Archaeological site information',
         'type' => 'visitor-guide',
-        'layout_archetype' => 'list-with-thumbnails',
+        'layout_archetype' => 'zigzag-steps',
         'background' => 'base',
     ]);
     $siteInformation = plan_section([
@@ -525,7 +525,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'slug' => 'visit',
         'title' => 'Visítanos',
         'type' => 'utility',
-        'layout_archetype' => 'centered-stack',
+        'layout_archetype' => 'bento-grid',
         'background' => 'base',
     ]);
     // Siblings sit on base so the page stays inside the band cap: this test is
@@ -589,7 +589,7 @@ test('PagePlanStep::normalize keeps the art-direction fields on a valid plan', f
     $sections = PagePlanStep::normalize([
         plan_section(),
         plan_section(['slug' => 'work', 'title' => 'Work', 'role' => 'content', 'type' => 'case-study-mosaic', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the contrast CTA below.']),
-        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the base offset grid above and the footer below.']),
+        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast', 'handoff' => 'Between the base offset grid above and the footer below.']),
     ]);
 
     assert_eq(3, count($sections));
@@ -631,15 +631,15 @@ test('PagePlanStep::normalize requires a known vertical density', function () {
 
 test('PagePlanStep::normalize preserves spacious density for content-dense sections', function () {
     foreach ([
-        ['type' => 'gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'gallery', 'layout_archetype' => 'bento-grid'],
         ['type' => 'features', 'layout_archetype' => 'offset-grid'],
         ['type' => 'services', 'layout_archetype' => 'equal-card-grid'],
-        ['type' => 'faq', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'faq', 'layout_archetype' => 'bento-grid'],
         // "type" is free-form model output: capitalization and compound
         // spellings still name the dense role.
-        ['type' => 'Gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'Gallery', 'layout_archetype' => 'bento-grid'],
         ['type' => 'image-gallery', 'layout_archetype' => 'offset-grid'],
-        ['type' => 'Pricing Table', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'Pricing Table', 'layout_archetype' => 'bento-grid'],
     ] as $dense) {
         $message = '';
         try {
@@ -666,7 +666,7 @@ test('PagePlanStep::normalize preserves spacious density for content-dense secti
 test('PagePlanStep::normalize allows a repeated archetype when not adjacent', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'equal-card-grid', 'background' => 'base']),
-        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'tinted']),
         plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
     ]);
     assert_eq(3, count($sections));
@@ -676,8 +676,8 @@ test('PagePlanStep::normalize reports every violation in one rejection', functio
     try {
         PagePlanStep::normalize([
             plan_section(['background' => 'plaid']),
-            plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'handoff' => '']),
-            plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'centered-stack']),
+            plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'handoff' => '']),
+            plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'bento-grid']),
         ]);
         assert_true(false, 'expected the plan to be rejected');
     } catch (RuntimeException $e) {
@@ -704,7 +704,7 @@ test('PagePlanStep::normalize rejects an interior page opening with a full-bleed
     try {
         PagePlanStep::normalize([
             plan_section(), // full-bleed-cover first
-            plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+            plan_section(['slug' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
         ], front: false);
         assert_true(false, 'expected the interior plan to be rejected');
     } catch (RuntimeException $e) {
@@ -718,11 +718,11 @@ test('PagePlanStep::normalize allows a full-bleed cover opening on the front pag
     // Front page: cover opening is the point of a homepage hero.
     assert_eq(2, count(PagePlanStep::normalize([
         plan_section(),
-        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ], front: true)));
     // Interior page: a cover is only banned as the OPENING section.
     assert_eq(2, count(PagePlanStep::normalize([
-        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'bento-grid', 'background' => 'tinted']),
         plan_section(['slug' => 'gallery-band', 'role' => 'closing']),
     ], front: false)));
 });
@@ -735,7 +735,7 @@ test('PagePlanStep::normalize forces the image background onto a non-opening ful
     $repairs = [];
     $sections = PagePlanStep::normalize([
         plan_section(),
-        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'artist-lineup', 'role' => 'closing', 'layout_archetype' => 'full-bleed-cover', 'background' => 'tinted']),
     ], true, null, [], $warnings, 'home', $repairs);
 
@@ -764,7 +764,7 @@ test('PagePlanStep::normalize forces the image background on a deeper interior c
     $warnings = [];
     $repairs = [];
     $sections = PagePlanStep::normalize([
-        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'bento-grid', 'background' => 'tinted']),
         plan_section(['slug' => 'gallery-band', 'role' => 'closing', 'background' => 'contrast']),
     ], false, null, [], $warnings, 'about', $repairs);
 
@@ -786,7 +786,7 @@ test('PagePlanStep::normalize leaves the projection-owned front opening cover on
     $repairs = [];
     $sections = PagePlanStep::normalize([
         plan_section(['background' => 'contrast']),
-        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
     ], true, $projection, [], $warnings, 'home', $repairs);
 
     assert_eq('contrast', $sections[0]['background'], 'the hero recipe projection owns the opening pairing');
@@ -796,7 +796,7 @@ test('PagePlanStep::normalize leaves the projection-owned front opening cover on
 test('PagePlanStep::repairLayoutCompatibility demotes an interior page\'s leading full-bleed cover', function () {
     $sections = PagePlanStep::repairLayoutCompatibility([
         plan_section(),
-        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ], front: false);
 
     assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'leading cover reassigned');
@@ -813,7 +813,7 @@ test('PagePlanStep::repairLayoutCompatibility leaves a valid plan unchanged', fu
     $raw = [
         plan_section(),
         plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
-        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'bento-grid']),
     ];
     assert_eq(
         array_column($raw, 'layout_archetype'),
@@ -834,7 +834,7 @@ test('PagePlanStep::repairLayoutCompatibility leaves invalid archetypes for norm
 test('PagePlanStep::repairLayoutCompatibility leaves valid densities and invalid enums alone', function () {
     $sections = PagePlanStep::repairLayoutCompatibility([
         plan_section(['slug' => 'a', 'vertical_density' => 'enormous']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'bento-grid', 'vertical_density' => 'spacious']),
         plan_section(['slug' => 'c', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'compact']),
     ]);
     assert_eq(['enormous', 'spacious', 'compact'], array_column($sections, 'vertical_density'));
@@ -939,13 +939,13 @@ test('page-plan writes pages.json with sections per page', function () {
             'intent' => 'Help visitors explore the current menu.',
             'destination' => '/menu/',
         ]]),
-        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the image hero above and the footer below.']),
+        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast', 'handoff' => 'Between the image hero above and the footer below.']),
     ]]);
     $llm->queueJson(['sections' => [
         plan_section([
             'slug' => 'menu-hero',
             'title' => 'Menu Hero',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'tinted',
             'handoff' => 'Between the site header above and the bread list below.',
             'primary_action' => [
@@ -954,10 +954,10 @@ test('page-plan writes pages.json with sections per page', function () {
                 'destination' => '/',
             ],
         ]),
-        plan_section(['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the tinted menu hero above and the footer below.']),
+        plan_section(['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'handoff' => 'Between the tinted menu hero above and the footer below.']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'bread-list', 'title' => 'Bread List', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the site header above and the footer below.']),
+        plan_section(['slug' => 'bread-list', 'title' => 'Bread List', 'type' => 'bread-catalog', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'handoff' => 'Between the site header above and the footer below.']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -1006,11 +1006,11 @@ test('page-plan preserves a richly banded page without a stylistic repair', func
     ]]));
     $archetypes = [
         'full-bleed-cover',
-        'centered-stack',
+        'bento-grid',
         'asymmetric-split',
         'equal-card-grid',
-        'list-with-thumbnails',
-        'centered-stack',
+        'zigzag-steps',
+        'bento-grid',
     ];
     $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image', 'contrast'];
     $sections = [];
@@ -1051,7 +1051,7 @@ test('page-plan removes a generated footer before stamping roles without forcing
     $llm->queueJson(['sections' => [
         plan_section([
             'slug'             => 'welcome',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background'       => 'base',
         ]),
         plan_section([
@@ -1137,7 +1137,7 @@ test('page-plan stamps roles after a repair even when model role annotations sta
     // Its role annotations are deliberately wrong and must not create another
     // validation failure.
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'welcome', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'welcome', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'story', 'role' => 'hero', 'layout_archetype' => 'unsupported-layout', 'background' => 'contrast']),
         plan_section(['slug' => 'visit', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
@@ -1146,7 +1146,7 @@ test('page-plan stamps roles after a repair even when model role annotations sta
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'welcome', 'role' => 'closing']),
         plan_section(['slug' => 'story', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
-        plan_section(['slug' => 'visit', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'role' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
 
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
@@ -1178,13 +1178,13 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     // …menu plan contains an unsupported layout…
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'a', 'layout_archetype' => 'unsupported-layout', 'background' => 'base']),
-        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     // …and the repair call returns a fixed menu plan (compact opening — menu
     // is an interior page, so a full-bleed cover would be re-rejected).
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'a', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
-        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -1225,7 +1225,7 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     // the three pages need a repair.
     $llm->queueJson(['sections' => [plan_section()]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'm1', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'm1', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'm2', 'layout_archetype' => 'unsupported-layout', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
@@ -1234,19 +1234,19 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     ]]);
     // Both repairs come back fixed, in page order.
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'm1', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'm1', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'm2', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'a1', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
-        plan_section(['slug' => 'a2', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'contrast']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'zigzag-steps', 'background' => 'contrast']),
     ]]);
 
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $pages = $project->readJson('pages.json')['pages'];
     assert_eq('asymmetric-split', $pages[1]['sections'][1]['layout_archetype']);
-    assert_eq('list-with-thumbnails', $pages[2]['sections'][1]['layout_archetype']);
+    assert_eq('zigzag-steps', $pages[2]['sections'][1]['layout_archetype']);
 
     // The whole point: two failing pages cost ONE extra round-trip, not two.
     assert_eq(2, $llm->completeJsonBatchCalls, 'the initial fan-out plus ONE batched repair round');
@@ -1284,13 +1284,13 @@ test('page-plan sends a dead cross-page CTA fragment through semantic repair', f
             'intent' => 'Guide the visitor to signature dishes.',
             'destination' => '/menu/#signature',
         ]]),
-        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'story', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'visit', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
     ]];
     $menu = ['sections' => [
         plan_section([
             'slug' => 'menu-hero',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'base',
         ]),
         plan_section([
@@ -1332,7 +1332,7 @@ test('page-plan falls back to a mechanical fix when the repair still contains an
     $llm = new FakeLlm();
     // The closing uses an unsupported layout…
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'closing-cta', 'role' => 'closing', 'layout_archetype' => 'unsupported-layout', 'background' => 'contrast']),
     ]]);
     // …and the repair repeats the invalid enum.
@@ -1449,7 +1449,7 @@ test('page-plan keeps every section when the repair round repeats a dead CTA anc
         plan_section([
             'slug' => 'overview',
             'title' => 'Overview',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'base',
             'type' => 'content',
         ]),
@@ -1534,7 +1534,7 @@ test('page-plan generated JSON fallback preserves valid page siblings', function
         'the valid sibling is preserved without manufactured sections'
     );
     assert_eq(['content'], array_column($pages[1]['sections'], 'slug'), 'failed sibling gets one fallback');
-    assert_eq('centered-stack', $pages[1]['sections'][0]['layout_archetype'], 'interior fallback stays compact');
+    assert_eq('asymmetric-split', $pages[1]['sections'][0]['layout_archetype'], 'the interior fallback opens on the workhorse split');
     assert_eq(null, $pages[1]['sections'][0]['primary_action'], 'every fallback action is explicit null');
     $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
     assert_contains("pages[slug='menu'].sections", $joined);
@@ -1612,7 +1612,7 @@ test('PagePlanStep::recoverSections preserves the page when generated repair rep
         plan_section([
             'slug' => 'overview',
             'title' => 'Overview',
-            'layout_archetype' => 'centered-stack',
+            'layout_archetype' => 'bento-grid',
             'background' => 'base',
             'type' => 'content',
         ]),
@@ -1711,7 +1711,7 @@ test('PagePlanStep::fallbackSections is a minimal plan normalize accepts', funct
 
     $interior = PagePlanStep::fallbackSections(false);
     assert_eq(1, count($interior));
-    assert_eq('centered-stack', $interior[0]['layout_archetype']);
+    assert_eq('asymmetric-split', $interior[0]['layout_archetype']);
     PagePlanStep::normalize($interior, false);
 });
 
@@ -1765,7 +1765,7 @@ test('PagePlanStep::repairFields hands repairLayoutCompatibility no new work', f
     foreach (['a', 'b', 'c', 'd', 'e'] as $i => $slug) {
         $sections[] = plan_section([
             'slug'             => $slug,
-            'layout_archetype' => $i % 2 === 0 ? 'nonsense' : 'centered-stack',
+            'layout_archetype' => $i % 2 === 0 ? 'nonsense' : 'bento-grid',
         ]);
     }
     $out = PagePlanStep::repairFields($sections, $warnings);
@@ -1816,7 +1816,7 @@ test('PagePlanStep rewrites an invented external CTA URL to an anchor for the re
         'slug' => 'home', 'path' => '/', 'front' => true,
         'sections' => [
             array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $kept]),
-            array_merge(plan_section(['slug' => 'features', 'title' => 'Features']), ['role' => 'content', 'layout_archetype' => 'centered-stack']),
+            array_merge(plan_section(['slug' => 'features', 'title' => 'Features']), ['role' => 'content', 'layout_archetype' => 'bento-grid']),
             array_merge(plan_section(['slug' => 'signup', 'title' => 'Signup']), ['role' => 'closing', 'layout_archetype' => 'asymmetric-split']),
         ],
     ]];
@@ -1837,7 +1837,7 @@ test('normalize rejects every CTA fragment form that names no planned section (B
             'intent' => 'Guide the visitor to the signature dishes.',
             'destination' => '#menu-signature',
         ]]),
-        plan_section(['slug' => 'overview', 'title' => 'Overview', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'type' => 'content']),
+        plan_section(['slug' => 'overview', 'title' => 'Overview', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'type' => 'content']),
         plan_section(['slug' => 'closing', 'title' => 'Closing', 'layout_archetype' => 'offset-grid', 'background' => 'contrast', 'type' => 'closing']),
     ];
     $error = assert_throws(static fn () => PagePlanStep::normalize($sections, pageSlug: 'home'));
@@ -1899,15 +1899,15 @@ test('normalize rejects every CTA fragment form that names no planned section (B
 test('PagePlanStep remaps ineligible offset-grid to a level row, never a cover', function () {
     $warnings = [];
     $sections = PagePlanStep::normalize([
-        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'story', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
-        plan_section(['slug' => 'visit', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'zigzag-steps', 'background' => 'base']),
     ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
 
     assert_eq('equal-card-grid', $sections[1]['layout_archetype']);
     assert_true($sections[1]['layout_archetype'] !== 'full-bleed-cover');
-    assert_eq('centered-stack', $sections[0]['layout_archetype']);
-    assert_eq('list-with-thumbnails', $sections[2]['layout_archetype']);
+    assert_eq('bento-grid', $sections[0]['layout_archetype']);
+    assert_eq('zigzag-steps', $sections[2]['layout_archetype']);
 });
 
 test('PagePlanStep prefers a distinct neighboring layout when repairing ineligible offset-grid', function () {
@@ -1927,12 +1927,12 @@ test('PagePlanStep remaps offset-grid away from a level-rhythm build', function 
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
         plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
-        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
     ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
 
     assert_eq('full-bleed-cover', $sections[0]['layout_archetype']);
     assert_true($sections[1]['layout_archetype'] !== 'offset-grid', 'offset-grid is not delivered');
-    assert_eq('centered-stack', $sections[2]['layout_archetype']);
+    assert_eq('bento-grid', $sections[2]['layout_archetype']);
     assert_true($sections[0]['layout_archetype'] !== $sections[1]['layout_archetype']);
     assert_true($sections[1]['layout_archetype'] !== $sections[2]['layout_archetype']);
     assert_true($warnings !== []);
@@ -1946,12 +1946,12 @@ test('PagePlanStep does not remap an interior offset-grid into a full-bleed cove
     $warnings = [];
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => 'intro', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
-        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ], false, null, [], $warnings, 'about', allowOffsetGrid: false);
 
     assert_true($sections[0]['layout_archetype'] !== 'offset-grid');
     assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'interior opening stays compact');
-    assert_eq('centered-stack', $sections[1]['layout_archetype']);
+    assert_eq('bento-grid', $sections[1]['layout_archetype']);
 });
 
 test('PagePlanStep keeps offset-grid under a broken-grid rhythm', function () {
@@ -1959,7 +1959,7 @@ test('PagePlanStep keeps offset-grid under a broken-grid rhythm', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
         plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
-        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
     ], true, null, [], $warnings, 'home', allowOffsetGrid: true);
 
     assert_eq('offset-grid', $sections[1]['layout_archetype']);
@@ -2058,12 +2058,12 @@ test('an oversized contact plan is trimmed to 4 sections, keeping form and close
         'purpose' => 'Let visitors reach the team.',
         'front' => false,
         'sections' => [
-            plan_section(['slug' => 'hero', 'title' => 'Hello', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'type' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
             plan_section(['slug' => 'story', 'title' => 'Our story', 'type' => 'story', 'layout_archetype' => 'asymmetric-split', 'role' => 'content']),
             plan_section(['slug' => 'programs', 'title' => 'Programs', 'type' => 'services', 'layout_archetype' => 'equal-card-grid', 'role' => 'content']),
-            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'content_notes' => 'Reserve a JP_FORM contact placeholder', 'layout_archetype' => 'centered-stack', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'content_notes' => 'Reserve a JP_FORM contact placeholder', 'layout_archetype' => 'bento-grid', 'role' => 'content']),
             plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'role' => 'content']),
-            plan_section(['slug' => 'close', 'title' => 'See you on the water', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'role' => 'closing']),
+            plan_section(['slug' => 'close', 'title' => 'See you on the water', 'type' => 'cta', 'layout_archetype' => 'bento-grid', 'role' => 'closing']),
         ],
     ];
     $warnings = [];
@@ -2087,7 +2087,7 @@ test('an oversized contact plan is trimmed to 4 sections, keeping form and close
         assert_true(!str_contains((string) $handoff, 'Gallery'), 'dropped neighbor must leave the seam');
     }
     $archetypes = array_column($capped['sections'], 'layout_archetype');
-    assert_eq(['centered-stack', 'asymmetric-split', 'centered-stack', 'centered-stack'], $archetypes);
+    assert_eq(['bento-grid', 'asymmetric-split', 'bento-grid', 'bento-grid'], $archetypes);
 });
 
 test('capContactPage does not trim a front page whose purpose mentions contact', function () {
@@ -2096,7 +2096,7 @@ test('capContactPage does not trim a front page whose purpose mentions contact',
         $sections[] = plan_section([
             'slug' => $slug,
             'title' => ucfirst($slug),
-            'layout_archetype' => $i % 2 === 0 ? 'centered-stack' : 'asymmetric-split',
+            'layout_archetype' => $i % 2 === 0 ? 'bento-grid' : 'asymmetric-split',
             'role' => $i === 0 ? 'hero' : ($i === 7 ? 'closing' : 'content'),
         ]);
     }
@@ -2120,9 +2120,9 @@ test('a contact page already at or under 4 sections is left alone', function () 
         'purpose' => 'Reach us',
         'front' => false,
         'sections' => [
-            plan_section(['slug' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+            plan_section(['slug' => 'hero', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
             plan_section(['slug' => 'form', 'type' => 'contact', 'layout_archetype' => 'asymmetric-split', 'role' => 'content']),
-            plan_section(['slug' => 'close', 'layout_archetype' => 'centered-stack', 'role' => 'closing']),
+            plan_section(['slug' => 'close', 'layout_archetype' => 'bento-grid', 'role' => 'closing']),
         ],
     ];
     $warnings = [];
@@ -2141,12 +2141,12 @@ test('the contact trim never introduces a full-bleed cover band', function () {
         'purpose' => 'Let visitors reach the team.',
         'front' => false,
         'sections' => [
-            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'hero']),
             plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'programs', 'title' => 'Programs', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
-            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
-            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'closing']),
+            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'closing']),
         ],
     ];
     $warnings = [];
@@ -2161,7 +2161,7 @@ test('the contact trim never introduces a full-bleed cover band', function () {
         !in_array('offset-grid', $archetypes, true),
         'the trim runs without the rhythm gate, so it must not assign offset-grid either',
     );
-    assert_eq(['centered-stack', 'asymmetric-split', 'centered-stack', 'centered-stack'], $archetypes);
+    assert_eq(['bento-grid', 'asymmetric-split', 'bento-grid', 'bento-grid'], $archetypes);
 
     // The repair's own row said delivered="full-bleed-cover". That band never
     // ships, so warnings.json must not claim it did.
@@ -2180,11 +2180,11 @@ test('an authored full-bleed cover on a contact page survives the trim', functio
         'purpose' => 'Let visitors reach the team.',
         'front' => false,
         'sections' => [
-            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'hero']),
             plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'role' => 'content']),
-            plan_section(['slug' => 'hours', 'title' => 'Hours', 'purpose' => 'Harbor office hours and address', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'hours', 'title' => 'Hours', 'purpose' => 'Harbor office hours and address', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'content']),
             // The closing band is always kept, so the authored cover reaches
             // the assertion instead of being scored out of the page.
             plan_section(['slug' => 'view', 'title' => 'The view', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'role' => 'closing']),
@@ -2209,12 +2209,12 @@ test('rewritten seam prose names each neighbor assignment, not just its title', 
         'purpose' => 'Let visitors reach the team.',
         'front' => false,
         'sections' => [
-            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'hero']),
             plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'role' => 'content']),
             plan_section(['slug' => 'programs', 'title' => 'Programs', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
-            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
-            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'role' => 'closing']),
+            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'zigzag-steps', 'background' => 'base', 'role' => 'closing']),
         ],
     ];
     $warnings = [];
@@ -2237,11 +2237,11 @@ test('rewritten seam prose names each neighbor assignment, not just its title', 
     }
 });
 
-test('page-plan mechanical repairs never guess centered-stack for content of unknown complexity (BIGR-988)', function () {
+test('page-plan mechanical repairs keep the authored copy and reach a fixed point', function () {
     $cases = [
         'field' => ['asymmetric-split', 'unknown', 'full-bleed-cover'],
         'adjacency' => ['asymmetric-split', 'asymmetric-split', 'full-bleed-cover'],
-        'dominance' => ['asymmetric-split', 'equal-card-grid', 'asymmetric-split', 'list-with-thumbnails', 'asymmetric-split', 'equal-card-grid'],
+        'dominance' => ['asymmetric-split', 'equal-card-grid', 'asymmetric-split', 'zigzag-steps', 'asymmetric-split', 'equal-card-grid'],
     ];
     foreach ($cases as $case => $archetypes) {
         $sections = [];
@@ -2259,7 +2259,9 @@ test('page-plan mechanical repairs never guess centered-stack for content of unk
         $out = $case === 'field'
             ? PagePlanStep::repairFields($sections, $warnings, 'home', false)
             : PagePlanStep::repairLayoutCompatibility($sections, warnings: $warnings, pageSlug: 'home', allowOffsetGrid: false);
-        assert_true(!in_array('centered-stack', array_column($out, 'layout_archetype'), true), $case);
+        foreach (array_column($out, 'layout_archetype') as $archetype) {
+            assert_true(in_array($archetype, PagePlanStep::ARCHETYPES, true), $case);
+        }
         if ($case !== 'field') {
             assert_eq($sections, $out, 'valid repetition is not repaired to satisfy quotas');
             assert_eq([], $warnings);
@@ -2287,11 +2289,11 @@ test('page-plan mechanical repairs never guess centered-stack for content of unk
     }
 });
 
-test('page-plan preserves an explicitly planned simple centered invitation (BIGR-988)', function () {
+test('page-plan mechanical repairs leave a legal plan untouched', function () {
     $sections = [
         plan_section(),
         plan_section(['slug' => 'story', 'type' => 'story', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-        plan_section(['slug' => 'invitation', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'content_notes' => 'One heading and one short invitation to visit.']),
+        plan_section(['slug' => 'invitation', 'type' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'content_notes' => 'One heading and one short invitation to visit.']),
     ];
     $warnings = [];
     $out = PagePlanStep::repairFields($sections, $warnings);
@@ -2313,16 +2315,16 @@ test('PagePlanStep::normalize lets a type that names an archetype set the layout
     $warnings = [];
     $out = PagePlanStep::normalize([
         plan_section(),
-        plan_section(['slug' => 'clients', 'title' => 'Trusted by', 'type' => 'logo-strip', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
-        plan_section(['slug' => 'faq', 'title' => 'FAQ', 'type' => 'faq', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'text_placement' => 'centered']),
+        plan_section(['slug' => 'clients', 'title' => 'Trusted by', 'type' => 'logo-strip', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'text_placement' => 'centered']),
+        plan_section(['slug' => 'faq', 'title' => 'FAQ', 'type' => 'faq', 'layout_archetype' => 'bento-grid', 'background' => 'base', 'text_placement' => 'centered']),
     ], true, null, [], $warnings, 'home', $repairs);
     assert_eq('logo-strip', $out[1]['layout_archetype'], 'the type names the archetype');
-    assert_eq('centered-stack', $out[2]['layout_archetype'], 'a plain type is not an archetype name');
+    assert_eq('bento-grid', $out[2]['layout_archetype'], 'a plain type is not an archetype name');
     assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
-    assert_contains("path=\"pages[slug='home'].sections[1].layout_archetype\"; authored=\"centered-stack\"; delivered=\"logo-strip\"", implode("\n", $repairs));
+    assert_contains("path=\"pages[slug='home'].sections[1].layout_archetype\"; authored=\"bento-grid\"; delivered=\"logo-strip\"", implode("\n", $repairs));
 
     $repairs = [];
-    $out = PagePlanStep::normalize([plan_section(['type' => 'centered-stack'])], true, null, [], $warnings, 'home', $repairs);
+    $out = PagePlanStep::normalize([plan_section(['type' => 'bento-grid'])], true, null, [], $warnings, 'home', $repairs);
     assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
     assert_true(!str_contains(implode("\n", $repairs), 'names an archetype'));
 });
@@ -2358,7 +2360,7 @@ test('a section the stated highlight applies to takes a card archetype when the 
     assert_eq([], $repairs);
 });
 
-test('a repeated list planned as an asymmetric split takes the card grid or the thumbnail list (frm PR-3aq)', function () {
+test('a repeated list planned as an asymmetric split takes the card grid (frm PR-3aq)', function () {
     $page = static fn (array $rows): array => ['slug' => 'home', 'front' => true, 'sections' => array_map(
         static fn (array $r): array => plan_section(['slug' => $r[0], 'title' => ucfirst($r[0]), 'type' => $r[1], 'layout_archetype' => $r[2], 'background' => 'base', 'handoff' => 'A split.']),
         $rows,
@@ -2389,7 +2391,7 @@ test('a repeated list planned as an asymmetric split takes the card grid or the 
 
     $repairs = [];
     $out = PagePlanStep::withListsOffTheSplit([$page([
-        ['hero', 'hero', 'centered-stack'],
+        ['hero', 'hero', 'bento-grid'],
         ['services', 'services', 'asymmetric-split'],
         ['testimonials', 'testimonials', 'equal-card-grid'],
         ['pricing', 'pricing', 'pricing-tiers'],
@@ -2408,7 +2410,7 @@ test('a repeated list planned as an asymmetric split takes the card grid or the 
     assert_eq(1, count($repairs));
 
     $repairs = [];
-    $plain = [$page([['hero', 'hero', 'centered-stack'], ['about', 'about', 'asymmetric-split'], ['work', 'projects', 'project-grid-2x2']])];
+    $plain = [$page([['hero', 'hero', 'bento-grid'], ['about', 'about', 'asymmetric-split'], ['work', 'projects', 'project-grid-2x2']])];
     assert_eq($plain, PagePlanStep::withListsOffTheSplit($plain, $repairs));
     assert_eq([], $repairs);
 });

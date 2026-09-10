@@ -227,12 +227,12 @@ test('section prompt bans decorative labels numbers and rules without banning co
     assert_contains('prices, dates, addresses', $section);
     assert_true(!str_contains($section, 'Optional orientation labels'));
     $input = section_unit_input();
-    $input['section']['layout_archetype'] = 'list-with-thumbnails';
+    $input['section']['layout_archetype'] = 'zigzag-steps';
     $request = (new \Automattic\SiteBuild\Units\SectionUnit(
         new \Automattic\SiteBuild\Tests\FakeLlm(),
         new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')),
     ))->request($input);
-    assert_contains('Never put an eyebrow or kicker line above the row heading', section_unit_request_text($request));
+    assert_contains('Eyebrows are banned', section_unit_request_text($request));
 });
 
 test('design-direction offers no numeral device and no numbered-index idiom', function () {
@@ -265,14 +265,15 @@ test('planning and CSS prompts retain anti-tell guardrails', function () {
     assert_contains('do not hide or delete real content', $css);
 });
 
-test('section recipes do not reopen decorative label and divider exceptions', function () {
-    $stack = (string) file_get_contents(repo_path('prompts/section-compositions/centered-stack.md'));
-    assert_true(!str_contains($stack, 'A divider or motif is'));
-    assert_contains('Do not add a divider or motif', $stack);
-    $rows = (string) file_get_contents(repo_path('prompts/section-compositions/list-with-thumbnails.md'));
-    assert_contains('Never put a label above a row heading', $rows);
-    assert_true(!str_contains($rows, 'label is optional'));
-    assert_contains('because the index reading is what the rule serves', $rows);
+test('retired section recipes stay absent and labels remain explicitly bounded', function () {
+    foreach (['centered-stack', 'statement-lines', 'list-with-thumbnails'] as $retired) {
+        assert_true(!file_exists(repo_path('prompts/section-compositions/' . $retired . '.md')));
+        assert_true(!in_array($retired, Automattic\SiteBuild\SectionComposition::ARCHETYPES, true));
+    }
+    $section = (string) file_get_contents(repo_path('prompts/section.md'));
+    assert_contains('The only exceptions are the committed `section-badge`', $section);
+    assert_contains('the committed `side-label`', $section);
+    assert_contains('this section is not a page opening', $section);
 });
 
 test('shared chrome does not reopen decorative border exceptions', function () {
