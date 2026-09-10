@@ -1841,3 +1841,29 @@ test('generate-images carries the image kind into the prompt, manifest, and requ
     assert_contains('ui-mockup', grade_image_log($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('generate-images retries a rotated screen or object and records the residual defect', function () {
+    foreach (['ui-mockup', '3d-object'] as $kind) {
+        [$project, $tmp] = generate_fixture();
+        $project->writeJson('designDirection.json', ['image_kind' => $kind]);
+        $images = new FakeImageClient('JPEGDATA');
+        $llm = new FakeLlm();
+        $answer = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "upside down"}';
+        $llm->queueText($answer);
+        $llm->queueText($answer);
+        try {
+            (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+            assert_eq(2, count($llm->imageCalls));
+            assert_eq(2, count($images->batches));
+            assert_contains('camera is upright and level', $images->batches[1][0]['prompt']);
+            $rows = $project->readJson('warnings.json')['generate-images'];
+            assert_eq(1, count($rows));
+            assert_contains('camera not upright', $rows[0]);
+            assert_contains('disposition: delivered, still failing after one regeneration', $rows[0]);
+            assert_true($project->exists('theme/assets/hero.jpg'));
+        } finally {
+            remove_tree($tmp);
+        }
+    }
+});

@@ -169,11 +169,6 @@ final class ImageKind
         return self::explicit($raw) === 'ui-mockup';
     }
 
-    public static function keepsTilt(?string $raw): bool
-    {
-        return in_array(self::explicit($raw), ['ui-mockup', '3d-object'], true);
-    }
-
     public static function qaUprightRule(?string $raw): string
     {
         $kind = self::explicit($raw);

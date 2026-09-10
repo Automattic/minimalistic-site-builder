@@ -957,7 +957,7 @@ final class GenerateImagesStep implements Step
             Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
             return null;
         }
-        $verdict = ImageQa::verdict($answer, ImageKind::keepsTilt(ImageKind::effectiveKind($spec)));
+        $verdict = ImageQa::verdict($answer);
         if ($verdict === null) {
             Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
         }
@@ -989,7 +989,7 @@ final class GenerateImagesStep implements Step
             + ['image_qa' => $finding];
         $error = null;
         $this->drainBatch([$genSpec], function (int $pos, array $result) use (
-            $project, $rel, $filename, $genSpec, $logRequest, &$error
+            $project, $rel, $filename, $genSpec, $logRequest, $spec, &$error
         ): void {
             try {
                 if (!($result['ok'] ?? false) || !isset($result['bytes'])) {

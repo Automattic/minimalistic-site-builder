@@ -101,15 +101,12 @@ test('ImageQa warning row carries file, subject, finding and disposition', funct
 });
 
 
-test('ImageQa drops the upright finding for a kind that keeps its tilt and keeps every other finding', function () {
-    $answer = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "the screen is tilted left"}';
-    $photo = ImageQa::verdict($answer);
-    assert_eq(false, $photo['ok']);
-    assert_contains('camera not upright', $photo['findings'][0]);
-    $mockup = ImageQa::verdict($answer, true);
-    assert_eq(['ok' => true, 'findings' => [], 'note' => 'the screen is tilted left'], $mockup);
-    $text = ImageQa::verdict('{"upright": false, "rendered_text": true, "matches_subject": true, "note": ""}', true);
-    assert_eq(false, $text['ok']);
-    assert_eq(1, count($text['findings']));
-    assert_contains('rendered text', $text['findings'][0]);
+test('ImageQa retains rotation failures after the prompt permits the image kind tilt', function () {
+    $answer = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "the screen is upside down"}';
+    $verdict = ImageQa::verdict($answer);
+    assert_eq(false, $verdict['ok']);
+    assert_contains('camera not upright', $verdict['findings'][0]);
+    assert_contains('camera is upright and level', ImageQa::correctedSubject('A dashboard.', $verdict, 'ui-mockup'));
+    $tilt = ImageQa::verdict('{"upright": true, "rendered_text": false, "matches_subject": true, "note": "the screen has a gentle tilt"}');
+    assert_eq(true, $tilt['ok']);
 });

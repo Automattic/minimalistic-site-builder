@@ -55,7 +55,7 @@ final class ImageQa
      *
      * @return array{ok:bool,findings:list<string>,note:string}|null
      */
-    public static function verdict(string $answer, bool $keepsTilt = false): ?array
+    public static function verdict(string $answer): ?array
     {
         $start = strpos($answer, '{');
         $end = strrpos($answer, '}');
@@ -76,8 +76,8 @@ final class ImageQa
             return null;
         }
         $findings = [];
-        // Preserve the intended tilt of mockups and 3D objects.
-        if (!$keepsTilt && ($data['upright'] ?? true) === false) {
+        // The QA prompt permits the tilt for each image kind.
+        if (($data['upright'] ?? true) === false) {
             $findings[] = 'camera not upright (scene rotated or tilted)';
         }
         if (($data['rendered_text'] ?? false) === true) {

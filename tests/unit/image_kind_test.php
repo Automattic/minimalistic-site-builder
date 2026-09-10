@@ -118,11 +118,6 @@ test('a ui-mockup site inspects every picture and reads placeholder bars as shap
 });
 
 test('a mockup or a rendered object keeps its tilt through the QA upright question', function () {
-    assert_true(ImageKind::keepsTilt('ui-mockup'));
-    assert_true(ImageKind::keepsTilt('3d-object'));
-    assert_true(!ImageKind::keepsTilt('photo'));
-    assert_true(!ImageKind::keepsTilt('line-illustration'));
-    assert_true(!ImageKind::keepsTilt(null));
     assert_eq('', ImageKind::qaUprightRule('photo'));
     assert_contains('product-interface mockup, not a photograph', ImageKind::qaUprightRule('ui-mockup'));
     assert_contains('rendered object, not a photograph', ImageKind::qaUprightRule('3d-object'));
