@@ -8,6 +8,8 @@ use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
+use Automattic\SiteBuild\ImagePlaceholder;
+use Automattic\SiteBuild\InitialImagePolicy;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
@@ -40,6 +42,9 @@ use Automattic\SiteBuild\Warnings;
  * (~30-60s/image) and hits the network — unlike the rest of the deterministic
  * build. A single image failing never aborts the build: it is marked "failed"
  * and only media blocks/references to that undeliverable asset are removed.
+ * Initial builds generate homepage images (including chrome) and existing
+ * interior hero images. Other images receive local neutral rasters, with
+ * status "placeholder" and authored specs retained for later generation.
  *
  * A prompt the endpoint's safety filter rejects (the client retries those like
  * transient failures first — 3 more attempts by default) gets one repair pass
@@ -108,6 +113,7 @@ final class GenerateImagesStep implements Step
             label: $this->label(),
             reads: [
                 'images.json',
+                'pages.json',
                 'siteSpec.json',
                 'designDirection.json',
                 'plugin/images.json',
@@ -253,6 +259,8 @@ final class GenerateImagesStep implements Step
         }
 
         $resolved = []; // theme: src => served URL, for the markup rewrite
+        $policy = new InitialImagePolicy($project->exists('pages.json') ? $project->readJson('pages.json') : null);
+        $placeholderWarnings = [];
 
         // Already-completed images need no work — just record them for the rewrite.
         $pending = [];
@@ -261,7 +269,29 @@ final class GenerateImagesStep implements Step
                 $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
                 continue;
             }
+            if (!$policy->shouldGenerate($spec)) {
+                $url = $this->servedUrl($project, $spec['filename']);
+                $path = 'theme/assets/' . $spec['filename'];
+                if (($spec['status'] ?? '') !== 'placeholder' || !$project->exists($path)) {
+                    $project->writeText($path, ImagePlaceholder::bytes($spec));
+                }
+                $specs[$i]['status'] = 'placeholder';
+                $specs[$i]['url'] = $url;
+                unset($specs[$i]['error'], $specs[$i]['qa']);
+                $resolved[$spec['src']] = $url;
+                $placeholderWarnings[] = 'file=' . Warnings::value($path)
+                    . '; block=' . Warnings::value(implode(', ', (array) ($spec['sources'] ?? [])))
+                    . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                    . '; delivered=neutral local placeholder; disposition=deferred by initial image policy '
+                    . '(homepage and interior heroes only); original image spec retained in images.json';
+                continue;
+            }
             $pending[$i] = $spec; // preserve the original images.json index
+        }
+        if ($placeholderWarnings !== []) {
+            $project->addWarnings($this->id(), $placeholderWarnings);
+            $project->writeJsonAtomic('images.json', $specs);
+            Narrator::write(sprintf("    using %d local image placeholder(s)\n", count($placeholderWarnings)));
         }
 
         // Generate every pending image through ONE pooled batch: concurrency

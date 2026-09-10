@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\InitialImagePolicy;
 use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\TransformArtifacts;
@@ -11,8 +12,8 @@ use Automattic\SiteBuild\TransformArtifacts;
  *
  *   php bin/images.php <slug>
  *
- * Generates any pending images recorded in images.json via the WPCOM AI proxy
- * and wires the resulting assets into the theme. Useful to add images to a build
+ * Generates eligible pending images recorded in images.json via the WPCOM AI proxy
+ * and delivers local placeholders for interior non-hero images. Useful to add images to a build
  * made without --with-images. Already-completed images are left as-is.
  *
  * images.json is written by the collect-images pipeline step (which runs before
@@ -54,8 +55,10 @@ if (!$project->exists('images.json')) {
     (new CollectImagesStep(htmlFirst: $htmlFirst))->run($project);
 }
 $specs = $project->readJson('images.json');
-$pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');
-printf("  %d placeholder(s), %d to generate\n", count($specs), count($pending));
+$policy = new InitialImagePolicy($project->exists('pages.json') ? $project->readJson('pages.json') : null);
+$pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed' && $policy->shouldGenerate($img));
+$deferred = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed' && !$policy->shouldGenerate($img));
+printf("  %d image(s), %d to generate, %d local placeholder(s)\n", count($specs), count($pending), count($deferred));
 
 // The Llm is only used to rewrite prompts the image safety filter rejects;
 // without LLM credentials the step still runs, minus that repair.
