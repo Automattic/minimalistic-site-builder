@@ -1164,6 +1164,116 @@ final class CssChecks
     }
 
     /**
+     * Remove whole @property registrations selected by their decoded name.
+     * Walk rule boundaries iteratively: deeply nested grouping rules must not
+     * hide a registration behind the declaration scanner's recursion limit.
+     * Strings, functions, comments, and custom-property values stay opaque.
+     * Surviving bytes are untouched; removed rules retain their authored CSS
+     * for the caller's durable warning.
+     *
+     * @param callable(string):bool $isProtected
+     * @return array{0:string,1:list<string>} CSS, removed registrations
+     */
+    public static function dropPropertyRegistrations(string $css, callable $isProtected): array
+    {
+        $removed = [];
+        $length = strlen($css);
+        $cursor = 0;
+        $depth = 0;
+        for ($i = 0; $i < $length;) {
+            if ($depth === 0 && $i === $cursor) {
+                $cursor = $i = self::skipTrivia($css, $i, $length);
+                if ($i >= $length) {
+                    break;
+                }
+            }
+            $char = $css[$i];
+            if ($char === '/' && ($css[$i + 1] ?? '') === '*') {
+                $i = self::skipComment($css, $i, $length);
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $i = self::skipQuoted($css, $i, $length, $char);
+                continue;
+            }
+            if ($char === '\\') {
+                $i = min($length, $i + 2);
+                continue;
+            }
+            if ($char === '(' || $char === '[') {
+                $i = self::skipDelimited($css, $i, $length, $char, $char === '(' ? ')' : ']');
+                continue;
+            }
+            // CSS ignores legacy HTML comment wrappers at stylesheet level.
+            if ($depth === 0 && $cursor === $i) {
+                $wrapper = substr($css, $i, 4) === '<!--' ? 4 : (substr($css, $i, 3) === '-->' ? 3 : 0);
+                if ($wrapper !== 0) {
+                    $cursor = $i += $wrapper;
+                    continue;
+                }
+            }
+            if ($char === ';' || $char === '}') {
+                if ($char === '}') {
+                    $depth = max(0, $depth - 1);
+                }
+                $cursor = ++$i;
+                continue;
+            }
+            if ($char !== '{') {
+                ++$i;
+                continue;
+            }
+            $prefix = substr($css, $cursor, $i - $cursor);
+            $colon = self::topLevelColon($prefix);
+            $property = $colon === null ? null : self::propertyName(substr($prefix, 0, $colon));
+            if ($property !== null && str_starts_with($property, '--')) {
+                // A custom property's arbitrary block value is data, not rules.
+                $close = self::matchingBlockEnd($css, $i, $length);
+                $i = $close === null ? $length : $close + 1;
+                continue;
+            }
+            $name = self::registeredPropertyName($prefix);
+            if ($name !== null && $isProtected($name)) {
+                $start = self::skipTrivia($css, $cursor, $i);
+                $close = self::matchingBlockEnd($css, $i, $length);
+                // Browsers recover an unclosed registration at EOF.
+                $end = $close === null ? $length : $close + 1;
+                $removed[] = ['start' => $start, 'end' => $end, 'raw' => substr($css, $start, $end - $start)];
+                $cursor = $i = $end;
+                continue;
+            }
+            ++$depth;
+            $cursor = ++$i;
+        }
+        $repaired = $css;
+        foreach (array_reverse($removed) as $rule) {
+            $repaired = substr($repaired, 0, $rule['start']) . substr($repaired, $rule['end']);
+        }
+        return [$repaired, array_column($removed, 'raw')];
+    }
+
+    /** Decode an @property prelude without joining comment-separated tokens. */
+    private static function registeredPropertyName(string $prelude): ?string
+    {
+        // CSS input preprocessing turns CRLF into one newline, including the
+        // whitespace that terminates a hexadecimal identifier escape.
+        $prelude = str_replace(["\r\n", "\r", "\f"], "\n", $prelude);
+        $length = strlen($prelude);
+        $at = self::skipTrivia($prelude, 0, $length);
+        if (($prelude[$at] ?? '') !== '@') {
+            return null;
+        }
+        $keywordEnd = self::identifierEnd($prelude, $at + 1, $length);
+        if (strtolower(self::decodeIdentifier(substr($prelude, $at + 1, $keywordEnd - $at - 1))) !== 'property') {
+            return null;
+        }
+        $nameStart = self::skipTrivia($prelude, $keywordEnd, $length);
+        $rawName = trim((string) preg_replace('~/\*.*?\*/~s', ' ', substr($prelude, $nameStart)));
+        $name = self::decodeIdentifier($rawName);
+        return preg_match('/\A--[^ \t\r\n\f:;{}]+\z/u', $name) === 1 ? $name : null;
+    }
+
+    /**
      * Shape-affecting declarations whose delivered scope is owned by the
      * committed image/button corner language. Style-rule rows are selected by
      * the caller's selector policy. Keyframe rows are selected only when that
@@ -2004,10 +2114,12 @@ final class CssChecks
     {
         for ($i = $quote + 1; $i < $end;) {
             if ($css[$i] === '\\') {
-                $i = min($end, $i + 2);
+                $i = min($end, $i + (substr($css, $i + 1, 2) === "\r\n" ? 3 : 2));
                 continue;
             }
-            if ($css[$i] === $delimiter) {
+            // An unescaped newline ends a CSS bad-string token. Continuing
+            // to the next quote would hide later, browser-effective rules.
+            if ($css[$i] === $delimiter || str_contains("\r\n\f", $css[$i])) {
                 return $i + 1;
             }
             ++$i;

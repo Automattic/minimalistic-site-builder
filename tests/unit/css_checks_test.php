@@ -908,3 +908,59 @@ test('emphasis guard preserves attribute text and removes only the actual hook r
     assert_eq(['white-space: nowrap'], $removed);
     assert_eq([$result, []], CssChecks::dropEmphasisHookDeclarations($result));
 });
+
+
+test('protected property registrations are removed as whole rules without changing sibling CSS', function () {
+    $safe = '/* @property --wp--preset--fake {} */ .note::after{content:"@property --wp--preset--fake { }"}';
+    $local = '@property --local-tone { syntax: "<color>"; inherits: false; initial-value: blue; }';
+    $registration = '@property --wp--preset--color--contrast { syntax: "<color>"; inherits: false; initial-value: white; }';
+    $css = $safe . $registration . $local . '.plain{color:var(--wp--preset--color--contrast)}';
+    [$out, $removed] = CssChecks::dropPropertyRegistrations($css, static fn (string $name): bool => str_starts_with($name, '--wp--preset--'));
+    assert_eq($safe . $local . '.plain{color:var(--wp--preset--color--contrast)}', $out);
+    assert_eq([$registration], $removed);
+    assert_eq([$out, []], CssChecks::dropPropertyRegistrations($out, static fn (string $name): bool => str_starts_with($name, '--wp--preset--')));
+});
+
+test('property registration removal handles grouping rules, escaped names and EOF recovery', function () {
+    foreach ([
+        '@property --wp--preset--color--contrast',
+        '@PrOpErTy/**/--wp--preset--color--contrast',
+        '@\\70 roperty --wp--pre\\73 et--color--contrast',
+        '@property \\2d\\2d wp--preset--color--contrast',
+        "@\\70\r\nroperty --wp--pre\\73\r\net--color--contrast",
+    ] as $header) {
+        $rule = $header . '{syntax:"<color>";inherits:false;initial-value:white}';
+        $css = '@supports (display: grid){.before{color:red}' . $rule . '.after{color:blue}}';
+        [$out, $removed] = CssChecks::dropPropertyRegistrations($css, static fn (string $name): bool => str_starts_with($name, '--wp--preset--'));
+        assert_eq('@supports (display: grid){.before{color:red}.after{color:blue}}', $out, $header);
+        assert_eq([$rule], $removed);
+        $unclosed = '.before{color:red}' . substr($rule, 0, -1);
+        [$out, $removed] = CssChecks::dropPropertyRegistrations($unclosed, static fn (string $name): bool => str_starts_with($name, '--wp--preset--'));
+        assert_eq('.before{color:red}', $out, 'browser-recovered registration');
+        assert_eq([substr($rule, 0, -1)], $removed);
+    }
+});
+
+test('registration-looking text in custom properties and functions remains untouched', function () {
+    $css = '.plain{--data: { @property --wp--preset--color--contrast { syntax:"*";inherits:false } };background:url("data:text/plain,@property --wp--preset--color--contrast{}")}';
+    assert_eq([$css, []], CssChecks::dropPropertyRegistrations($css, static fn (string $name): bool => str_starts_with($name, '--wp--preset--')));
+});
+
+
+test('protected registrations cannot hide behind legacy wrappers, bad strings or deep nesting', function () {
+    $registration = '@property --wp--preset--color--contrast{syntax:"<color>";inherits:false;initial-value:white}';
+    foreach (['<!-- ', '--> ', ".bad{content:\"oops\n}", ".bad{content:\"oops\r}", ".bad{content:\"oops\f}", str_repeat('@media all{', 65)] as $prefix) {
+        $suffix = str_starts_with($prefix, '@media') ? str_repeat('}', 65) : '';
+        $css = $prefix . $registration . '.plain{color:var(--wp--preset--color--contrast)}' . $suffix;
+        [$out, $removed] = CssChecks::dropPropertyRegistrations($css, static fn (string $name): bool => str_starts_with($name, '--wp--preset--'));
+        assert_eq($prefix . '.plain{color:var(--wp--preset--color--contrast)}' . $suffix, $out);
+        assert_eq([$registration], $removed);
+    }
+});
+
+test('escaped newlines keep registration-looking text inside a CSS string', function () {
+    foreach (["\n", "\r", "\r\n", "\f"] as $newline) {
+        $css = '.plain{content:"before' . "\\" . $newline . '@property --wp--preset--color--contrast{}"}';
+        assert_eq([$css, []], CssChecks::dropPropertyRegistrations($css, static fn (string $name): bool => str_starts_with($name, '--wp--preset--')));
+    }
+});
