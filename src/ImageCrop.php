@@ -61,6 +61,7 @@ final class ImageCrop
             .card-media img { aspect-ratio: {$ratio['card']} !important; height: auto; }
             .card-media-tall img { aspect-ratio: {$ratio['tall']} !important; height: auto; }
             .card-media-thumb img { aspect-ratio: {$ratio['thumb']} !important; height: auto; }
+            .card-media-thumb { --list-thumb-image-ratio: {$ratio['thumb']}; }
             .feature-media img {
                 width: 100%;
                 aspect-ratio: {$ratio['feature']} !important;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ListThumbTreatment;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -50,7 +51,7 @@ final class ScaffoldThemeStep implements Step
 
     public function run(Project $project): void
     {
-        $project->writeText('theme/style.css', self::STYLE_CSS);
+        $project->writeText('theme/style.css', self::STYLE_CSS . ListThumbTreatment::css());
         $project->writeText('theme/readme.txt', self::README);
         self::copyMotionKit($project);
         self::copyHeaderKit($project);
@@ -372,36 +373,18 @@ final class ScaffoldThemeStep implements Step
             border-radius: 0 !important;
         }
 
-        /* List-thumb rows on a wide band (BIGR-999). The recipe gives a row an
-           18% media column and an 82% text column, and the archetype takes
-           align:wide, so on a 1560px band one paragraph line runs about 180
-           characters and the thumbnail grows to 275px. Percentages cannot hold
-           either one, so the row carries its own bounds. Every rule keys on
-           the documented card-media-thumb hook: the flush variant and the
-           plain row share one contract.
-
-           The row keeps its leading edge. The band's heading and lead copy are
-           alignwide too, so a centered row would step out of their column and
-           the leftover space belongs at the row's trailing edge instead. Core's
-           constrained layout writes both auto margins with !important, so the
-           start margin needs the same weight.
-
-           The row cap is the sum of its parts: the media cap, the reading
-           measure, and one column gap. The media column grows into what the
-           capped text column leaves, up to its own cap, so the row's box ends
-           where its content ends and a bordered flush row shows no dead strip.
-           A flush row zeroes that column gap and spends the same distance on
-           the text column's own padding, so one cap serves both variants.
-
-           9rem holds the thumbnail at 144px, close to the 18% it takes on a
-           960px band, and 52ch holds the longest line at about 68 characters
-           in the reviewed site, inside the 65-75 character measure. Both units
-           are font-relative, so larger body type gives a larger thumbnail and
-           the same character count. */
+        /* Limit row containers and separators to the list width.
+           The introduction keeps the standard section width and text measure.
+           Core centers the list; nested rows inherit its width limit. */
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-group:has(> .wp-block-columns > .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb),
+        .wp-block-group.section-composition--list-with-thumbnails > .wp-block-separator {
+            max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));
+            margin-inline: auto !important;
+        }
+        /* Bound rows outside a composition wrapper too. */
         .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {
-            max-inline-size: calc(9rem + 52ch + var(--wp--style--block-gap, 2rem));
-            margin-inline-start: 0 !important;
-            margin-inline-end: auto !important;
+            max-inline-size: min(100%, calc(9rem + 52ch + var(--wp--style--block-gap, 2rem)));
         }
         .wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) > .wp-block-column:has(figure.card-media-thumb) {
             flex-grow: 1;
