@@ -44,7 +44,7 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 
 - `subject`: specific scene, subject, setting, composition, lighting, palette or grade, and framing. Never request readable text, names, letters, numerals, logos, or signage.
 - `page-context`: describe image role in homepage hero.
-- `style`: exactly one of `photorealistic`, `digital-art`, `illustration`, `minimalist`, `flat-design`, `3d-render`, `abstract`, `watercolor`.
+- `style`: exactly one of `photorealistic`, `digital-art`, `illustration`, `minimalist`, `flat-design`, `ui-screenshot`, `3d-render`, `abstract`, `watercolor`.
 - `aspect-ratio`: exactly one of `square`, `landscape`, `portrait`; prefer `landscape` for wide hero treatment.
 - Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
@@ -66,3 +66,5 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - No HTML comments. No CSS comments.
 
 Return only finished HTML document.
+
+The hero and fold remain free of texture classes. Never use a `surface--` class or write texture CSS here. An optional texture belongs on one suitable later section, as the design direction permits.

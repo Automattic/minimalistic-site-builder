@@ -4,7 +4,12 @@
     var root = document.documentElement;
     var ENHANCEMENT_CLASS = 'header-state-js';
     var SCROLLED_CLASS = 'header-is-scrolled';
-    var HEADER_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid';
+    var HEADER_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid, '
+        + '.site-header-shell--overlay-transient';
+    // Chrome that survives the scroll owns the anchor offset. A transient
+    // overlay leaves with the hero, so it never claims that offset.
+    var PERSISTENT_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid';
+    var PERSISTENT_CLASS = 'header-chrome-persistent';
     // Hysteresis: the scrolled state engages at the enter threshold but only
     // releases at the lower exit threshold, so jitter around a single boundary
     // cannot restart the surface transition on every frame.
@@ -308,6 +313,7 @@
         stop();
         root.classList.remove(ENHANCEMENT_CLASS);
         root.classList.remove(SCROLLED_CLASS);
+        root.classList.remove(PERSISTENT_CLASS);
         clearMeasuredHeight();
     }
 
@@ -369,6 +375,9 @@
             if (!header) {
                 failOpen();
                 return;
+            }
+            if (typeof header.matches === 'function' && header.matches(PERSISTENT_SELECTOR)) {
+                root.classList.add(PERSISTENT_CLASS);
             }
 
             // Synchronous setup handles a restored scroll position before the

@@ -1114,9 +1114,9 @@ test('headerFacts reads overlay mode from the classes delivery actually emits (B
     // stacked, so warnings.json carried a false above-fold drift row on 4/7
     // cohort sites while masking any real future downgrade.
     $canonicalOverlay = '<!-- wp:group {"className":"header-archetype--minimal-overlay '
-        . 'header-behavior-overlay-to-solid header-start-transparent header-scrolled-contrast '
+        . 'header-behavior-overlay header-start-transparent header-scrolled-contrast '
         . 'header-foreground-base header-top-transparent","textColor":"base","layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group header-archetype--minimal-overlay header-behavior-overlay-to-solid '
+        . '<div class="wp-block-group header-archetype--minimal-overlay header-behavior-overlay '
         . 'header-start-transparent header-scrolled-contrast header-foreground-base header-top-transparent '
         . 'has-base-color has-text-color"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $facts = AboveFoldPartFacts::headerFacts($canonicalOverlay);

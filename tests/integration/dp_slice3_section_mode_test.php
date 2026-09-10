@@ -149,9 +149,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source stays frozen after the retired-mood filter on regenerated chrome',
         );
         assert_eq(
-            'da340cb5566303c52c3f26667a361e221ca38f1aef7f0aa80deaaaed68de35ef',
+            '7dba6aee066690a529ce8c866eeb0e55e0bb820d05011de54414ad25a529d420',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
-            'assemble-pages source stays frozen after site-logo union and content-row preserve',
+            'assemble-pages source includes the reviewed transient overlay shells',
         );
         $llm = new FakeLlm();
         $llm->queueText(dp3_integration_preview());

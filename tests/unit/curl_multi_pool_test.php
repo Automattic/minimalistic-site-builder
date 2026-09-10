@@ -3,6 +3,35 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\CurlMultiPool;
 
+test('CurlMultiPool completes real local transfers without deprecations and releases its handles', function () {
+    $references = [];
+    $build = static function (string|int $key) use (&$references): \CurlHandle {
+        $handle = curl_init('file://' . __FILE__);
+        curl_setopt($handle, CURLOPT_RETURNTRANSFER, true);
+        $references[$key] = WeakReference::create($handle);
+        return $handle;
+    };
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    }, E_DEPRECATED);
+    try {
+        $out = (new CurlMultiPool())->run(
+            ['a' => null, 'b' => null],
+            $build,
+            static fn (string|int $key, \CurlHandle $handle): array => [
+                'ok' => curl_multi_getcontent($handle) === file_get_contents(__FILE__),
+            ],
+            2,
+        );
+    } finally {
+        restore_error_handler();
+    }
+    assert_eq(['a' => ['ok' => true], 'b' => ['ok' => true]], $out);
+    foreach ($references as $reference) {
+        assert_eq(null, $reference->get(), 'the pool retains no handle after completion');
+    }
+});
+
 /**
  * Unit tests for the shared curl_multi rolling-pool glue (CurlMultiPool).
  * The ext-curl multi calls sit behind overridable methods, so a scripted fake
@@ -32,8 +61,8 @@ class FakeCurlMultiPool extends CurlMultiPool
     public bool $failMulti = false;
     /** @var list<string|int> keys whose add is refused */
     public array $refuseAdds = [];
-    /** @var list<string|int> keys whose handle was closed */
-    public array $closed = [];
+    /** @var list<string|int> keys whose handle was detached */
+    public array $removed = [];
 
     /**
      * @param array<int,list<string|int>> $script
@@ -90,12 +119,8 @@ class FakeCurlMultiPool extends CurlMultiPool
 
     protected function removeHandle(\CurlMultiHandle $multi, \CurlHandle $ch): void
     {
+        $this->removed[] = $this->keysById[spl_object_id($ch)];
         unset($this->attached[spl_object_id($ch)]);
-    }
-
-    protected function closeHandle(\CurlHandle $ch): void
-    {
-        $this->closed[] = $this->keysById[spl_object_id($ch)];
     }
 
     protected function multiClose(\CurlMultiHandle $multi): void
@@ -209,10 +234,10 @@ test('CurlMultiPool classifies every remaining transfer when the multi stack fai
     assert_true($pool->multiClosed, 'the multi handle is closed even after a CURLM failure');
 });
 
-test('CurlMultiPool closes the finished handle and in-flight siblings when classify throws', function () {
+test('CurlMultiPool detaches the finished handle and in-flight siblings when classify throws', function () {
     // A classify callback is allowed to throw (WpcomImageClient's disk write
     // failing mid-batch aborts the build by design). The pool must still
-    // remove+close the finished handle and drain every in-flight sibling
+    // detach the finished handle and drain every in-flight sibling
     // before the exception propagates — not leak open connections.
     $pool = new FakeCurlMultiPool([['a']]);
     [$buildHandle] = cmp_seams($pool);
@@ -222,9 +247,9 @@ test('CurlMultiPool closes the finished handle and in-flight siblings when class
 
     $e = assert_throws(fn () => $pool->run(['a' => 1, 'b' => 2], $buildHandle, $classify, 2));
     assert_eq("disk full while saving 'a'", $e->getMessage(), 'the classify failure propagates to the caller');
-    $closed = $pool->closed;
-    sort($closed);
-    assert_eq(['a', 'b'], $closed, 'the finished handle and the in-flight sibling are both closed');
+    $removed = $pool->removed;
+    sort($removed);
+    assert_eq(['a', 'b'], $removed, 'the finished handle and the in-flight sibling are both detached');
     assert_true($pool->multiClosed, 'the multi handle is closed after the classify failure');
 });
 

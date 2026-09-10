@@ -5,7 +5,9 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
+
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -16,6 +18,8 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  *   prompt context (outline is the OWNING page's outline)
  * - card_style: normalized site-wide card construction enforced on delivery;
  *   list-thumb rows also receive their non-stacking and tight-gap invariants
+ * - motion_profile: committed Motion profile; absent/invalid means static,
+ *   matching the delivery gate. Only its permitted instructions are sent.
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/item_pattern/text_placement/handoff. The
@@ -23,6 +27,7 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  *   and must be one of hero/content/closing. The layout_archetype must be a
  *   `SectionComposition` id: it selects the one prompt fragment this request
  *   sees, and the `section-composition--<id>` root class the part delivers.
+ * - stated_highlight: an optional brief clause that requests one card highlight
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
@@ -46,6 +51,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   theme_json:string|array<mixed>,
      *   design_direction:string,
      *   card_style?:string,
+     *   motion_profile?:string,
      *   outline:string,
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
@@ -99,11 +105,18 @@ final class SectionUnit extends AbstractPageSectionUnit
             // and never reads a word about it.
             'composition_recipe' => $this->renderer->render(
                 SectionComposition::recipeTemplate($archetype),
-                SectionComposition::recipeVars($archetype, $itemPattern),
+                SectionComposition::recipeVars(
+                    $archetype,
+                    $itemPattern,
+                    SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
+                ),
             ),
         ]);
 
+        $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
+            'card_instructions' => $rules->card($cardStyle),
+            'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'card_style'        => $cardStyle,
             'page_title'        => $this->pageString($input, 'title'),
@@ -177,6 +190,22 @@ final class SectionUnit extends AbstractPageSectionUnit
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
             $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
+        $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
+        $markup = GeneratedMarkup::stripMediaOffNoImageArchetype($markup, $this->key($input), $archetype, $repairs, $warnings);
+        $markup = GeneratedMarkup::stripMediaOverBudget($markup, $this->key($input), $archetype, $repairs, $warnings);
+        $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
+        $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
+        $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
+
+        if (preg_match('/\*\*Heading emphasis\*\*: two-tone\b/', (string) ($input['design_direction'] ?? '')) === 1) {
+            foreach (HeadingEmphasis::gluedTwoTone($markup) as $glued) {
+                $warnings[] = "file='theme/parts/" . $this->key($input) . ".html'; block='heading'; authored=two-tone \""
+                    . mb_strimwidth($glued, 0, 80, '…', 'UTF-8')
+                    . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
+            }
+        }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);
@@ -190,6 +219,10 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        $cardText = CardTextContract::enforce($markup, $this->key($input), $input['theme_json'] ?? null);
+        $markup = $cardText['markup'];
+        array_push($repairs, ...$cardText['repairs']);
+        array_push($warnings, ...$cardText['warnings']);
         $section = $this->section($input);
         $band = BandSurfaceContract::enforce(
             $markup,
@@ -199,6 +232,11 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $band->markup;
         array_push($repairs, ...$band->repairs);
         array_push($warnings, ...$band->warnings);
+        if ($archetype === 'cta-panel') {
+            $markup = GeneratedMarkup::stripCtaPanelSiblings($markup, $this->key($input), $repairs, $warnings);
+            $markup = GeneratedMarkup::centerImagelessCtaPanel($markup, $this->key($input), $repairs);
+            $markup = GeneratedMarkup::flushCtaPanelMedia($markup, $this->key($input), $cardStyle, $repairs);
+        }
         // Advisory only: the catalog reports a section that ignored its
         // assignment and the build delivers the safe parseable markup anyway.
         if ($archetype !== null) {
@@ -209,6 +247,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                     $archetype,
                     $this->key($input),
                     $itemPattern,
+                    SectionComposition::highlightAppliesTo($input['stated_highlight'] ?? null, $section),
                 ),
             );
         }

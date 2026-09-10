@@ -80,16 +80,6 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             . '}',
         $css,
     );
-    // When the square thumb out-measures a short text stack the row takes the
-    // thumb's height; the text column centers its copy in the extra space.
-    assert_contains(
-        ".wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
-            . "    display: flex;\n"
-            . "    flex-direction: column;\n"
-            . "    justify-content: center;\n"
-            . '}',
-        $css,
-    );
     assert_contains(
         ".list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {\n"
             . "    height: 100%;\n"
@@ -104,6 +94,52 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             . "    border-radius: 0 !important;\n"
             . '}',
         $css,
+    );
+
+    // Every list-thumb row carries its own bounds at a wide viewport
+    // (BIGR-999). The recipe's 18/82 percentages let a 1560px band run a
+    // paragraph line to about 180 characters and grow the thumbnail to 275px,
+    // so the row caps its own width, the media column caps the thumbnail, and
+    // the text column caps the reading measure. The row keeps the band's
+    // leading edge, because the section heading and lead copy start there and
+    // core's constrained layout writes both auto margins with !important. The
+    // media column grows into what the capped text column leaves, so a
+    // bordered flush row ends where its content ends.
+    assert_contains(
+        ".wp-block-columns:has(> .wp-block-column > figure.card-media-thumb) {\n"
+            . "    max-inline-size: calc(9rem + 52ch + var(--wp--style--block-gap, 2rem));\n"
+            . "    margin-inline-start: 0 !important;\n"
+            . "    margin-inline-end: auto !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        '.wp-block-columns:has(> .wp-block-column > figure.card-media-thumb)'
+            . " > .wp-block-column:has(figure.card-media-thumb) {\n"
+            . "    flex-grow: 1;\n"
+            . "    max-inline-size: 9rem;\n"
+            . '}',
+        $css,
+    );
+    // One rule serves both variants: the text column holds the reading measure
+    // and centers its copy when the thumbnail drives the row height. The flush
+    // variant used to own a centering rule of its own; the plain row had none.
+    assert_contains(
+        '.wp-block-columns:has(> .wp-block-column > figure.card-media-thumb)'
+            . " > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    justify-content: center;\n"
+            . "    max-inline-size: 52ch;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains(
+            $css,
+            '.wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb))',
+        ),
+        'the flush-only centering rule is replaced by the shared list-thumb rule',
     );
 
     // Card media fills the card's content box even though the equal-cards card
@@ -573,5 +609,145 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
     // form.
     assert_contains(':not(' . $exempt . ' *)', $lists['guards'], 'a list inside an exemption stays exempt');
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme styles native accordion rows for the faq-split archetype (frm W3b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_faq_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-details > summary', $css);
+    assert_contains('.wp-block-details[open] > summary::after', $css);
+    assert_contains('.faq-list > .wp-block-details:first-child', $css);
+    assert_contains('prefers-reduced-motion', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme rounds and clips the closing cta-panel from the shape scale (frm W3d)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_cta_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-group.cta-panel {', $css);
+    assert_contains('border-radius: var(--shape-radius-panel, 0)', $css);
+    assert_contains('overflow: hidden', $css);
+    assert_contains('.wp-block-group.cta-panel :is(h1, h2, h3)', $css, 'a clipped panel never clips its headline');
+    assert_contains('overflow-wrap: anywhere', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important', $css, 'phone-scale headline cap');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush {', $css, 'the flush panel construction ships');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush > .wp-block-columns > .cta-panel__copy {', $css, 'the copy column carries the padding');
+    assert_contains('.wp-block-group.cta-panel.cta-panel--flush .cta-panel__media img {', $css, 'the image covers its column');
+    assert_contains('object-fit: cover', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme sets the pricing figure in the heading face and lifts the recommended tier (frm W3c)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pricing_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--pricing-tiers .price-figure {', $css);
+    assert_contains('font-size: var(--wp--preset--font-size--section-title)', $css);
+    assert_contains('.section-composition--pricing-tiers .equal-cards > .wp-block-column > .card-highlight {', $css);
+    assert_contains('transform: translateY(-0.75rem)', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme draws stat-ledger hairlines between figure columns and stacks them on phones (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--display), 26cqi)', $css, 'a figure never runs out of its column (frm PR-3m: the column cap)');
+    assert_true(!str_contains($css, '7vw, 26cqi'), 'the viewport cap is gone: it shrank phone figures');
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column {', $css);
+    assert_contains('container-type: inline-size', $css, 'each ledger column is its own inline-size container');
+    assert_contains('min-width: 0', $css, 'a ledger column may shrink below its figure');
+    assert_contains('.section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,', $css);
+    assert_contains('border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css, 'the phone hairline is horizontal');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme shares the hairline column rules with the feature row (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_featurerow_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {', $css);
+    assert_true(substr_count($css, 'border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)') >= 1, 'the hairline is shared');
+    assert_contains('.section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy-first on phones (frm W3g)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_zigzag_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Luzia');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--zigzag-steps .wp-block-columns {', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-group.step-plate,', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:not(:has(*)) {', $css, 'an emptied media column keeps the plate shape');
+    assert_contains('min-block-size: 14rem', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {', $css);
+    assert_contains('order: -1', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme sets statement lines one ramp step under the title, with hairlines between them (frm W3e, BIGR-1002)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_statements_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $rule = '.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {';
+    assert_contains($rule, $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {', $css);
+    $body = substr($css, (int) strpos($css, $rule), 400);
+    assert_contains('text-wrap: balance;', $body, 'the line still balances when it does wrap');
+    // The tie with the section title is the defect: elements.h2 uses the
+    // section-title preset, so the ledger must not use it too.
+    assert_true(
+        !str_contains($body, 'var(--wp--preset--font-size--section-title)'),
+        'the statement line no longer ties with the section title',
+    );
+    assert_contains(
+        'font-size: min(var(--wp--preset--font-size--heading, 2.828rem), max(1.25rem, 4.6cqi));',
+        $body,
+        'the line sits one ramp step under the title and follows the group width',
+    );
+    assert_contains('container-type: inline-size;', $css, 'the group is the query container the cqi unit reads');
+    assert_eq(1, substr_count($css, $rule), 'one size rule prevents a viewport breakpoint jump');
+    // One axis: the two-class selector outranks core's has-text-align-center.
+    assert_contains('.section-composition--statement-lines :is(.wp-block-heading, p) {', $css);
+    assert_contains('text-align: start;', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme keys the project-grid tile rules on covers inside columns, never on a section band (frm PR-3q)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_grid_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Lumina');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    exec('rm -rf ' . escapeshellarg($tmp));
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover {', $css);
+    assert_contains('.section-composition--project-grid-2x2 :is(.wp-block-column, .wp-block-column > .wp-block-group) > .wp-block-cover:hover .wp-block-cover__image-background {', $css);
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover {'), 'a section-level image band is a cover too and must keep its height');
+    assert_true(!str_contains($css, '.section-composition--project-grid-2x2 .wp-block-cover__image-background {'), 'the band backdrop keeps its own scale');
+});
+
+test('the stat-ledger figure rule names level-3 figures, so a section heading in a lead column wraps (frm PR-3z)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_ledger_h2_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    $rule = '.section-composition--stat-ledger .wp-block-column > h3.wp-block-heading:first-child {';
+    assert_contains($rule, $css);
+    $body = substr($css, (int) strpos($css, $rule), 700);
+    assert_contains('white-space: nowrap;', $body, 'the figure still never wraps mid-token');
+    assert_contains('26cqi', $body);
+    assert_true(!str_contains($css, '.section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {'), 'no level-agnostic figure rule remains');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -15,7 +15,24 @@ final class HeaderBehavior
     public const STATIC = 'static';
     public const STICKY_SOFT = 'sticky-soft';
     public const OVERLAY_TO_SOLID = 'overlay-to-solid';
-    public const BEHAVIORS = [self::STATIC, self::STICKY_SOFT, self::OVERLAY_TO_SOLID];
+    public const OVERLAY_TRANSIENT = 'overlay-transient';
+    public const BEHAVIORS = [
+        self::STATIC,
+        self::STICKY_SOFT,
+        self::OVERLAY_TO_SOLID,
+        self::OVERLAY_TRANSIENT,
+    ];
+
+    /**
+     * The two behaviors that start over the opening image. They share one
+     * paint vocabulary — the verified scrim, the single light foreground, and
+     * the earned clear resting state — and differ only in whether the trusted
+     * shell keeps the header on screen after the scroll threshold.
+     */
+    public const OVERLAY_BEHAVIORS = [self::OVERLAY_TO_SOLID, self::OVERLAY_TRANSIENT];
+
+    /** The one CSS class family both overlay behaviors paint through. */
+    public const OVERLAY_CLASS_FAMILY = 'overlay';
 
     public const MODE_STACKED = 'stacked';
     public const MODE_OVERLAY = 'overlay';
@@ -67,10 +84,21 @@ final class HeaderBehavior
     ];
 
     /**
-     * Choose whether persistent navigation benefits the planned site shape.
-     * A transparent overlay always needs its solid scrolled state. Stacked
-     * chrome is sticky only when there is enough navigation/page depth to
-     * justify occupying the viewport; forced tall archetypes remain static.
+     * Choose whether the header survives the scroll (BIGR-998).
+     *
+     * The design direction owns the choice; this function owns the two
+     * deterministic vetoes that a design choice may not lift:
+     *
+     *  1. A forced tall archetype is too tall to be useful chrome, so it
+     *     never becomes persistent, in either mode.
+     *  2. A site with too little depth gains nothing from chrome that never
+     *     leaves, so a shallow one-page site never becomes persistent either.
+     *
+     * Each mode then keeps its own paint family: a stacked header chooses
+     * between `sticky-soft` and `static`, and an overlay header chooses
+     * between `overlay-to-solid` and `overlay-transient`. Both overlay
+     * values start over the opening image with the same verified scrim; only
+     * `overlay-to-solid` stays on screen afterwards.
      *
      * @param array<int,array<string,mixed>> $pages
      */
@@ -78,32 +106,41 @@ final class HeaderBehavior
         array $pages,
         string $mode,
         ?string $forcedArchetype = null,
+        mixed $chrome = HeaderChrome::DEFAULT,
     ): string {
         if (!in_array($mode, self::MODES, true)) {
             throw new \InvalidArgumentException("unknown header mode '{$mode}'");
         }
-        if ($mode === self::MODE_OVERLAY) {
-            return self::OVERLAY_TO_SOLID;
-        }
+        $persistent = $mode === self::MODE_OVERLAY ? self::OVERLAY_TO_SOLID : self::STICKY_SOFT;
+        $transient = $mode === self::MODE_OVERLAY ? self::OVERLAY_TRANSIENT : self::STATIC;
+
         if (in_array((string) $forcedArchetype, self::TALL_ARCHETYPES, true)) {
-            return self::STATIC;
+            return $transient;
         }
-        // A detached pill that scrolls away is a bar with rounded corners;
-        // persistence is the archetype's whole point, so it asks for sticky
-        // regardless of site depth (the palette safety check can still
-        // downgrade it to static, in which case the pill simply rests).
-        if (in_array((string) $forcedArchetype, ['floating-pill', 'bar-center-cta', 'spread-nav'], true)) {
-            return self::STICKY_SOFT;
+        if (!self::depthSupportsChrome($pages)) {
+            return $transient;
         }
+        return HeaderChrome::isPersistent($chrome) ? $persistent : $transient;
+    }
+
+    /**
+     * Whether the planned site is deep enough for a header that never leaves
+     * to repay the viewport it takes. More than one destination, or one page
+     * long enough that the reader loses the top of it, both qualify.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     */
+    public static function depthSupportsChrome(array $pages): bool
+    {
         if (count($pages) > 1) {
-            return self::STICKY_SOFT;
+            return true;
         }
         foreach ($pages as $page) {
             if (count((array) ($page['sections'] ?? [])) >= 4) {
-                return self::STICKY_SOFT;
+                return true;
             }
         }
-        return self::STATIC;
+        return false;
     }
 
     public static function transitionFor(string $motionProfile): string
@@ -122,6 +159,8 @@ final class HeaderBehavior
      * @param ?string $pageBackground palette slug painted behind the page
      *                                body; a transparent sticky top reveals
      *                                it, so it joins the contrast contract.
+     * @param mixed   $chrome         the design direction's header_chrome
+     *                                commitment; see behaviorFor().
      * @return array{behavior:string,mode:string,transition:string,topSurface:string,
      *               scrolledSurface:string,foreground:string,topTreatment:string,
      *               scrolledTreatment:string}
@@ -135,14 +174,15 @@ final class HeaderBehavior
         ?string $authoredTopSurface = null,
         ?string $authoredForeground = null,
         ?string $pageBackground = null,
+        mixed $chrome = HeaderChrome::DEFAULT,
     ): array {
         if (!in_array($transition, self::TRANSITIONS, true)) {
             throw new \InvalidArgumentException("unknown header transition '{$transition}'");
         }
         $palette = self::concretePalette($palette);
-        $requested = self::behaviorFor($pages, $mode, $forcedArchetype);
+        $requested = self::behaviorFor($pages, $mode, $forcedArchetype, $chrome);
 
-        if ($requested === self::OVERLAY_TO_SOLID) {
+        if (in_array($requested, self::OVERLAY_BEHAVIORS, true)) {
             $openingSurfaces = self::overlayOpeningSurfaces($pages);
             $foreground = $openingSurfaces === null
                 ? null
@@ -159,7 +199,7 @@ final class HeaderBehavior
                 );
             if ($foreground !== null && $scrolled !== null) {
                 return self::validateArtifact([
-                    'behavior' => self::OVERLAY_TO_SOLID,
+                    'behavior' => $requested,
                     'mode' => self::MODE_OVERLAY,
                     'transition' => $transition,
                     'topSurface' => self::TRANSPARENT,
@@ -177,10 +217,11 @@ final class HeaderBehavior
 
             // A palette with no safe light-on-solid pair cannot support the
             // overlay's one-foreground guarantee. Fall back to the stacked
-            // path wholesale: with enough site depth and an opaque
-            // contrast-safe pair the header keeps sticky-soft, and only when
-            // that path's own palette safety check also fails does it end at
-            // static. The caller records the behavior loss either way.
+            // path wholesale: with enough site depth, a persistent chrome
+            // commitment, and an opaque contrast-safe pair the header keeps
+            // sticky-soft, and when that path's own palette safety check also
+            // fails it ends at static. The caller records the behavior loss
+            // either way.
             return self::resolve(
                 $pages,
                 self::MODE_STACKED,
@@ -190,6 +231,7 @@ final class HeaderBehavior
                 $authoredTopSurface,
                 $authoredForeground,
                 $pageBackground,
+                $chrome,
             );
         }
 
@@ -586,14 +628,18 @@ final class HeaderBehavior
         if (!in_array($scrolledTreatment, self::SCROLLED_TREATMENTS, true)) {
             throw new \InvalidArgumentException("unknown header scrolled treatment '{$scrolledTreatment}'");
         }
-        if ($behavior === self::OVERLAY_TO_SOLID) {
+        if (in_array($behavior, self::OVERLAY_BEHAVIORS, true)) {
             if ($mode !== self::MODE_OVERLAY || $top !== self::TRANSPARENT) {
-                throw new \InvalidArgumentException('overlay-to-solid requires overlay mode and a transparent top surface');
+                throw new \InvalidArgumentException("{$behavior} requires overlay mode and a transparent top surface");
             }
+            // Both overlay behaviors keep the same scrolled guarantee. A
+            // transient overlay leaves the viewport before it paints that
+            // state, but the no-JS shell and the forced-solid index header
+            // still use the pair, so it must stay proven.
             if (!in_array($topTreatment, [self::TREATMENT_GLASS, self::TREATMENT_TRANSPARENT], true)
                 || $scrolledTreatment !== self::TREATMENT_SOLID) {
                 throw new \InvalidArgumentException(
-                    'overlay-to-solid requires a scrim-glass or earned-transparent top treatment '
+                    "{$behavior} requires a scrim-glass or earned-transparent top treatment "
                         . 'and a solid scrolled treatment'
                 );
             }
@@ -628,8 +674,14 @@ final class HeaderBehavior
         if ($artifact['behavior'] === self::STATIC) {
             return [];
         }
+        // Both overlay behaviors paint through one class family: the scrim,
+        // the light foreground and the earned clear top are identical, and
+        // only the outer shell class decides whether the header stays.
+        $family = in_array($artifact['behavior'], self::OVERLAY_BEHAVIORS, true)
+            ? self::OVERLAY_CLASS_FAMILY
+            : $artifact['behavior'];
         $classes = [
-            'header-behavior-' . $artifact['behavior'],
+            'header-behavior-' . $family,
             'header-start-' . $artifact['topSurface'],
             'header-scrolled-' . $artifact['scrolledSurface'],
             'header-foreground-' . $artifact['foreground'],
@@ -648,7 +700,7 @@ final class HeaderBehavior
                 $classes[] = 'header-scrolled-glass';
             }
         }
-        if ($artifact['behavior'] === self::OVERLAY_TO_SOLID
+        if (in_array($artifact['behavior'], self::OVERLAY_BEHAVIORS, true)
             && $artifact['topTreatment'] === self::TREATMENT_TRANSPARENT) {
             $classes[] = 'header-top-transparent';
         }
@@ -669,6 +721,10 @@ final class HeaderBehavior
             self::STICKY_SOFT => 'DETERMINISTIC HEADER BEHAVIOR: sticky-soft. The trusted outer theme shell keeps '
                 . 'this compact header available while scrolling and applies a subtle palette-surface transition. '
                 . 'Do not add positioning, behavior classes, CSS, or JavaScript.',
+            self::OVERLAY_TRANSIENT => 'DETERMINISTIC HEADER BEHAVIOR: overlay-transient. The trusted outer theme '
+                . 'shell starts translucently over the opening image with a verified contrast veil, then scrolls '
+                . 'away with that opening composition. Keep the root visually transparent at the top; do '
+                . 'not add positioning, behavior classes, CSS, or JavaScript.',
             self::STATIC => 'DETERMINISTIC HEADER BEHAVIOR: static. The header scrolls away with the opening '
                 . 'composition. Do not add positioning, behavior classes, CSS, or JavaScript.',
             default => throw new \InvalidArgumentException("unknown header behavior '{$behavior}'"),
