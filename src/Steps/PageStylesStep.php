@@ -4247,6 +4247,9 @@ CSS;
             $problems[] = 'heading emphasis declarations are build-owned';
         }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (self::hasSizeContainment($declaration['property'], $declaration['value'])) {
+                $problems[] = 'size containment can collapse content-sized blocks';
+            }
             if (str_starts_with(strtolower($declaration['property']), '--wp--preset--')) {
                 $problems[] = 'WordPress preset variables are build-owned and cannot be redeclared';
             }
@@ -4533,6 +4536,9 @@ CSS;
                 self::declarationTargetsHeading($declaration),
             );
             if ($problem !== null) {
+                if (self::hasSizeContainment($declaration['property'], $declaration['value'])) {
+                    $problem .= '; selector ' . $declaration['context'];
+                }
                 $problems[$declaration['start']] = $problem;
             }
         }
@@ -4573,6 +4579,9 @@ CSS;
         }
         $property = strtolower($m[1]);
         $value = $m[2];
+        if (self::hasSizeContainment($property, $value)) {
+            return 'size containment can collapse content-sized blocks';
+        }
         if (str_starts_with($property, '--motion-')) {
             return 'motion custom properties are profile-owned';
         }
@@ -4624,6 +4633,36 @@ CSS;
             return 'hides content';
         }
         return null;
+    }
+
+    /**
+     * The generated blocks appendix cannot establish size containment: unlike
+     * a reviewed scaffold component, its flex/grid items may be intrinsically
+     * sized. Containment then measures them as empty and can collapse headings.
+     * Only this appendix is filtered, never scaffold or HTML-first design CSS.
+     * Keep non-size containment and container names. The shorthand's name may
+     * itself be "size"; only its type after the slash establishes containment.
+     */
+    private static function hasSizeContainment(string $property, string $value): bool
+    {
+        $property = strtolower($property);
+        if (!in_array($property, ['container-type', 'container', 'contain'], true)) {
+            return false;
+        }
+        $value = strtolower(trim((string) preg_replace('~/\*.*?\*/~s', '', $value)));
+        // An unresolved substitution or inherited type could introduce size
+        // containment just as a literal can. Initial/normal resets remain safe.
+        if (preg_match('/\b(?:var|env)\s*\(|\binherit\b/', $value) === 1) {
+            return true;
+        }
+        if ($property === 'container') {
+            $slash = strpos($value, '/');
+            if ($slash === false) {
+                return false;
+            }
+            $value = substr($value, $slash + 1);
+        }
+        return preg_match('/(?<![\w-])(?:size|inline-size|strict)(?![\w-])/', $value) === 1;
     }
 
     /**
