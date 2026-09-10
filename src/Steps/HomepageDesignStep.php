@@ -85,7 +85,7 @@ final class HomepageDesignStep implements Step
             throw new \RuntimeException('meta.json has no "prompt"');
         }
 
-        $siteSpec = $project->readText('siteSpec.json');
+        $siteSpec = SiteSpecStep::promptText($project);
         $designDirection = $project->readText('designDirection.json');
         $candidateCount = self::intKnob(
             $meta,

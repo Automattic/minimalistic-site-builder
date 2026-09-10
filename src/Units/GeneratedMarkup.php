@@ -16,11 +16,18 @@ use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PlainText;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
 {
+    public const WIDE_TILE_CLASS = 'project-tile--wide';
+    public const PROJECT_TILE_INK = '#ffffff';
+    public const PROJECT_TILE_OVERLAY = '#0b0b0d';
+    public const PROJECT_TILE_DIM = 50;
+    public const COVER_DEFAULT_DIM = 40;
+
     /** Generated blocks whose primary rendered purpose is copy, not a surface. */
     private const COPY_BLOCKS = [
         'heading', 'paragraph', 'list', 'list-item', 'quote', 'pullquote', 'verse',
@@ -2540,7 +2547,9 @@ final class GeneratedMarkup
     /** Whether one class token names a rule or hairline the section may not draw. */
     public static function isRuleClassToken(string $token): bool
     {
-        if (str_starts_with($token, 'item-pattern--') || str_starts_with($token, 'device--')) {
+        if (str_starts_with($token, 'item-pattern--')
+            || str_starts_with($token, 'device--')
+            || str_starts_with($token, 'section-composition--')) {
             return false;
         }
         return preg_match('/(^|-)(rules?|ruled|hairlines?)(-|$)/i', $token) === 1;
@@ -2557,74 +2566,7 @@ final class GeneratedMarkup
         string $safeDisposition,
         array &$warnings,
     ): string {
-        $document = BlockMarkup::parse($markup);
-        $candidates = [];
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'separator') {
-                continue;
-            }
-            $end = $document->endOffset($index);
-            if ($end === null) {
-                continue;
-            }
-            $offset = $document->openingOffset($index);
-            $candidates[] = [
-                'index' => $index,
-                'start' => $offset,
-                'end' => $end,
-                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
-            ];
-        }
-        if ($candidates === []) {
-            return $markup;
-        }
-
-        $safe = self::heroNestedRemovalSafety($document, $candidates);
-        $safeCandidates = self::outermostRemovalSpans(array_values(array_filter(
-            $candidates,
-            static fn (array $candidate): bool => $safe[$candidate['index']],
-        )));
-        $unsafeCandidates = self::outermostRemovalSpans(array_values(array_filter(
-            $candidates,
-            static fn (array $candidate): bool => !$safe[$candidate['index']],
-        )));
-        $removals = self::outermostRemovalSpans($safeCandidates);
-        $out = self::removeSpans($markup, $removals);
-        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
-
-        $warningRows = [];
-        foreach ($safeCandidates as $span) {
-            $index = $span['index'];
-            $warningRows[] = [
-                'start' => $span['start'],
-                'warning' => "file='theme/parts/{$part}.html'; block='"
-                . self::blockPath($document, $index)
-                . "'; authored=" . Warnings::value(substr(
-                    $markup,
-                    $span['start'],
-                    $span['end'] - $span['start'],
-                ))
-                . "; delivered=removed; disposition={$safeDisposition}",
-            ];
-        }
-        foreach ($unsafeCandidates as $span) {
-            $index = $span['index'];
-            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
-            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
-            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
-            $warningRows[] = [
-                'start' => $span['start'],
-                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
-                    . self::heroRemovalWarningValue($authored)
-                    . '; delivered=' . self::heroRemovalWarningValue($authored)
-                    . '; disposition=the generated separator boundary owns raw/non-block payload or a non-target '
-                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
-                    . 'and the residual separator was queued for later repair',
-            ];
-        }
-        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
-        array_push($warnings, ...array_column($warningRows, 'warning'));
-        return $out;
+        return self::stripBlocksNamed($markup, $part, ['separator'], 'separator', $safeDisposition, $warnings);
     }
 
     /**
@@ -2978,6 +2920,12 @@ final class GeneratedMarkup
      * edit per the shared convention — stale
      * saved-HTML classes are corrected by fix-blocks re-serialization; the
      * contradictory position class tokens are removed here.
+ *
+ * On a side anchor the copy group and every constrained group between it
+ * and the cover are also justified to the resolved side (BIGR-992): the
+ * skeleton keeps the cover's inner container at full width, so a
+ * constrained group with no `justifyContent` would otherwise center its
+ * children over the focal half (audited: portfolio10, luzia-like4).
      *
      * @param list<array<string,mixed>> $repairs
      * @param list<string>              $warnings
@@ -3012,6 +2960,9 @@ final class GeneratedMarkup
         }
 
         $document = BlockMarkup::parse($markup);
+        $sideTargets = !$horizontallyCentered && in_array($coverHorizontal, ['left', 'right'], true)
+            ? self::anchoredCopyGroups($document)
+            : [];
         $adjusted = 0;
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
@@ -3056,6 +3007,30 @@ final class GeneratedMarkup
                 continue;
             }
             if (!$horizontallyCentered) {
+                if ($name !== 'group' || !isset($sideTargets[$index])) {
+                    continue;
+                }
+                $layout = $attrs['layout'] ?? null;
+                if (!is_array($layout)) {
+                    if (array_key_exists('layout', $attrs)) {
+                        $warnings[] = self::heroAlignmentShapeWarning(
+                            $document,
+                            $index,
+                            $part,
+                            'layout',
+                            $layout,
+                        );
+                    }
+                    continue;
+                }
+                if (($layout['type'] ?? null) !== 'constrained'
+                    || ($layout['justifyContent'] ?? null) === $coverHorizontal
+                ) {
+                    continue;
+                }
+                $attrs['layout']['justifyContent'] = $coverHorizontal;
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
                 continue;
             }
             $className = $attrs['className'] ?? '';
@@ -3166,11 +3141,63 @@ final class GeneratedMarkup
         $repairs[] = [
             'code' => 'hero-copy-centered',
             'part' => $part,
-            'authored' => "{$adjusted} block(s) off the blueprint's centered anchor",
+            'authored' => "{$adjusted} block(s) off the blueprint's '{$textAnchor}' anchor",
             'delivered' => "cover position and copy alignment on the '{$textAnchor}' anchor",
             'disposition' => 'repaired',
         ];
         return $document->render();
+    }
+
+    /**
+     * The groups whose constrained layout places the side-anchored copy:
+     * every group directly inside a cover, plus each marked copy root and
+     * the groups between it and its cover. The cover's inner container
+     * stays full width (ScaffoldThemeStep, BIGR-992), so these are the
+     * boxes whose default auto margins would otherwise center the copy.
+     *
+     * @return array<int,true> indexed by block index
+     */
+    private static function anchoredCopyGroups(BlockMarkup $document): array
+    {
+        $targets = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'group') {
+                continue;
+            }
+            $parent = $document->parent($index);
+            if ($parent !== null && $document->name($parent) === 'cover') {
+                $targets[$index] = true;
+                continue;
+            }
+            $className = ($document->attrs($index) ?? [])['className'] ?? '';
+            $classes = preg_split(
+                '/\s+/',
+                is_string($className) ? trim($className) : '',
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            if (!in_array('hero-composition__copy', $classes, true)) {
+                continue;
+            }
+            $chain = [];
+            $insideCover = false;
+            for ($i = $index; $i !== null; $i = $document->parent($i)) {
+                $name = $document->name($i);
+                if ($name === 'cover') {
+                    $insideCover = true;
+                    break;
+                }
+                if ($name === 'group') {
+                    $chain[] = $i;
+                }
+            }
+            if ($insideCover) {
+                foreach ($chain as $i) {
+                    $targets[$i] = true;
+                }
+            }
+        }
+        return $targets;
     }
 
     private static function heroAlignmentShapeWarning(
@@ -3410,8 +3437,12 @@ final class GeneratedMarkup
         if (!preg_match_all('/<\s*\/?\s*([a-z][a-z0-9-]*)\b[^>]*>/i', $shell, $tags)) {
             return false;
         }
+        $allowed = self::HERO_REMOVAL_INLINE_TAGS;
+        if (in_array($document->name($index), ['image', 'gallery'], true)) {
+            $allowed = [...$allowed, 'figure', 'figcaption', 'img', 'picture', 'source', 'a'];
+        }
         foreach ($tags[1] as $tag) {
-            if (!in_array(strtolower($tag), self::HERO_REMOVAL_INLINE_TAGS, true)) {
+            if (!in_array(strtolower($tag), $allowed, true)) {
                 return true;
             }
         }
@@ -4005,5 +4036,811 @@ final class GeneratedMarkup
             },
             $text
         );
+    }
+
+    public static function stripMediaOffNoImageArchetype(
+        string $markup,
+        string $part,
+        ?string $archetype,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        if ($archetype === null
+            || !SectionComposition::isKnown($archetype)
+            || (int) SectionComposition::metadata($archetype)['max_images'] !== 0
+        ) {
+            return $markup;
+        }
+        $before = $markup;
+        $markup = self::stripBlocksNamed(
+            $markup,
+            $part,
+            ['image', 'gallery'],
+            'image',
+            "the {$archetype} archetype plans no media, so the authored picture was removed at its complete "
+                . 'block boundary and no asset is generated for it',
+            $warnings,
+        );
+        if ($markup === $before) {
+            return $markup;
+        }
+        $authored = preg_match_all('~<img\b~i', $before);
+        $delivered = preg_match_all('~<img\b~i', $markup);
+        $repairs[] = [
+            'code' => 'no-image-archetype-media-removed',
+            'part' => $part,
+            'block' => 'image',
+            'authored' => ((int) $authored) . ' authored image(s) on ' . $archetype,
+            'delivered' => ((int) $delivered) === 0 ? 'removed' : ((int) $delivered) . ' retained for later repair',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    public static function stripMediaOverBudget(
+        string $markup,
+        string $part,
+        ?string $archetype,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        if ($archetype === null || !SectionComposition::isKnown($archetype)) {
+            return $markup;
+        }
+        $max = (int) SectionComposition::metadata($archetype)['max_images'];
+        if ($max <= 0) {
+            return $markup;
+        }
+        $authored = (int) preg_match_all('~<img\b~i', $markup);
+        if ($authored <= $max) {
+            return $markup;
+        }
+        $before = $markup;
+        $markup = self::stripBlocksNamed(
+            $markup,
+            $part,
+            ['image'],
+            'image',
+            "the {$archetype} archetype budgets {$max} picture(s) and this section authored {$authored}; the picture "
+                . 'past the budget was removed at its complete block boundary and no asset is generated for it',
+            $warnings,
+            $max,
+        );
+        if ($markup === $before) {
+            return $markup;
+        }
+        $delivered = (int) preg_match_all('~<img\b~i', $markup);
+        $repairs[] = [
+            'code' => 'media-over-budget-removed',
+            'part' => $part,
+            'block' => 'image',
+            'authored' => "{$authored} authored image(s) on {$archetype} (budget {$max})",
+            'delivered' => "{$delivered} kept",
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    private static function stripBlocksNamed(
+        string $markup,
+        string $part,
+        array $names,
+        string $label,
+        string $safeDisposition,
+        array &$warnings,
+        int $keepFirst = 0,
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $candidates = [];
+        foreach ($document->indices() as $index) {
+            if (!in_array($document->name($index), $names, true)) {
+                continue;
+            }
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $candidates[] = [
+                'index' => $index,
+                'start' => $offset,
+                'end' => $end,
+                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
+            ];
+        }
+        if ($keepFirst > 0) {
+            $candidates = array_slice($candidates, $keepFirst);
+        }
+        if ($candidates === []) {
+            return $markup;
+        }
+
+        $safe = self::heroNestedRemovalSafety($document, $candidates);
+        $safeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $safe[$candidate['index']],
+        )));
+        $unsafeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => !$safe[$candidate['index']],
+        )));
+        $removals = self::outermostRemovalSpans($safeCandidates);
+        $out = self::removeSpans($markup, $removals);
+        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
+
+        $warningRows = [];
+        foreach ($safeCandidates as $span) {
+            $index = $span['index'];
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='"
+                . self::blockPath($document, $index)
+                . "'; authored=" . Warnings::value(substr(
+                    $markup,
+                    $span['start'],
+                    $span['end'] - $span['start'],
+                ))
+                . "; delivered=removed; disposition={$safeDisposition}",
+            ];
+        }
+        foreach ($unsafeCandidates as $span) {
+            $index = $span['index'];
+            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
+            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
+            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
+                    . self::heroRemovalWarningValue($authored)
+                    . '; delivered=' . self::heroRemovalWarningValue($authored)
+                    . "; disposition=the generated {$label} boundary owns raw/non-block payload or a non-target "
+                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
+                    . "and the residual {$label} was queued for later repair",
+            ];
+        }
+        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
+        array_push($warnings, ...array_column($warningRows, 'warning'));
+        return $out;
+    }
+
+    public static function stripCtaPanelSiblings(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $children = $document->children($root);
+        $panel = null;
+        foreach ($children as $child) {
+            if ($document->name($child) === 'group'
+                && in_array(SectionComposition::CTA_PANEL_CLASS, self::classTokens(
+                    (string) (($document->attrs($child) ?? [])['className'] ?? ''),
+                ), true)
+            ) {
+                $panel = $child;
+                break;
+            }
+        }
+        if ($panel === null) {
+            return $markup;
+        }
+        $spans = [];
+        foreach ($children as $child) {
+            if ($child === $panel) {
+                continue;
+            }
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                continue;
+            }
+            $start = $document->openingOffset($child);
+            $spans[] = ['index' => $child, 'start' => $start, 'end' => $end];
+            $warnings[] = "file='theme/parts/{$part}.html'; block='" . self::blockPath($document, $child)
+                . "'; authored=" . Warnings::value(substr($markup, $start, $end - $start))
+                . '; delivered=removed; disposition=a closing cta-panel section holds one panel and nothing else in'
+                . ' its root; the sibling block was removed at its complete block boundary';
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-siblings-stripped',
+            'part' => $part,
+            'authored' => count($spans) . ' block(s) beside the panel',
+            'delivered' => 'the one panel',
+            'disposition' => 'repaired',
+        ];
+        return self::removeSpans($markup, self::outermostRemovalSpans($spans));
+    }
+
+    /**
+     * Center the copy and the action of a closing cta-panel that holds no
+     * image. The recipe asks the model to center them in prose only, and a
+     * panel then ships with a centered heading over a start-aligned lead
+     * (portfolio3, lumen3, tbilisi4 on frm_sections). A CSS rule on the
+     * root cannot repair it: the paragraph carries its own `has-text-align-*`
+     * class, and a per-element class beats inherited alignment. A panel with
+     * a columns row keeps the start alignment of its text column.
+     */
+    public static function centerImagelessCtaPanel(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $panel = self::ctaPanelIndex($document);
+        if ($panel === null) {
+            return $markup;
+        }
+        $inside = [];
+        foreach ($document->indices() as $index) {
+            for ($ancestor = $document->parent($index); $ancestor !== null; $ancestor = $document->parent($ancestor)) {
+                if ($ancestor === $panel) {
+                    $inside[] = $index;
+                    break;
+                }
+            }
+        }
+        foreach ($inside as $index) {
+            if ($document->name($index) === 'columns') {
+                return $markup;
+            }
+        }
+        $adjusted = 0;
+        foreach ($inside as $index) {
+            $name = $document->name($index);
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'heading' || $name === 'paragraph') {
+                $style = $attrs['style'] ?? [];
+                $typography = is_array($style) ? ($style['typography'] ?? []) : null;
+                if (!is_array($style) || !is_array($typography)) {
+                    continue;
+                }
+                $legacy = $name === 'heading' ? ($attrs['textAlign'] ?? null) : ($attrs['align'] ?? null);
+                if (($typography['textAlign'] ?? null) === 'center' && ($legacy === null || $legacy === 'center')) {
+                    continue;
+                }
+                $attrs['style']['typography']['textAlign'] = 'center';
+                unset($attrs[$name === 'heading' ? 'textAlign' : 'align']);
+                $document->setAttrs($index, $attrs);
+                self::setOwnTextAlignClass($document, $index, 'center');
+                $adjusted++;
+                continue;
+            }
+            if ($name === 'buttons') {
+                $layout = $attrs['layout'] ?? [];
+                if (!is_array($layout) || ($layout['justifyContent'] ?? null) === 'center') {
+                    continue;
+                }
+                $attrs['layout'] = ['type' => 'flex'] + $layout;
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            }
+        }
+        if ($adjusted === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-copy-centered',
+            'part' => $part,
+            'authored' => $adjusted . ' start-aligned block(s) in a panel with no image',
+            'delivered' => 'centered copy and action',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Put one `has-text-align-<direction>` token on the block's own root tag,
+     * in place of any other direction, so the delivered HTML matches the
+     * attribute before the block fixer re-serializes it.
+     */
+    private static function setOwnTextAlignClass(BlockMarkup $document, int $index, string $direction): void
+    {
+        $own = $document->ownHtml($index);
+        if (preg_match('/<(?:p|h[1-6])\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return;
+        }
+        $opening = $m[0][0];
+        $token = 'has-text-align-' . $direction;
+        if (preg_match('/\sclass="([^"]*)"/', $opening, $c) === 1) {
+            $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $placed = false;
+            $kept = [];
+            foreach ($tokens as $t) {
+                if (preg_match('/^has-text-align-(?:left|center|right)$/', $t) !== 1) {
+                    $kept[] = $t;
+                } elseif (!$placed) {
+                    $kept[] = $token;
+                    $placed = true;
+                }
+            }
+            if (!$placed) {
+                // WP puts the alignment class right after the block class.
+                array_splice($kept, str_starts_with($kept[0] ?? '', 'wp-block-') ? 1 : 0, 0, [$token]);
+            }
+            $clean = str_replace($c[0], ' class="' . implode(' ', $kept) . '"', $opening);
+        } else {
+            $clean = preg_replace('/^<(p|h[1-6])\b/', '<$1 class="' . $token . '"', $opening, 1) ?? $opening;
+        }
+        if ($clean !== $opening) {
+            $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+        }
+    }
+
+    /**
+     * Bleed the image of a closing cta-panel to the panel's edges under every
+     * card construction except `framed`. The panel follows the site's cards:
+     * a framed card sets its media inside the card padding, and every other
+     * construction runs the media to the box edge. The recipe keeps the 60/40
+     * columns row. The build marks the panel and its two columns, and the
+     * theme's `.cta-panel--flush` rules zero the panel padding, stretch the
+     * image column, and move the padding onto the copy column.
+     */
+    public static function flushCtaPanelMedia(string $markup, string $part, string $cardStyle, array &$repairs = []): string
+    {
+        if ($cardStyle === 'framed') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $panel = self::ctaPanelIndex($document);
+        if ($panel === null) {
+            return $markup;
+        }
+        $rows = array_values(array_filter(
+            $document->children($panel),
+            static fn (int $child): bool => $document->name($child) === 'columns',
+        ));
+        if (count($rows) !== 1) {
+            return $markup;
+        }
+        $columns = array_values(array_filter(
+            $document->children($rows[0]),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        if (count($columns) !== 2) {
+            return $markup;
+        }
+        $media = null;
+        $copy = null;
+        foreach ($columns as $column) {
+            $names = array_map(static fn (int $child): string => $document->name($child), $document->children($column));
+            if ($names === ['image']) {
+                $media = $column;
+            } elseif ($names !== [] && array_intersect($names, ['image', 'cover', 'columns', 'gallery', 'media-text']) === []) {
+                $copy = $column;
+            }
+        }
+        if ($media === null || $copy === null) {
+            return $markup;
+        }
+        $added = 0;
+        $hooks = [
+            [$panel, SectionComposition::CTA_PANEL_FLUSH_CLASS],
+            [$copy, SectionComposition::CTA_PANEL_COPY_CLASS],
+            [$media, SectionComposition::CTA_PANEL_MEDIA_CLASS],
+        ];
+        foreach ($hooks as [$index, $token]) {
+            if (self::addOwnClassToken($document, $index, $token)) {
+                $added++;
+            }
+        }
+        if ($added === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'cta-panel-media-flushed',
+            'part' => $part,
+            'authored' => 'an image inset in the panel padding',
+            'delivered' => "the image bleeds to the panel edge under the '{$cardStyle}' card style",
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /** The first group that carries the cta-panel class, or null. */
+    private static function ctaPanelIndex(BlockMarkup $document): ?int
+    {
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'group'
+                && in_array(SectionComposition::CTA_PANEL_CLASS, self::classTokens(
+                    (string) (($document->attrs($index) ?? [])['className'] ?? ''),
+                ), true)
+            ) {
+                return $index;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Add one class token to a block's className attribute and to the class
+     * attribute of its own root tag. Returns false when the block already
+     * carries the token or has no root tag to write on.
+     */
+    private static function addOwnClassToken(BlockMarkup $document, int $index, string $token): bool
+    {
+        $attrs = $document->attrs($index) ?? [];
+        $classes = self::classTokens((string) ($attrs['className'] ?? ''));
+        if (in_array($token, $classes, true)) {
+            return false;
+        }
+        $own = $document->ownHtml($index);
+        if (preg_match('/<[a-z][a-z0-9]*\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return false;
+        }
+        $classes[] = $token;
+        $attrs['className'] = implode(' ', $classes);
+        $document->setAttrs($index, $attrs);
+        $opening = $m[0][0];
+        if (preg_match('/\sclass="([^"]*)"/', $opening, $c) === 1) {
+            $tokens = self::classTokens($c[1]);
+            if (!in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+            $clean = str_replace($c[0], ' class="' . implode(' ', $tokens) . '"', $opening);
+        } else {
+            $clean = preg_replace('/^<([a-z][a-z0-9]*)\b/', '<$1 class="' . $token . '"', $opening, 1) ?? $opening;
+        }
+        if ($clean !== $opening) {
+            $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+        }
+        return true;
+    }
+
+    public static function stripStepPlatePaint(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $stripped = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'group') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('step-plate', $classes, true)) {
+                continue;
+            }
+            $painted = isset($attrs['backgroundColor']) || isset($attrs['gradient'])
+                || isset($attrs['style']['color']['background']) || isset($attrs['style']['color']['gradient']);
+            if (!$painted) {
+                continue;
+            }
+            unset($attrs['backgroundColor'], $attrs['gradient'], $attrs['style']['color']['background'], $attrs['style']['color']['gradient']);
+            if (isset($attrs['style']['color']) && $attrs['style']['color'] === []) {
+                unset($attrs['style']['color']);
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            $own = $document->ownHtml($index);
+            if (preg_match('/<div\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $kept = array_values(array_filter($tokens, static fn (string $t): bool
+                        => $t !== 'has-background'
+                        && preg_match('/^has-[a-z0-9-]+-(?:background-color|gradient-background)$/', $t) !== 1));
+                    return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+                }, $opening, 1) ?? $opening;
+                $clean = preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $c): string {
+                    $decls = array_values(array_filter(array_map('trim', explode(';', $c[1])), static fn (string $d): bool
+                        => $d !== '' && preg_match('/^background(?:-color|-image)?\s*:/i', $d) !== 1));
+                    return $decls === [] ? '' : ' style="' . implode(';', $decls) . '"';
+                }, $clean) ?? $clean;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $stripped++;
+        }
+        if ($stripped === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'step-plate-paint-stripped',
+            'part' => $part,
+            'authored' => $stripped . ' painted step plate(s)',
+            'delivered' => 'plates tinted by the theme from the band',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    public static function demotePricelessFigure(string $markup, string $part, array &$repairs = [], array &$warnings = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $demoted = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('price-figure', $classes, true)) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($text === '' || preg_match('/\p{N}|[$€£¥₹₩₽]|\b(?:free|gratis)\b/iu', $text) === 1) {
+                continue;
+            }
+            $kept = array_values(array_filter($classes, static fn (string $c): bool => $c !== 'price-figure'));
+            if ($kept === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $kept);
+            }
+            $document->setAttrs($index, $attrs);
+
+            $own = $document->ownHtml($index);
+            if (preg_match('/<p\b[^>]*>/', $own, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $opening = $m[0][0];
+                $clean = preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c): string {
+                    $tokens = array_values(array_filter(preg_split('/\s+/', trim($c[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [], static fn (string $t): bool => $t !== 'price-figure'));
+                    return $tokens === [] ? '' : ' class="' . implode(' ', $tokens) . '"';
+                }, $opening, 1) ?? $opening;
+                if ($clean !== $opening) {
+                    $document->spliceOwnHtml($index, (int) $m[0][1], strlen($opening), $clean);
+                }
+            }
+            $demoted[] = $text;
+            $warnings[] = "file='theme/parts/{$part}.html'; block='paragraph'; authored=price-figure \"" . mb_strimwidth($text, 0, 60, '…', 'UTF-8')
+                . '"; delivered=plain scope line; disposition=a figure without a price or a currency is a scope line, not a figure';
+        }
+        if ($demoted === []) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'priceless-figure-demoted',
+            'part' => $part,
+            'authored' => count($demoted) . ' price figure(s) without a price: ' . implode(' | ', array_map(static fn (string $t): string => mb_strimwidth($t, 0, 40, '…', 'UTF-8'), $demoted)),
+            'delivered' => 'plain scope lines',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    public static function widenOrphanProjectTile(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'project-grid-2x2') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $rows = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'columns') {
+                continue;
+            }
+            $columns = array_values(array_filter(
+                $document->children($index),
+                static fn (int $child): bool => $document->name($child) === 'column',
+            ));
+            $hasTile = false;
+            foreach ($columns as $column) {
+                foreach ($document->children($column) as $child) {
+                    if ($document->name($child) === 'cover') {
+                        $hasTile = true;
+                    }
+                }
+            }
+            if ($hasTile) {
+                $rows[] = ['index' => $index, 'columns' => $columns];
+            }
+        }
+        $changed = false;
+        foreach ($rows as $i => $row) {
+            if (count($row['columns']) !== 1 || $i === 0 || count($rows[$i - 1]['columns']) !== 2) {
+                continue;
+            }
+            $column = $row['columns'][0];
+            if (!$document->isStructurallySafe($column)) {
+                continue;
+            }
+            $attrs = $document->attrs($column) ?? [];
+            $width = is_string($attrs['width'] ?? null) ? trim($attrs['width']) : '';
+            if ($width === '100%') {
+                continue;
+            }
+
+            $attrs['width'] = '100%';
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array(self::WIDE_TILE_CLASS, $classes, true)) {
+                $classes[] = self::WIDE_TILE_CLASS;
+            }
+            $attrs['className'] = implode(' ', $classes);
+            $document->setAttrs($column, $attrs);
+            $repairs[] = [
+                'code' => 'orphan-project-tile-widened',
+                'part' => $part,
+                'block' => 'column',
+                'authored' => $width === '' ? 'no width' : "width '{$width}'",
+                'delivered' => "width '100%'",
+                'disposition' => 'repaired',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    public static function ownLedgerFigureScale(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'stat-ledger') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $inColumn = false;
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if ($document->name($parent) === 'column') {
+                    $inColumn = true;
+                    break;
+                }
+            }
+            if (!$inColumn) {
+                continue;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($text === '' || preg_match(SectionComposition::FIGURE_PATTERN, $text) !== 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $dropped = [];
+            $size = trim((string) ($attrs['fontSize'] ?? ''));
+            if ($size !== '') {
+                unset($attrs['fontSize']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$size}-font-size");
+                $dropped[] = "fontSize '{$size}'";
+            }
+            if (is_array($attrs['style']['typography'] ?? null)) {
+                foreach (['fontSize', 'lineHeight'] as $key) {
+                    if (array_key_exists($key, $attrs['style']['typography'])) {
+                        $dropped[] = "style.typography.{$key}";
+                        unset($attrs['style']['typography'][$key]);
+                    }
+                }
+                if ($attrs['style']['typography'] === []) {
+                    unset($attrs['style']['typography']);
+                }
+                if ($attrs['style'] === []) {
+                    unset($attrs['style']);
+                }
+            }
+            if ($dropped === []) {
+                continue;
+            }
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'heading.figure',
+                'authored' => implode(', ', $dropped),
+                'delivered' => 'removed',
+                'note' => 'the theme caps the ledger figure to its column; an authored size would overrun it',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    public static function defaultCoverDim(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if (trim((string) ($attrs['url'] ?? '')) === '' || is_numeric($attrs['dimRatio'] ?? null)) {
+                continue;
+            }
+            $attrs['dimRatio'] = self::COVER_DEFAULT_DIM;
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'code' => 'cover-dim-default',
+                'part' => $part,
+                'block' => 'cover',
+                'authored' => 'no dimRatio (core paints 100, a solid overlay)',
+                'delivered' => 'dimRatio ' . self::COVER_DEFAULT_DIM,
+                'disposition' => 'repaired',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
+
+    private static function isProjectTile(BlockMarkup $document, int $cover): bool
+    {
+        for ($node = $document->parent($cover); $node !== null; $node = $document->parent($node)) {
+            $name = $document->name($node);
+            if ($name === 'column') {
+                return true;
+            }
+            if ($name !== 'group') {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    public static function ownProjectTileInk(string $markup, string $part, ?string $archetype, array &$repairs = []): string
+    {
+        if ($archetype !== 'project-grid-2x2') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+
+            if (!self::isProjectTile($document, $index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if (($attrs['customOverlayColor'] ?? null) === self::PROJECT_TILE_OVERLAY
+                && ($attrs['isUserOverlayColor'] ?? null) === true
+                && ($attrs['dimRatio'] ?? null) === self::PROJECT_TILE_DIM
+                && ($attrs['style']['color']['text'] ?? null) === self::PROJECT_TILE_INK
+                && !isset($attrs['overlayColor']) && !isset($attrs['textColor'])
+                && !isset($attrs['gradient']) && !isset($attrs['customGradient'])
+            ) {
+                continue;
+            }
+            $authored = [];
+            foreach (['overlayColor', 'customOverlayColor', 'isUserOverlayColor', 'gradient', 'customGradient', 'textColor'] as $key) {
+                if (array_key_exists($key, $attrs)) {
+                    $authored[] = $key . ' ' . json_encode($attrs[$key]);
+                    unset($attrs[$key]);
+                }
+            }
+            if (isset($attrs['dimRatio']) && (int) $attrs['dimRatio'] !== self::PROJECT_TILE_DIM) {
+                $authored[] = 'dimRatio ' . json_encode($attrs['dimRatio']);
+            }
+            if (isset($attrs['style']['color']['text'])) {
+                $authored[] = 'style.color.text ' . json_encode($attrs['style']['color']['text']);
+            }
+            $attrs['customOverlayColor'] = self::PROJECT_TILE_OVERLAY;
+            $attrs['isUserOverlayColor'] = true;
+            $attrs['dimRatio'] = self::PROJECT_TILE_DIM;
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $color = is_array($style['color'] ?? null) ? $style['color'] : [];
+            $color['text'] = self::PROJECT_TILE_INK;
+            $style['color'] = $color;
+            $attrs['style'] = $style;
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'cover.project-tile',
+                'authored' => $authored === [] ? 'no tile ink' : implode(', ', $authored),
+                'delivered' => 'overlay ' . self::PROJECT_TILE_OVERLAY . ' at ' . self::PROJECT_TILE_DIM . '%, text ' . self::PROJECT_TILE_INK,
+                'note' => 'the build owns a project tile\'s overlay and ink so a photo tile reads the same on every ground',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
     }
 }

@@ -9,6 +9,53 @@ use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+foreach (['page', 'section'] as $resumeMode) {
+    test("inner-pages-design excludes a retired spec mood on resume in {$resumeMode} mode", function () use ($resumeMode) {
+        [$project, $llm, $tmp] = inner_pages_fixture([
+            inner_page('home', 'Home', 'Welcome visitors'),
+            inner_page('about', 'About', 'Explain the studio'),
+        ]);
+        $previousMode = getenv('SITE_BUILD_GEN_UNIT');
+        putenv('SITE_BUILD_GEN_UNIT=' . $resumeMode);
+        try {
+            $spec = $project->readJson('siteSpec.json');
+            $spec['visual_vibe'] = 'sophisticated';
+            $project->writeJson('siteSpec.json', $spec);
+            $project->writeJson('meta.json', ['prompt' => 'A design studio']);
+            seed_test_design_direction($project);
+            if ($resumeMode === 'section') {
+                $llm->queueJson(['sections' => [[
+                    'slug' => 'about-story', 'title' => 'Our story', 'type' => 'content',
+                    'purpose' => 'Explain the studio', 'content_notes' => 'Use the site facts.',
+                    'layout_archetype' => 'centered-stack', 'background' => 'base',
+                    'vertical_density' => 'standard', 'handoff' => 'Close with the next step.',
+                ]]]);
+            }
+            $llm->queueText(inner_pages_home_body());
+            $llm->queueText($resumeMode === 'section'
+                ? '<section id="about-story"><h1>Our story</h1></section>'
+                : '<main><h1>About</h1></main>');
+
+            inner_pages_run($project, $llm);
+
+            assert_eq($resumeMode === 'section' ? 3 : 2, count($llm->calls));
+            foreach ($llm->calls as $call) {
+                $prompt = implode('', $call['opts']['cached_prefixes'] ?? []) . $call['prompt'];
+                assert_true(!str_contains($prompt, 'visual_vibe'));
+                assert_true(!str_contains($prompt, 'sophisticated'));
+                assert_contains('Northstar Studio', $prompt);
+            }
+            assert_true($project->exists('design/home-body.html'));
+            assert_true($project->exists('design/about.html'));
+        } finally {
+            $previousMode === false
+                ? putenv('SITE_BUILD_GEN_UNIT')
+                : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
+            remove_tree($tmp);
+        }
+    });
+}
+
 /**
  * @param list<array<string,mixed>> $pages
  * @return array{0:Project,1:FakeLlm,2:string}

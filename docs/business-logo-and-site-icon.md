@@ -79,7 +79,7 @@ Shape (same keys as a collected placeholder, plus `role`):
 |---|---|
 | `filename` | `site-logo.png` |
 | `src` | `theme:./assets/site-logo.png` |
-| `subject` | composed from `area`, `topic`, and `visual_vibe` only — never `name` or `title` |
+| `subject` | composed from `area` and `topic` only — never `name`, `title`, or a mood |
 | `pageContext` | `site logo and site icon, small square mark in the header` |
 | `style` | `flat` |
 | `aspectRatio` | `square` (Gemini `1:1`) |
@@ -89,9 +89,9 @@ Shape (same keys as a collected placeholder, plus `role`):
 
 `.png` selects the existing transparent pipeline (`ImagePromptComposer` white isolation, `ImageTransparency` keying, 1K). The subject must forbid letters, numerals, wordmarks, signage, and the site name (BIGR-768). Example subject:
 
-> simple geometric brand mark for a neighborhood bakery, warm rustic mood, single ink, no letters, no numerals, no wordmark, no signage
+> simple geometric brand mark for a neighborhood bakery, single ink, no letters, no numerals, no wordmark, no signage
 
-`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to a safe `site_type`, then to `an organization` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
+`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic` and `area` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to a safe `site_type`, then to `an organization` when a candidate repeats `name`, `persona_name`, or `email_domain`.
 
 ## Site-logo post-process
 
@@ -233,7 +233,7 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Both must pass.
 
 - `collect-images` appends the mark for photography, gallery, nonprofit, and product-page specs with no `persona_name`.
-- `collect-images` appends `site-logo.png` + `role` for a business spec; a personal fixture does not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
+- `collect-images` appends `site-logo.png` + `role` for a business spec; a personal fixture does not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic` fall back rather than entering the subject.
 - `ImageTransparency::padToSquare` centres a non-square bitmap on a transparent square at `max(w, h, 512)` without resampling, and returns its input unchanged on failure.
 - `ImageTransparency::isKeyed` is false for a fully opaque PNG, true for one with transparent corners, and true when those corners quantise to a small non-zero alpha (`< 0.01`).
 - `generate-images` square-pads only the `site-logo` role, and on an unkeyed mark drops the role, removes the manifest row, and does not copy the file.

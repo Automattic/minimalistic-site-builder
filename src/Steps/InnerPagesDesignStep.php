@@ -107,7 +107,7 @@ final class InnerPagesDesignStep implements Step
     /** @param list<string> $warnings */
     private function runPageMode(Project $project, array $warnings = []): void
     {
-        $siteSpec = $project->readJson('siteSpec.json');
+        $siteSpec = json_decode(SiteSpecStep::promptText($project), true, 512, JSON_THROW_ON_ERROR);
         $allPages = PagePlanStep::flattenPages($siteSpec);
         $pages = array_values(array_filter(
             $allPages,
@@ -372,7 +372,7 @@ final class InnerPagesDesignStep implements Step
 
     private function runSectionMode(Project $project): void
     {
-        $siteSpec = $project->readJson('siteSpec.json');
+        $siteSpec = json_decode(SiteSpecStep::promptText($project), true, 512, JSON_THROW_ON_ERROR);
         $allPages = PagePlanStep::flattenPages($siteSpec);
         $pages = array_values(array_filter(
             $allPages,

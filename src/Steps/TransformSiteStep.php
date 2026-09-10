@@ -400,7 +400,6 @@ final class TransformSiteStep implements Step
             $this->generateMissingChrome(
                 $project,
                 $allPages,
-                $siteSpec,
                 $chromeNeedsGeneration,
                 $missingLandmarks,
                 $outputs,
@@ -1166,7 +1165,6 @@ final class TransformSiteStep implements Step
     private function generateMissingChrome(
         Project $project,
         array $pages,
-        array $siteSpec,
         array $missing,
         array $missingLandmarks,
         array &$outputs,
@@ -1175,7 +1173,7 @@ final class TransformSiteStep implements Step
         array &$warnings,
     ): void {
         $common = [
-            'site_spec' => $siteSpec,
+            'site_spec' => SiteSpecStep::promptText($project),
             'language' => SiteSpecStep::languageOf($project),
             'theme_json' => $project->readJson('theme/theme.json'),
             'design_direction' => DesignDirectionStep::readFor($project),

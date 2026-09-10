@@ -11,6 +11,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -63,9 +64,9 @@ use Automattic\SiteBuild\Warnings;
  *         - for an explicit depth commitment, writes and enqueues the
  *           build-owned depth kit that consumes the matching `depth` shadow
  *           preset on cards and contained media; full-bleed media stays flat.
- *         - for a committed page surface other than `none`, writes and
+ *         - for an optional section texture other than `none`, writes and
  *           enqueues the build-owned overlay (assets/surface/surface.css) that
- *           claims `body::before` as a fixed grain sheet; `none` prunes it.
+ *           paints below a marked section; `none` removes the stylesheet.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -123,6 +124,7 @@ final class FinalizeThemeStep implements Step
         $imageCrop = DesignDirectionStep::imageCropFor($project);
         $depth = DesignDirectionStep::depthFor($project);
         $surface = DesignDirectionStep::surfaceFor($project);
+        $typeTreatment = DesignDirectionStep::typeTreatmentFor($project);
         $palette = self::paletteColors($project);
         $imageTreatmentCss = ImageTreatment::kitCss($imageTreatment, $palette);
         $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
@@ -166,6 +168,12 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $typeTreatmentShipped = self::writeOverlayKit(
+            $project,
+            self::typeTreatmentKit(),
+            TypeTreatment::kitCss($typeTreatment),
+            $headerWarnings,
+        );
         $overlays = [];
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
@@ -185,6 +193,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($deviceShipped) {
             $overlays[] = self::deviceKit();
+        }
+        if ($typeTreatmentShipped) {
+            $overlays[] = self::typeTreatmentKit();
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -213,6 +224,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($deviceShipped
             ? "  device: '{$device}' utility enqueued\n"
             : "  device: {$device} (kit not shipped)\n");
+        Narrator::write($typeTreatmentShipped
+            ? "  type treatment: '{$typeTreatment}' statement-lines register enqueued\n"
+            : '  type treatment: ' . ($typeTreatment ?? 'none committed') . " (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
@@ -231,9 +245,7 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
-     * The surface overlay claims `body::before`, so if the generated
-     * stylesheet was already using it, something lost its layer. Silence there
-     * would mean a design's own decoration vanishing with nothing said.
+     * Record a generated rule that conflicts with the texture pseudo-element.
      *
      * @return list<string>
      */
@@ -243,11 +255,12 @@ final class FinalizeThemeStep implements Step
             return [];
         }
         $css = $project->readText('theme/style.css');
-        if (preg_match('/\bbody\b(?:\s|:where\([^)]*\))*::?before\b/i', $css) !== 1) {
+        $class = Surface::className($surface);
+        if ($class === null || preg_match('/\.' . preg_quote($class, '/') . '[^{}]*::?before\b/i', $css) !== 1) {
             return [];
         }
-        return ["file='theme/style.css'; path=\"body::before\"; authored=generated design rule;"
-            . " delivered=overridden; disposition the '{$surface}' surface overlay claims html body::before"
+        return ["file='theme/style.css'; path=\"{$class}::before\"; authored=generated design rule;"
+            . " delivered=overridden; disposition the '{$surface}' surface overlay claims {$class}::before"
             . ' and resets it, so a generated rule on the same pseudo-element no longer renders'];
     }
 
@@ -284,15 +297,36 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
+        return [
+            self::shapeKit(),
+            self::imageTreatmentKit(),
+            self::imageCropKit(),
+            self::depthKit(),
+            self::surfaceKit(),
+            self::deviceKit(),
+            self::typeTreatmentKit(),
+        ];
     }
 
     public static function surfaceKit(): OverlayKit
     {
         return new OverlayKit(
             'surface',
-            "// Committed page surface: a fixed overlay, never on a scrolling\n"
-                . '// container. Loads after generated style.css.',
+            '// Optional section texture. Loads after generated style.css.',
+        );
+    }
+
+    /**
+     * The statement-lines register: one archetype opts out of an uppercase
+     * site heading case. Only `caps-tight` and `caps-tracked` ship CSS, so
+     * every other treatment prunes the kit.
+     */
+    public static function typeTreatmentKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'type-treatment',
+            "// Committed statement-lines register: the archetype drops an\n"
+                . '// uppercase site heading case. Loads after generated style.css.',
         );
     }
 
@@ -381,7 +415,7 @@ final class FinalizeThemeStep implements Step
      * build. readText() remains outside the JSON catch: an actual filesystem
      * read failure is infrastructure, not an imperfect generated value.
      *
-     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid',1:list<string>}
+     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid'|'overlay-transient',1:list<string>}
      */
     private static function headerBehaviorFor(Project $project): array
     {

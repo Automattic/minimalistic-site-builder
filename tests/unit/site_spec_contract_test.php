@@ -123,7 +123,7 @@ test('siteSpec schema and example publish the canonical package contract', funct
     $example = site_spec_contract_object(Package::siteSpecExamplePath());
     $required = [
         'name', 'slug', 'title', 'description', 'site_type', 'topic', 'area', 'audience',
-        'language', 'writing_direction', 'persona_name', 'email_domain', 'invented', 'visual_vibe',
+        'language', 'writing_direction', 'persona_name', 'email_domain', 'invented',
         'subject_is_visual_work', 'animation_request', 'sections', 'pages',
     ];
 

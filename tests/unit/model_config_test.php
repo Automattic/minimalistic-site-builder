@@ -51,7 +51,6 @@ test('StepDefaults default (anthropic) reproduces the historical model mapping',
     putenv('LLM_MODEL_SMALL');
     $models = StepDefaults::models();
 
-    assert_eq('claude-haiku-4-5', $models['refine-prompt']);
     assert_eq('claude-haiku-4-5', $models['site-spec']);
     assert_eq('claude-haiku-4-5', $models['design-direction-seeds']);
     assert_eq('claude-haiku-4-5', $models['page-plan']);
@@ -69,7 +68,6 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
         $models = StepDefaults::models();
         // small tier → gpt-5.4-mini
         assert_eq('gpt-5.4-mini', $models['site-spec']);
-        assert_eq('gpt-5.4-mini', $models['refine-prompt']);
         assert_eq('gpt-5.4-mini', $models['page-plan']);
         // large tier → gpt-5.5
         assert_eq('gpt-5.5', $models['design-direction']);
@@ -201,7 +199,7 @@ test('LLM_MODEL_<STEP> overrides any provider tier, with any model id', function
         $models = StepDefaults::models();
         assert_eq('claude-haiku-4-5', $models['site-spec'], 'per-step override wins');
         assert_eq('gpt-5.5-pro', $models['sections'], 'per-step override wins on large tier');
-        assert_eq('gpt-5.4-mini', $models['refine-prompt'], 'untouched step keeps provider small tier');
+        assert_eq('gpt-5.4-mini', $models['page-plan'], 'untouched step keeps provider small tier');
     } finally {
         putenv('LLM_PROVIDER');
         putenv('LLM_MODEL_SITE_SPEC');

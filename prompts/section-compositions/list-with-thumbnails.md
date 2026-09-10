@@ -24,8 +24,12 @@ share one rhythm, and the reader scans down the column of thumbnails.
   thumbnail crops square. Use group, columns/column, image, heading, paragraph,
   list, separator, and buttons.
 - Surface/width: the band runs wide or full, and each row takes
-  `"align":"wide"` itself. A `wp:separator` between rows is allowed here,
-  because the index reading is what the rule serves.
+  `"align":"wide"` itself. The theme caps the thumbnail column and the text
+  measure, so a wide band still reads: the row keeps the band's leading edge
+  and the leftover space sits at its trailing edge. Author the `18%`/`82%`
+  widths and nothing else — never add a `width`, a `max-width`, or an inline
+  style to hold the measure yourself. A `wp:separator` between rows is allowed
+  here, because the index reading is what the rule serves.
 - Objective failure: rows with no thumbnail, a row that stacks the thumbnail
   above its text on desktop, `"isStackedOnMobile"` left at its default, or rows
   rebuilt as a card grid.

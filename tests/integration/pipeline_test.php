@@ -52,14 +52,12 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $tmp = sys_get_temp_dir() . '/builder_int_' . uniqid();
     $llm = new FakeLlm();
 
-    // refine-prompt (text) — fast small-model clean-up of the raw prompt, runs first
-    $llm->queueText('A cozy neighborhood bakery selling artisan bread and pastries to local residents, with a warm and rustic feel.');
     // site-spec (json) — factual info only, no design fields; carries the page tree
     $llm->queueJson([
         'name' => 'Hearth & Crumb', 'slug' => 'hearth-crumb',
         'title' => 'Hearth & Crumb', 'site_type' => 'bakery storefront',
         'topic' => 'artisan bread and pastries', 'area' => 'bakery',
-        'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
+        'audience' => 'neighborhood locals',
         'language' => 'en', 'persona_name' => '',
         'email_domain' => 'hearthandcrumb.com', 'invented' => ['name'],
         'sections' => ['Hero', 'Specials', 'About'],
@@ -96,6 +94,9 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
             ],
         ],
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
+        // The direction asks for a header that stays; the resolver still
+        // applies its own archetype, depth, and contrast vetoes (BIGR-998).
+        'header_chrome' => 'persistent',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
@@ -239,10 +240,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 
-    // The two-page composition benefits from persistent navigation, while its
-    // mixed opening treatments make an overlay unsafe. The deterministic
-    // resolver therefore commits a closed sticky-soft contract whose palette
-    // pair remains readable in both visual states.
+    // The direction commits to persistent chrome, the two-page composition
+    // has the depth to support it, and its mixed opening treatments make an
+    // overlay unsafe. The deterministic resolver therefore commits a closed
+    // sticky-soft contract whose palette pair remains readable in both
+    // visual states.
     $headerBehavior = $project->readJson('headerBehavior.json');
     assert_eq([
         'behavior',
@@ -495,7 +497,7 @@ test('pipeline step order is correct', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
     $ids = blocks_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
-        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
         'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',

@@ -26,7 +26,6 @@ if ($spec === []) {
 }
 echo '# ' . ($spec['name'] ?? '–') . "  ({$slug})\n";
 echo 'tagline: ' . ($spec['tagline'] ?? $spec['topic'] ?? '–') . "\n";
-echo 'vibe: ' . ($spec['visual_vibe'] ?? '–') . "\n";
 // Fonts are a design decision; they live in theme.json now, not the spec.
 $theme = $project->exists('theme/theme.json')
     ? json_decode($project->readText('theme/theme.json'), true)
