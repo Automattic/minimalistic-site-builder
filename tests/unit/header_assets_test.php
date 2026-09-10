@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Steps\HeaderHeroStep;
 
 /** Return the complete CSS block beginning at a selector/at-rule needle. */
 function header_asset_css_block(string $css, string $needle): string
@@ -287,6 +289,68 @@ test('header driver runtime covers restored scroll, measurement, admin bar, and 
 
     assert_eq(0, $exit, implode("\n", $output));
     assert_contains('header state driver runtime harness passed', implode("\n", $output));
+});
+
+test('header CSS reserves the overlay safe-top zone the contract states', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+    $scope = ':is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)'
+        . "\n    + .wp-block-post-content\n    .";
+
+    // The kit's reservation and the contract fact are the same zone stated
+    // twice; a change to one that misses the other reopens the bug.
+    assert_contains('--header-safe-top: ' . AboveFoldContract::OVERLAY_SAFE_TOP_PX . 'px', $css);
+    assert_eq(80, AboveFoldContract::OVERLAY_SAFE_TOP_PX);
+
+    // The zone actually applied is what the header covers — its measured
+    // height plus the admin bar it sits below — with the contract fact only
+    // as the floor for the first paint and for no-JS.
+    $derived = header_asset_css_block($css, $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ' {');
+    assert_contains('--header-clearance: max(', $derived);
+    assert_contains('var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px)', $derived);
+    assert_contains('var(--header-safe-top)', $derived);
+
+    // A cover centres its content, so the zone is reserved on BOTH sides: an
+    // opening that later gains a height keeps the composition it was given.
+    // Matched exactly, because `padding-block: X 0` is the one-sided form.
+    $cover = header_asset_css_block(
+        $css,
+        $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . "\n    > .wp-block-cover__inner-container"
+    );
+    assert_contains('padding-block: var(--header-clearance);', $cover);
+    assert_true(
+        preg_match('/padding-block:\s*var\(--header-clearance\)\s*;/', $cover) === 1
+            && preg_match('/padding(?:-block)?-(?:start|top):/', $cover) !== 1,
+        'a one-sided reservation would push centred hero content off its centre line'
+    );
+
+    // A flow group takes a spacer box, never a margin: a margin on the first
+    // child collapses out of a band with no top padding of its own.
+    $group = header_asset_css_block(
+        $css,
+        $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ':not(.wp-block-cover)::before'
+    );
+    assert_contains('block-size: var(--header-clearance)', $group);
+    assert_true(
+        !str_contains($group, 'margin-block-start'),
+        'a collapsible margin would move the band instead of clearing its content'
+    );
+
+    // Both consumers stay scoped to an overlay shell: a stacked header takes
+    // its own height out of the flow and needs no zone reserved for it.
+    assert_eq(
+        3,
+        substr_count($css, $scope . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS),
+        'every clearance rule outside the print block is scoped to the overlay shells'
+    );
+
+    // Print gives the header its own space, so the zone collapses there. The
+    // whole clearance is zeroed, not just its floor: the driver's measured
+    // height outlives the media switch. It overrides through cascade order,
+    // so it has to repeat the same overlay scope.
+    $print = header_asset_css_block($css, '@media print');
+    assert_contains('--header-clearance: 0px', $print);
+    assert_contains('.site-header-shell--overlay-transient)', $print);
+    assert_contains('.' . HeaderHeroStep::OVERLAY_CLEARANCE_CLASS . ' {', $print);
 });
 
 test('header CSS paints the floating pill on the inner row and keeps the rail transparent (frm W1a)', function () {

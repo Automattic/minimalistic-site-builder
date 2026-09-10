@@ -60,6 +60,29 @@ function hh_cover(string $height): string
         . '<!-- /wp:group -->';
 }
 
+/**
+ * A page opening that actually earns an overlay: a full-bleed cover carrying
+ * the image and the protection-token dim the contract checks for. Pass null
+ * for the interior shape that states no height of its own.
+ */
+function hh_protected_cover(?string $height): string
+{
+    $sized = $height === null ? '' : ',"minHeight":' . $height . ',"minHeightUnit":"vh"';
+    $style = $height === null ? '' : ' style="min-height:' . $height . 'vh"';
+    return '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":60,"overlayColor":"contrast","align":"full"' . $sized . '} -->'
+        . '<div class="wp-block-cover alignfull"' . $style . '>'
+        . '<img class="wp-block-cover__image-background" alt="" src="x.jpg" data-object-fit="cover"/>'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-contrast-background-color '
+        . 'has-background-dim-60 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2>Get In Touch</h2><!-- /wp:heading -->'
+        . '</div></div>'
+        . '<!-- /wp:cover --></div>' . "\n"
+        . '<!-- /wp:group -->';
+}
+
 /** Required semantic palette, as both slug map and theme.json entries. */
 function hh_palette(): array
 {
@@ -422,6 +445,85 @@ test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone'
     assert_eq($px, HeaderHeroStep::capCovers($px)['markup']);
 });
 
+test('reserveOverlayClearance marks only an opening that states no height', function () {
+    // The shape that shipped the bug: a qualifying full-bleed opening cover
+    // that is only as tall as its content, so its first line starts at the
+    // band's own top padding — under the overlay header.
+    $result = HeaderHeroStep::reserveOverlayClearance(hh_protected_cover(null));
+    assert_contains(HeaderHeroStep::OVERLAY_CLEARANCE_CLASS, $result['markup']);
+    assert_eq(1, count($result['notes']));
+
+    // A band that states its own height already seats its content clear of
+    // the header, so every reviewed image-led opening is left as composed.
+    $sized = hh_protected_cover('92');
+    assert_eq($sized, HeaderHeroStep::reserveOverlayClearance($sized)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($sized)['notes']);
+
+    // A height that survives only in the saved HTML still governs the render,
+    // so the delivered bytes decide, not the attributes alone.
+    $inlineOnly = str_replace(',"minHeight":92,"minHeightUnit":"vh"', '', hh_protected_cover('92'));
+    assert_contains('style="min-height:92vh"', $inlineOnly);
+    assert_eq($inlineOnly, HeaderHeroStep::reserveOverlayClearance($inlineOnly)['markup']);
+
+    // Every other band states its height under style.dimensions.
+    $stated = '<!-- wp:group {"backgroundColor":"contrast","style":{"dimensions":{"minHeight":"70vh"}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($stated, HeaderHeroStep::reserveOverlayClearance($stated)['markup']);
+});
+
+test('reserveOverlayClearance leaves a band whose row the reservation would break', function () {
+    // The kit reserves the zone inside a cover or above a flow group's first
+    // child. A flex or grid band would take that as one more item in the row
+    // and misalign the rest, so it is left alone rather than damaged.
+    $columns = '<!-- wp:columns {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-columns has-contrast-background-color has-background">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:columns -->';
+    assert_eq($columns, HeaderHeroStep::reserveOverlayClearance($columns)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($columns)['notes']);
+
+    $flex = '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"flex"}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background"></div>' . "\n"
+        . '<!-- /wp:group -->';
+    assert_eq($flex, HeaderHeroStep::reserveOverlayClearance($flex)['markup']);
+});
+
+test('reserveOverlayClearance reaches a protection-token surface and is idempotent', function () {
+    $group = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:heading --><h2>Get In Touch</h2><!-- /wp:heading -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    $once = HeaderHeroStep::reserveOverlayClearance($group);
+    assert_contains(HeaderHeroStep::OVERLAY_CLEARANCE_CLASS, $once['markup']);
+    assert_eq(1, count($once['notes']));
+
+    // A repair pass must reach a fixed point: the class is added once and a
+    // second pass reports nothing.
+    $twice = HeaderHeroStep::reserveOverlayClearance($once['markup']);
+    assert_eq($once['markup'], $twice['markup']);
+    assert_eq([], $twice['notes']);
+    assert_eq(1, substr_count($twice['markup'], HeaderHeroStep::OVERLAY_CLEARANCE_CLASS));
+});
+
+test('reserveOverlayClearance leaves an opening that never earned an overlay alone', function () {
+    // No media and no protection token: this opening does not qualify to sit
+    // beneath an overlay at all, so the overlay gate downgrades the build and
+    // there is no zone to reserve.
+    $plain = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio":50,"align":"full"} -->'
+        . '<div class="wp-block-cover alignfull"></div>'
+        . '<!-- /wp:cover --></div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    assert_eq($plain, HeaderHeroStep::reserveOverlayClearance($plain)['markup']);
+    assert_eq([], HeaderHeroStep::reserveOverlayClearance($plain)['notes']);
+});
+
 test('header behavior selection uses site depth and excludes forced tall chrome', function () {
     $short = [[
         'slug' => 'home',
@@ -649,6 +751,48 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
         assert_eq(HeaderBehavior::STATIC, $project->readJson(HeaderBehavior::FILE)['behavior']);
         assert_true(!$project->exists('warnings.json'), 'complete deterministic repair is not queued for AI repair');
         assert_true($project->exists('logs/header-hero.txt'));
+    });
+});
+
+test('the step reserves the overlay zone on an interior opening that states no height', function () {
+    with_project('builder_hh_overlay_', function ($project) {
+        $pages = [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [
+                ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'image'],
+            ]],
+            ['slug' => 'contact', 'title' => 'Contact', 'sections' => [
+                ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'image'],
+            ]],
+        ];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_protected_cover('92') . "\n");
+        $project->writeText('theme/parts/page-contact--hero.html', hh_protected_cover(null) . "\n");
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_eq(
+            AboveFoldContract::MODE_OVERLAY,
+            $project->readJson('aboveFold.json')['header']['mode'],
+            'the fixture must actually reach the overlay relation for this to prove anything'
+        );
+        assert_contains(
+            HeaderHeroStep::OVERLAY_CLEARANCE_CLASS,
+            $project->readText('theme/parts/page-contact--hero.html'),
+            'the interior opening states no height, so the header would land on its first line'
+        );
+        assert_true(
+            !str_contains(
+                $project->readText('theme/parts/page-home--hero.html'),
+                HeaderHeroStep::OVERLAY_CLEARANCE_CLASS
+            ),
+            'the front hero states 92vh and keeps the composition it was given'
+        );
     });
 });
 

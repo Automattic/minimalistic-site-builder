@@ -20,6 +20,14 @@ final class AboveFoldContract
     public const MODE_STACKED = 'stacked';
     public const MODE_OVERLAY = 'overlay';
 
+    /**
+     * The strip at the top of an overlay opening that the header paints over,
+     * and that the opening must therefore keep clear of its own content. The
+     * header kit reserves exactly this zone through `--header-safe-top`; the
+     * two are pinned to each other by test.
+     */
+    public const OVERLAY_SAFE_TOP_PX = 80;
+
     /** Header catalog retained from the pre-contract implementation. */
     public const HEADER_ARCHETYPES = [
         'standard-row',
@@ -291,7 +299,7 @@ final class AboveFoldContract
                 'protection_token' => $protection,
                 'protection_orientation' => 'top-edge',
                 'protect_top_edge' => $mode === self::MODE_OVERLAY,
-                'safe_top_px' => $mode === self::MODE_OVERLAY ? 80 : 0,
+                'safe_top_px' => $mode === self::MODE_OVERLAY ? self::OVERLAY_SAFE_TOP_PX : 0,
             ] + self::headerTextFacts($archetype, $tagline),
             'viewport' => [
                 'height_profile' => (string) ($blueprint['height_profile'] ?? 'standard'),
@@ -1081,7 +1089,7 @@ final class AboveFoldContract
                 'foreground_token' => $overlayForeground,
                 'protection_token' => $overlayProtection,
                 'protect_top_edge' => true,
-                'safe_top_px' => 80,
+                'safe_top_px' => self::OVERLAY_SAFE_TOP_PX,
             ]
             : [
                 'protect_top_edge' => false,

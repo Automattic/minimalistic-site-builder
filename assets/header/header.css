@@ -29,6 +29,14 @@
     --header-state-duration: 240ms;
     --header-state-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --header-overlay-scrim: rgb(0 0 0 / 0.60);
+
+    /* The strip an overlay header paints over. Must match
+     * AboveFoldContract::OVERLAY_SAFE_TOP_PX, which states the same zone as a
+     * contract fact; the two are pinned to each other by test. A static floor
+     * rather than the measured header height: this has to hold on the first
+     * paint, before the driver has measured anything, and with no JavaScript
+     * at all. */
+    --header-safe-top: 80px;
 }
 
 /* WordPress's classic admin-bar stylesheet does not expose a stable variable. */
@@ -76,6 +84,51 @@ body.admin-bar {
 :is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
     + .wp-block-post-content {
     margin-block-start: 0;
+}
+
+/*
+ * Sharing y=0 is also what puts the header over the opening band's own
+ * content. A band only as tall as its content starts its first line at its
+ * own top padding, which on the smaller spacing scales is inside the header;
+ * the build marks those bands (HeaderHeroStep::OVERLAY_CLEARANCE_CLASS) and
+ * the rules below reserve the zone, adding to the band's authored spacing
+ * rather than replacing it.
+ */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance {
+    /* What the header actually covers: its measured height plus the admin bar
+     * it is offset below — the same sum scroll-padding-top takes. The
+     * contract's static zone is the floor, so this holds on the first paint,
+     * before the driver has measured, and with no JavaScript at all. */
+    --header-clearance: max(
+        calc(var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px)),
+        var(--header-safe-top)
+    );
+}
+
+/* A cover centres its content, so its reservation is equal on both sides:
+ * that keeps the content on the band's own centre line instead of pushing it
+ * down, which makes this a no-op for a band that already had the room. It
+ * lands on the inner container so the image and dim still paint the full band. */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance
+    > .wp-block-cover__inner-container {
+    padding-block: var(--header-clearance);
+}
+
+/* A protection-token group has no inner container and lays its children out in
+ * flow, so the zone goes above the first of them — as a spacer box, not a
+ * margin. A margin on the first child collapses straight out of a band that
+ * has no top padding of its own, moving the whole band down and reopening a
+ * strip of page background at y=0 instead of clearing the content. */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance:not(.wp-block-cover)::before {
+    display: block;
+    block-size: var(--header-clearance);
+    content: "";
 }
 
 /* Fixed overlay behavior is JS-owned. Without this scope it scrolls away.
@@ -764,6 +817,17 @@ html.header-state-js.header-chrome-persistent {
 }
 
 @media print {
+    /* A printed header takes its own space, so nothing overlaps the opening
+     * and the reserved zone would only be a blank strip on the page. Zeroing
+     * the whole clearance, not just its floor: the driver's measured height
+     * outlives the media switch and would otherwise still be reserved. Same
+     * selector as the rule it overrides, so cascade order decides. */
+    :is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+        + .wp-block-post-content
+        .header-overlay-clearance {
+        --header-clearance: 0px;
+    }
+
     html.header-state-js,
     html.header-state-js.header-chrome-persistent {
         scroll-padding-top: 0;
