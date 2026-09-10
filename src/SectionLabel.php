@@ -347,7 +347,8 @@ final class SectionLabel
         }
         $class = $column ? 'wp-block-column' : 'wp-block-columns';
         $width = $column ? '(?:\s+style="\s*flex-basis:\s*[0-9.]+%\s*;?\s*")?' : '';
-        return preg_match('/^\s*<div\s+class="' . $class . '"' . $width . '\s*>\s*<\/div>\s*$/s', $shell) === 1;
+        // Generated markup may omit the canonical class until fix-blocks saves it.
+        return preg_match('/^\s*<div(?:\s+class="' . $class . '")?' . $width . '\s*>\s*<\/div>\s*$/s', $shell) === 1;
     }
 
     /** Keep wrapper semantics and child bytes while repairing the obsolete split width. */

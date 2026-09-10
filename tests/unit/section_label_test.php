@@ -382,3 +382,18 @@ test('label cleanup preserves HTML-only wrapper semantics and raw content around
     assert_eq(str_replace($column($label), '', $source), $result['markup']);
     assert_eq(1, count($result['warnings']));
 });
+
+test('label cleanup recognizes bare generated div shells before block serialization', function () {
+    $source = '<!-- wp:columns {"align":"wide"} --><div>'
+        . '<!-- wp:column {"width":"25%"} --><div><!-- wp:paragraph {"className":"side-label"} --><p class="side-label">Services</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"75%","anchor":"service-body"} --><div><!-- wp:paragraph --><p>Complete service description.</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    $result = SectionLabel::normalize($source, 'none', 'services');
+    assert_true(!str_contains($result['markup'], '"width":"25%"'), 'the empty generated label column is removed');
+    assert_contains('"width":"100%"', $result['markup']);
+    assert_contains('<div style="flex-basis:100%">', $result['markup']);
+    assert_contains('"anchor":"service-body"', $result['markup']);
+    assert_contains('<!-- wp:paragraph --><p>Complete service description.</p><!-- /wp:paragraph -->', $result['markup']);
+    assert_eq(1, count($result['warnings']));
+    assert_eq(['markup' => $result['markup'], 'warnings' => []], SectionLabel::normalize($result['markup'], 'none', 'services'));
+});
