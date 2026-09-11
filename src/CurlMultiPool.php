@@ -96,13 +96,15 @@ class CurlMultiPool
             }
         };
 
-        $await = function () use ($multi, &$inFlight, &$queuedOutcomes, $finish, $canExpand): array {
+        $await = function (bool $expanded = true) use ($multi, &$inFlight, &$queuedOutcomes, $finish, $canExpand): array {
             if ($queuedOutcomes !== []) {
                 $done = $queuedOutcomes;
                 $queuedOutcomes = [];
                 return $done;
             }
-            $wasExpanded = $canExpand === null || $canExpand();
+            if (!$expanded && $canExpand !== null && $canExpand()) {
+                return [];
+            }
             // Drive the stack until at least one transfer finishes. The -1
             // guard prevents a busy-spin while there is no socket yet (DNS).
             do {
@@ -119,7 +121,7 @@ class CurlMultiPool
                 if ($done !== []) {
                     return $done;
                 }
-                if (!$wasExpanded && $canExpand !== null && $canExpand()) {
+                if (!$expanded && $canExpand !== null && $canExpand()) {
                     return [];
                 }
                 if ($running && $status === CURLM_OK && $this->select($multi) === -1) {

@@ -302,3 +302,20 @@ test('CurlMultiPool starts siblings before the first transfer completes when the
     assert_eq(['a' => 0, 'b' => 1, 'c' => 1], $starts);
     assert_eq(3, count($results));
 });
+
+test('CurlMultiPool releases the gate when the deadline passes during handle preparation', function () {
+    $gate = new Automattic\SiteBuild\PromptCacheGate();
+    $events = [];
+    $pool = new FakeCurlMultiPool([['b', 'c'], ['a']]);
+    $build = function ($key) use ($pool, $gate, &$events): CurlHandle {
+        $events[] = 'start:' . $key;
+        $gate->release();
+        return $pool->register($key, curl_init('http://localhost/unused'));
+    };
+    $classify = function ($key) use (&$events): array {
+        $events[] = 'complete:' . $key;
+        return ['ok' => true];
+    };
+    $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build, $classify, 3, fn () => $gate->ready());
+    assert_eq(['start:a', 'start:b', 'start:c', 'complete:b', 'complete:c', 'complete:a'], $events);
+});

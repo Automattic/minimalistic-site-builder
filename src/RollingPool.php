@@ -18,7 +18,7 @@ final class RollingPool
     /**
      * @param array<array-key,mixed> $items transfer input keyed by id
      * @param callable(string|int,mixed):void $start
-     * @param callable():array<array-key,mixed> $await
+     * @param callable(bool=):array<array-key,mixed> $await receives the current expansion state when a gate is present
      * @return array<array-key,mixed> results keyed and ordered as $items
      */
     public static function run(array $items, callable $start, callable $await, int $cap, ?callable $canExpand = null): array
@@ -39,7 +39,7 @@ final class RollingPool
 
         $launch();
         while ($inFlight !== []) {
-            $completed = $await();
+            $completed = $canExpand === null ? $await() : $await($expanded);
             $wasExpanded = $expanded;
             $expanded = $expanded || ($canExpand !== null && $canExpand());
             if ($completed === [] && !(!$wasExpanded && $expanded)) {
