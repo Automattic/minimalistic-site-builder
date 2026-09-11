@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 /** Rebuild the tiny product assets; GD is needed here, never at build runtime. */
-$directory = dirname(__DIR__) . '/assets/image-placeholders';
+require_once __DIR__ . '/../src/bootstrap.php';
+
+$directory = Automattic\SiteBuild\Package::imagePlaceholdersDir();
 if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
     throw new RuntimeException('Could not create ' . $directory);
 }

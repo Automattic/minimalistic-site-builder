@@ -11,7 +11,7 @@ final class ImagePlaceholder
     {
         $ratio = GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
         $format = strtolower(pathinfo((string) $spec['filename'], PATHINFO_EXTENSION)) === 'png' ? 'png' : 'jpg';
-        $path = Package::root() . '/assets/image-placeholders/' . str_replace(':', '-', $ratio) . '.' . $format;
+        $path = Package::imagePlaceholdersDir() . '/' . str_replace(':', '-', $ratio) . '.' . $format;
         $bytes = file_get_contents($path);
         if ($bytes === false) {
             throw new \RuntimeException('Could not read bundled image placeholder: ' . $path);

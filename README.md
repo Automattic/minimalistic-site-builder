@@ -72,8 +72,11 @@ format, without an image-generation request. A text-only hero stays text-only.
 The same policy applies to `bin/images.php` and embedding hosts using
 `GenerateImagesStep`, on both build graphs. Deferred images retain their authored
 specs in `images.json` with `status: "placeholder"`; reruns keep those placeholders
-without spending more image requests. This limits which images generate, rather
-than imposing a numeric ceiling on homepage imagery.
+without spending more image requests. `php bin/images.php <slug> --all` ignores the
+policy and generates every pending image, which is how an eval or a demo gets a
+fully imaged build. An image whose source parts the plan does not name is generated
+rather than deferred, and recorded in `warnings.json`. This limits which images
+generate, rather than imposing a numeric ceiling on homepage imagery.
 
 Hero composition is selected from a reviewed code-owned catalog after filtering
 the optional caller constraints `--hero-canvas`, `--hero-media-modes`,

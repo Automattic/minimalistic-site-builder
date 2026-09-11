@@ -92,6 +92,7 @@ final class GenerateImagesStep implements Step
         private ?string $repairModel = null,
         private ?PromptRenderer $renderer = null,
         private bool $inspectImages = true,
+        private bool $generateAllImages = false,
     ) {
         $this->renderer ??= new PromptRenderer(Package::promptsDir());
     }
@@ -259,8 +260,12 @@ final class GenerateImagesStep implements Step
         }
 
         $resolved = []; // theme: src => served URL, for the markup rewrite
-        $policy = new InitialImagePolicy($project->exists('pages.json') ? $project->readJson('pages.json') : null);
+        $policy = new InitialImagePolicy(
+            $project->exists('pages.json') ? $project->readJson('pages.json') : null,
+            $this->generateAllImages,
+        );
         $placeholderWarnings = [];
+        $unplanned = [];
 
         // Already-completed images need no work — just record them for the rewrite.
         $pending = [];
@@ -286,12 +291,20 @@ final class GenerateImagesStep implements Step
                     . '(homepage and interior heroes only); original image spec retained in images.json';
                 continue;
             }
+            if ($policy->unplaced($spec)) {
+                $unplanned[] = 'theme/assets/' . $spec['filename'];
+            }
             $pending[$i] = $spec; // preserve the original images.json index
         }
         if ($placeholderWarnings !== []) {
             $project->addWarnings($this->id(), $placeholderWarnings);
             $project->writeJsonAtomic('images.json', $specs);
             Narrator::write(sprintf("    using %d local image placeholder(s)\n", count($placeholderWarnings)));
+        }
+        if ($unplanned !== []) {
+            $project->addWarnings($this->id(), ['file=' . Warnings::value(implode(', ', $unplanned))
+                . '; delivered=generated; disposition=' . count($unplanned) . ' image(s) whose source parts'
+                . ' pages.json does not name, generated rather than deferred by a policy that cannot place them']);
         }
 
         // Generate every pending image through ONE pooled batch: concurrency

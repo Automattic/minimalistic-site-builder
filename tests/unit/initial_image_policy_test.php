@@ -37,9 +37,31 @@ test('initial image policy uses page identity and section roles, with any eligib
     assert_true($policy->shouldGenerate(['sources' => ['parts/page-about--team.html', 'parts/page-welcome--gallery.html']]));
     assert_true(!$policy->shouldGenerate(['sources' => ['parts/page-about--team.html'], 'filename' => 'hero.jpg', 'pageContext' => 'hero']));
     assert_true(!$policy->shouldGenerate(['sources' => ['parts/page-contact--map.html']]));
-    assert_true(!$policy->shouldGenerate(['sources' => ['parts/unknown.html']]));
-    assert_true(!$policy->shouldGenerate(['sources' => []]));
     assert_true((new InitialImagePolicy(null))->shouldGenerate(['sources' => ['parts/gallery.html']]), 'theme-only compositions are a single homepage');
+});
+
+test('a source the plan does not name is generated and flagged, never quietly deferred', function () {
+    $policy = new InitialImagePolicy(initial_image_pages());
+    // Assembly rewrites provenance: assemble-pages inlines the page parts and
+    // deletes them, so a resumed build re-collects against templates/*.html.
+    // Deferring those would gray out the homepage the policy means to protect.
+    foreach ([['templates/page.html'], ['parts/unknown.html'], []] as $sources) {
+        assert_true($policy->shouldGenerate(['sources' => $sources]), implode(',', $sources));
+        assert_true($policy->unplaced(['sources' => $sources]), implode(',', $sources));
+    }
+    assert_true(!$policy->unplaced(['sources' => ['parts/page-about--team.html']]), 'planned but ineligible');
+    assert_true(!$policy->unplaced(['sources' => ['parts/header.html']]));
+    // A composition the policy does not govern has nothing to report.
+    assert_true(!(new InitialImagePolicy(null))->unplaced(['sources' => []]));
+    assert_true(!(new InitialImagePolicy(initial_image_pages(), true))->unplaced(['sources' => []]));
+    assert_true(!$policy->unplaced(['role' => 'site-logo', 'sources' => []]));
+});
+
+test('generateAll overrides the policy so a build can be brought back to full imagery', function () {
+    $policy = new InitialImagePolicy(initial_image_pages(), true);
+    foreach ([['parts/page-about--team.html'], ['parts/page-contact--map.html'], []] as $sources) {
+        assert_true($policy->shouldGenerate(['sources' => $sources]), implode(',', $sources));
+    }
 });
 
 test('initial image placeholders are valid neutral rasters in every supported shape and filename format', function () {
