@@ -244,8 +244,16 @@ final class ConceptSeeds
             if (preg_match('/^(?:(?:visual\s+)?(?:style|aesthetic)|art\s+direction)\s*:\s*(.+)$/iu', $sentence, $match)
                 || preg_match('/^(?:I|we)\s+(?:want|would\s+like)\s+the\s+(?:design|style|aesthetic)\s+to\s+be\s+(.+)$/iu', $sentence, $match)
                 || preg_match(
+                    // "…a bauhaus-styled website for a bakery": what follows
+                    // the noun is the business, not the style, and requiring
+                    // the sentence to end there dropped the request entirely.
                     '/^(?:(?:I|we)\s+(?:want|would\s+like)|(?:please\s+)?(?:create|build|design|make)'
-                    . '(?:\s+(?:me|us))?)\s+(?:an?|the)\s+(.+?[-\s]styled)\s+(?:site|website)$/iu',
+                    . '(?:\s+(?:me|us))?)\s+(?:an?|the)\s+(.+?[-\s]styled)\s+(?:site|website|page|landing\s+page)'
+                    // Only the business may follow the noun. Anything else is
+                    // another clause — "…, but not brutalist" is an exclusion,
+                    // and reading a style out of that sentence would state the
+                    // opposite of what it says.
+                    . '(?:\s+for\s+[^,;]*)?$/iu',
                     $sentence,
                     $match,
                 )) {
@@ -267,6 +275,10 @@ final class ConceptSeeds
         if (preg_match('/\b(?:not|no|without|avoid)\b|\bnon[- ]/u', $style)) {
             return $style;
         }
+        // "bauhaus-styled" is the same request as "bauhaus": the wrapper is
+        // grammar, not part of the style's name. A catalog register loses it
+        // below anyway; a freeform one would otherwise keep it forever.
+        $style = trim((string) preg_replace('/[-\s]styled$/u', '', $style));
         $matches = [];
         foreach (array_merge(self::REGISTERS, array_keys(self::EXTRA_REGISTERS)) as $register) {
             $aliases = [$register, str_replace('-', ' ', $register), $register . 'ly', $register . 'ally'];
