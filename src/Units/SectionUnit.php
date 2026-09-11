@@ -228,7 +228,7 @@ final class SectionUnit extends AbstractPageSectionUnit
             }
         }
         $markup = SectionReadabilityContract::enforce($markup, $input, $this->key($input), $repairs, $warnings);
-        $markup = CardPreparation::enforce($markup, $cardStyle, $this->key($input), $repairs, $warnings);
+        $markup = CardPreparation::enforce($markup, $cardStyle, $this->key($input), $repairs, $warnings, $input['theme_json'] ?? null);
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,

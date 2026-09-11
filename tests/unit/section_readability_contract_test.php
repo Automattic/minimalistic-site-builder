@@ -46,3 +46,43 @@ test('the readability contract retains unsafe text boundaries', function () {
     $repairs = $warnings = [];
     assert_eq($raw, SectionReadabilityContract::enforce($raw, readability_input(), 'page-menu--food', $repairs, $warnings));
 });
+
+test('malformed paragraph font sizes retain content with an actionable warning', function () {
+    foreach ([['lead'], 42, true] as $size) {
+        $raw = '<!-- wp:paragraph ' . json_encode(['fontSize' => $size]) . ' --><p>'
+            . str_repeat('Keep these words. ', 10) . '</p><!-- /wp:paragraph -->';
+        $repairs = $warnings = [];
+        assert_eq($raw, SectionReadabilityContract::enforce($raw, readability_input(), 'page-menu--food', $repairs, $warnings));
+        assert_contains('retained the malformed fontSize', implode("\n", $warnings));
+    }
+});
+
+test('paragraph size repair changes only real class and font-size attributes', function () {
+    foreach (['<p>', "<p class='has-lead-font-size'>", '<p title="has-lead-font-size" class="has-lead-font-size">',
+        '<p data-class="meta" class="has-lead-font-size" style="font-size:36px;margin-top:var(--wp--preset--spacing--md)">'] as $tag) {
+        $raw = '<!-- wp:paragraph {"fontSize":"lead"} -->' . $tag . str_repeat('Keep these words. ', 10) . '</p><!-- /wp:paragraph -->';
+        $repairs = $warnings = [];
+        $out = SectionReadabilityContract::enforce($raw, readability_input(), 'page-menu--food', $repairs, $warnings);
+        $document = \Automattic\SiteBuild\BlockMarkup::parse($out);
+        $class = \Automattic\SiteBuild\MarkupScan::tagAttribute(\Automattic\SiteBuild\MarkupScan::wrapperTag($document->ownHtml(0), 0), 'class');
+        assert_contains('has-body-font-size', $class[0]);
+        assert_true(!str_contains($out, 'font-size:36px'));
+        if (str_contains($tag, 'title=')) {
+            assert_contains('title="has-lead-font-size"', $out);
+        }
+        if (str_contains($tag, 'data-class=')) {
+            assert_contains('data-class="meta"', $out);
+            assert_contains('margin-top:var(--wp--preset--spacing--md)', $out);
+        }
+        assert_eq($out, SectionReadabilityContract::enforce($out, readability_input(), 'page-menu--food', $repairs, $warnings));
+    }
+});
+
+test('section heading repair retains a quoted greater-than sign in the wrapper', function () {
+    $tag = '<div data-note="1 > 0" class="wp-block-group">';
+    $raw = '<!-- wp:group -->' . $tag . '<!-- wp:heading {"level":3} --><h3>Khinkali</h3><!-- /wp:heading --></div><!-- /wp:group -->';
+    $repairs = $warnings = [];
+    $out = SectionReadabilityContract::enforce($raw, readability_input(), 'page-menu--food', $repairs, $warnings);
+    assert_contains($tag . '<!-- wp:heading -->', $out);
+    assert_contains('<h2 class="wp-block-heading">Our dishes</h2>', $out);
+});

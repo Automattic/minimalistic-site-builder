@@ -58,3 +58,39 @@ test('card preparation preserves unsafe boundaries for the strict validator', fu
     assert_eq($raw, CardPreparation::enforce($raw, 'flush', 'page-menu--sides', $repairs, $warnings));
     assert_true(CardStyleContract::enforce($raw, 'flush', 'page-menu--sides')['warnings'] !== []);
 });
+
+test('card surface repair honors inherited ink and precise wrapper attributes', function () {
+    $plain = preparation_card(true);
+    foreach (['single' => str_replace('class="wp-block-group item-pattern__item card-style--flush card-flush"', "class='wp-block-group item-pattern__item card-style--flush card-flush'", $plain),
+        'data' => str_replace('class="wp-block-group item-pattern__item card-style--flush card-flush"', 'data-class="meta" class="wp-block-group item-pattern__item card-style--flush card-flush"', $plain)] as $case => $raw) {
+        $repairs = $warnings = [];
+        $out = CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings);
+        $document = \Automattic\SiteBuild\BlockMarkup::parse($out);
+        $tag = \Automattic\SiteBuild\MarkupScan::wrapperTag($document->ownHtml(0), 0);
+        $class = \Automattic\SiteBuild\MarkupScan::tagAttribute($tag, 'class');
+        assert_contains('has-base-background-color', $class[0]);
+        if ($case === 'data') {
+            assert_contains('data-class="meta"', $out);
+        }
+    }
+    $raw = '<!-- wp:group {"textColor":"base","backgroundColor":"contrast"} --><div class="wp-block-group">'
+        . $plain . '</div><!-- /wp:group -->';
+    $repairs = $warnings = [];
+    $out = CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings);
+    assert_eq('contrast', \Automattic\SiteBuild\BlockMarkup::parse($out)->attrs(1)['backgroundColor']);
+});
+
+test('card surface repair proves contrast for authored palette colors', function () {
+    $theme = ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#1E1712'], ['slug' => 'contrast', 'color' => '#E8DCC8'],
+        ['slug' => 'primary', 'color' => '#AE7541'],
+    ]]]];
+    $raw = str_replace('<!-- wp:paragraph -->', '<!-- wp:paragraph {"textColor":"primary"} -->', preparation_card(true));
+    $repairs = $warnings = [];
+    $out = CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings, $theme);
+    assert_eq('base', \Automattic\SiteBuild\BlockMarkup::parse($out)->attrs(0)['backgroundColor']);
+    $raw = str_replace('"primary"', '"unknown"', $raw);
+    $repairs = $warnings = [];
+    assert_eq($raw, CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings, $theme));
+    assert_contains('repair the card surface', implode("\n", $warnings));
+});
