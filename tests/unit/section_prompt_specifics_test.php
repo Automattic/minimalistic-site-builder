@@ -69,8 +69,9 @@ test('section specifics keep complete requests within a bounded instruction budg
         foreach (['none', 'minimal', 'calm', 'energetic', 'dramatic'] as $profile) {
             $input['motion_profile'] = $profile;
             // Includes section-label guidance alongside the expanded motion recipes.
-            // Fixture maxima: 49,279 bytes for minimal motion, 54,798 for animated.
-            $budget = in_array($profile, ['none', 'minimal'], true) ? 50000 : 55000;
+            // Fixture maxima: 49,668 bytes for minimal motion, 55,187 for animated
+            // (BIGR-1015 added the masthead-preset rule to the type-scale block).
+            $budget = in_array($profile, ['none', 'minimal'], true) ? 50000 : 55500;
             $bytes = strlen(section_unit_request_text($unit->request($input)));
             assert_true($bytes < $budget, "$archetype/$profile request is $bytes bytes; budget is $budget including fixture context");
         }
