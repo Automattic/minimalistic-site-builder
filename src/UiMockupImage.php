@@ -131,6 +131,29 @@ final class UiMockupImage
                 $bar($x + 54, $cy + 9, $contentWidth * .24);
                 $rect($right - 116, $cy - 10, 52, 20, $colors['accent'], .18, 10);
             }
+        } elseif ($layout === 'report') {
+            $formWidth = $contentWidth * .55;
+            for ($row = 0; $row < 3; $row++) {
+                $cy = $y + $row * ($contentHeight * .16);
+                $bar($x, $cy, $formWidth * .32, .5);
+                $rect($x, $cy + 22, $formWidth, $contentHeight * .09, $colors['contrast'], .05, 8);
+                $bar($x + 16, $cy + 40, $formWidth * .62, .25);
+            }
+            $photoX = $x + $formWidth + 26;
+            $photoWidth = $contentWidth - $formWidth - 26;
+            $photoHeight = $contentHeight * .46;
+            $rect($photoX, $y, $photoWidth, $photoHeight, $colors['contrast'], .07);
+            $rect($photoX + 20, $y + $photoHeight * .38, $photoWidth * .35, $photoHeight * .46, $colors['contrast'], .15, 3);
+            $rect($photoX + $photoWidth * .52, $y + $photoHeight * .2, $photoWidth * .32, $photoHeight * .64, $colors['accent'], .2, 3);
+            $svg .= sprintf('<path d="M %.1f %.1f L %.1f %.1f l -18 3 m 18 -3 l -5 18" fill="none" stroke="%s" stroke-width="5"/>',
+                $photoX + $photoWidth * .2, $y + $photoHeight * .25,
+                $photoX + $photoWidth * .65, $y + $photoHeight * .6, $colors['accent']);
+            for ($row = 0; $row < 4; $row++) {
+                $cy = $y + $contentHeight * .6 + $row * ($contentHeight * .1);
+                $bar($x, $cy, $contentWidth * (.38 + ($row % 2) * .1), .5);
+                $bar($right - 116, $cy, 60, .3);
+                $rect($x, $cy + 25, $contentWidth, 1, $colors['contrast'], .1, 0);
+            }
         } else {
             $rect($x, $y, $contentWidth, 12, $colors['contrast'], .1, 6);
             $rect($x, $y, $contentWidth * .68, 12, $colors['accent'], 1, 6);

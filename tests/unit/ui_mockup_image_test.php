@@ -80,3 +80,11 @@ test('native UI preserves unsupported empty-space requests through provider fall
     assert_contains('height="1920"', $svg);
     assert_contains('x="921.6"', $svg);
 });
+
+test('native report and summary assets retain distinct interface structures', function () {
+    $report = UiMockupImage::svg(['image_kind' => 'ui-mockup', 'subject' => 'daily report'], '4:3');
+    $summary = UiMockupImage::svg(['image_kind' => 'ui-mockup', 'subject' => 'client update'], '4:3');
+    assert_true($report !== $summary);
+    assert_contains('stroke-width="5"', $report);
+    assert_true(!str_contains($summary, 'stroke-width="5"'));
+});
