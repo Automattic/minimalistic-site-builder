@@ -255,3 +255,35 @@ test('run adds work to the active stage scheduler and joins both tasks', functio
     assert_eq(null, ImageTransportScheduler::current());
     $scheduler->join();
 });
+
+test('cancellation records only active attempts and never delivers success', function () {
+    $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $error);
+    assert_true(is_resource($socket));
+    $address = stream_socket_get_name($socket, false);
+    $scheduler = new ImageTransportScheduler();
+    $cancelled = [];
+    $success = 0;
+    try {
+        $scheduler->start(function () use ($address, &$cancelled, &$success): void {
+            (new CurlMultiPool())->run(['active', 'queued'], function () use ($address) {
+                $handle = curl_init('http://' . $address . '/');
+                curl_setopt($handle, CURLOPT_RETURNTRANSFER, true);
+                return $handle;
+            }, function () use (&$success) {
+                $success++;
+                return ['ok' => true];
+            }, 1, lane: 'images', onCancel: function ($key, $handle) use (&$cancelled): void {
+                $cancelled[] = $key;
+                assert_true($handle instanceof CurlHandle);
+            });
+        });
+        $scheduler->cancel();
+        $scheduler->cancel();
+        assert_eq([0], $cancelled);
+        assert_eq(0, $success);
+        assert_eq(null, ImageTransportScheduler::current());
+    } finally {
+        $scheduler->cancel();
+        fclose($socket);
+    }
+});
