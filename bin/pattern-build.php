@@ -21,6 +21,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Patterns\FixtureLoader;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
@@ -60,7 +61,7 @@ $store = new ProjectStore(__DIR__ . '/../projects');
 $slug = $flags['slug'] ?? 'patterns-' . bin2hex(random_bytes(3));
 $project = $store->create($slug);
 
-copy_fixture_tree($fixtures, $project->path());
+FixtureLoader::load($fixtures, $project);
 $project->writeJson('meta.json', [
     'prompt' => 'pattern composition (fixture run)',
     'provisional_slug' => $slug,
@@ -111,21 +112,3 @@ function report(Project $project): void
     }
 }
 
-/** Copy a fixture tree into the project, preserving its layout. */
-function copy_fixture_tree(string $from, string $to): void
-{
-    $entries = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST,
-    );
-
-    foreach ($entries as $entry) {
-        $target = $to . '/' . substr($entry->getPathname(), strlen($from) + 1);
-        if ($entry->isDir()) {
-            @mkdir($target, 0o777, true);
-            continue;
-        }
-        @mkdir(dirname($target), 0o777, true);
-        copy($entry->getPathname(), $target);
-    }
-}
