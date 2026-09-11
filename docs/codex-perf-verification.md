@@ -60,7 +60,9 @@ The live build exposed additional boundaries. Separate PRs fix each one:
 
 These follow-up checks replay saved responses and markup. They do not regenerate the paid demo or change its recorded cost. The original `tbilisi13` project remains available with its historical output.
 
-The local PHP 8.5 suite retains the known baseline failures. CI checks PHP 8.1 and PHP 8.4. Review evidence remains outside Git under `/tmp/codex-perf-multipage-audit`.
+The final local PHP 8.5 suite reports 4,344 passes, 61 baseline failures, and two skips. The failure names exactly match the baseline. The [final combined CI run](https://github.com/Automattic/minimalistic-site-builder/actions/runs/34632310792) checks PHP 8.1 and PHP 8.4 at commit `6eed1458`. That commit contains all 29 fix PRs.
+
+A final repair replay uses a separate copy of the paid project. Its 19 sections have zero residual card warnings. The next pass makes no section, action, or copy change, and its typography check reports no warnings. The original project remains unchanged. Review evidence remains outside Git under `/tmp/codex-perf-multipage-audit`.
 
 The Tbilisi13 LLM requests appear below. Concurrent request durations overlap and must not be added as build time.
 
