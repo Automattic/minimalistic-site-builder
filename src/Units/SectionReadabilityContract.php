@@ -52,7 +52,8 @@ final class SectionReadabilityContract
             $attrs['fontSize'] = 'body';
             $document->setAttrs($index, $attrs);
             $own = $document->ownHtml($index);
-            $changed = str_replace('has-' . $slug . '-font-size', 'has-body-font-size', $own);
+            $changed = preg_replace_callback('/^\s*<p\b[^>]*>/i',
+                static fn ($match) => str_replace('has-' . $slug . '-font-size', 'has-body-font-size', $match[0]), $own) ?? $own;
             if ($changed !== $own) {
                 $document->spliceOwnHtml($index, 0, strlen($own), $changed);
             }

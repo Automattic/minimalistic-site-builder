@@ -11,7 +11,7 @@ function readability_input(): array
 }
 
 test('long paragraphs use body scale and retain all text and siblings', function () {
-    $text = str_repeat('This paragraph gives useful details. ', 5);
+    $text = str_repeat('This paragraph describes has-lead-font-size as text. ', 5);
     $short = '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">Short lead.</p><!-- /wp:paragraph -->';
     $long = '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">' . $text . '</p><!-- /wp:paragraph -->';
     $repairs = $warnings = [];
