@@ -1004,15 +1004,16 @@ test('page-plan preserves a richly banded page without a stylistic repair', func
     $project->writeJson('siteSpec.json', plan_spec(['pages' => [
         ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
     ]]));
+    // Five sections: the BIGR-1001 front-page budget. A sixth would be
+    // trimmed for its length, and the subject here is the surfaces.
     $archetypes = [
         'full-bleed-cover',
         'bento-grid',
         'asymmetric-split',
         'equal-card-grid',
         'zigzag-steps',
-        'bento-grid',
     ];
-    $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image', 'contrast'];
+    $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image'];
     $sections = [];
     foreach ($archetypes as $index => $archetype) {
         $sections[] = plan_section([
@@ -2087,7 +2088,10 @@ test('an oversized contact plan is trimmed to 3 sections, keeping form and close
         assert_true(!str_contains((string) $handoff, 'Gallery'), 'dropped neighbor must leave the seam');
     }
     $archetypes = array_column($capped['sections'], 'layout_archetype');
-    assert_eq(['bento-grid', 'asymmetric-split', 'bento-grid', 'bento-grid'], $archetypes);
+    // Three sections since BIGR-1001, and the authored archetypes, since
+    // this branch no longer varies them for their own sake: the trim
+    // keeps hero, form and close exactly as the plan wrote them.
+    assert_eq(['bento-grid', 'bento-grid', 'bento-grid'], $archetypes);
 });
 
 test('capPageSections uses the homepage cap when its purpose mentions contact', function () {
@@ -2161,7 +2165,10 @@ test('the contact trim never introduces a full-bleed cover band', function () {
         !in_array('offset-grid', $archetypes, true),
         'the trim runs without the rhythm gate, so it must not assign offset-grid either',
     );
-    assert_eq(['bento-grid', 'asymmetric-split', 'bento-grid', 'bento-grid'], $archetypes);
+    // Three sections since BIGR-1001, and the authored archetypes, since
+    // this branch no longer varies them for their own sake: the trim
+    // keeps hero, form and close exactly as the plan wrote them.
+    assert_eq(['bento-grid', 'bento-grid', 'bento-grid'], $archetypes);
 
     // The repair's own row said delivered="full-bleed-cover". That band never
     // ships, so warnings.json must not claim it did.

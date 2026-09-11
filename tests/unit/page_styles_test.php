@@ -3128,3 +3128,64 @@ test('a fully-clipping clip-path is salvaged as ONE declaration, not the whole a
     assert_eq($partial, $kept, 'byte-for-byte');
     assert_eq([], $none);
 });
+
+test('a sibling combinator inside an authored root is kept, beside it is not (frm PR-7c)', function () {
+    $scoped = new ReflectionMethod(PageStylesStep::class, 'selectorIsScoped');
+    $scoped->setAccessible(true);
+
+    // `p + p`, `li + li` and `> * + *` are how CSS states spacing BETWEEN
+    // siblings — the main tool for the rhythm this channel hands over. A
+    // sibling of a DESCENDANT shares a parent inside the root, so it is a
+    // descendant too and cannot escape.
+    foreach ([
+        '.design-studio-opening p + p',
+        '.design-x > * + *',
+        '.design-x li + li',
+        '.design-x > p ~ span',
+        '.design-x[data-a="b+c"] p',
+    ] as $selector) {
+        assert_true($scoped->invoke(null, $selector), "kept: {$selector}");
+    }
+
+    // A sibling OF the root selects an element the root does not own. That is
+    // the escape the containment rule exists to stop, spaced or not.
+    foreach ([
+        '.design-x + .design-y',
+        '.design-x+.design-y',
+        '.design-x ~ .other',
+        'p + p',
+        '.design-frame p',
+    ] as $selector) {
+        assert_true(!$scoped->invoke(null, $selector), "refused: {$selector}");
+    }
+});
+
+test('the contrast check resolves a preset background class (frm PR-7c)', function () {
+    // Shared chrome carries its surface as `has-base-background-color`, whose
+    // value lives in theme.json. Handed only the design appendix, the check
+    // could resolve no background for those elements and reported every
+    // colour on them unverified instead of checking it.
+    $tmp = sys_get_temp_dir() . '/builder_contrast_context_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF'],
+            ['slug' => 'contrast', 'color' => '#111111'],
+        ]]],
+    ]);
+    $context = new ReflectionMethod(PageStylesStep::class, 'contrastAnalysisContext');
+    $context->setAccessible(true);
+    $css = (string) $context->invoke(null, $project);
+
+    assert_contains('--wp--preset--color--base:#FFFFFF', $css, 'a var() in an authored rule resolves');
+    assert_contains('.has-base-background-color{background-color:#FFFFFF;}', $css, 'and so does the preset class');
+    assert_contains('.has-contrast-color{color:#111111;}', $css);
+
+    // A project with no theme.json yields no context rather than throwing.
+    $bare = sys_get_temp_dir() . '/builder_contrast_context_bare_' . uniqid();
+    assert_eq('', $context->invoke(null, (new ProjectStore($bare))->create('demo')));
+
+    exec('rm -rf ' . escapeshellarg($tmp) . ' ' . escapeshellarg($bare));
+});
+

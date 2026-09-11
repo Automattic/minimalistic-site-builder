@@ -200,3 +200,44 @@ test('homepage creative emphasis has no section or image quota', function () {
     assert_true(!str_contains($emphasis, 'image-rich'));
     assert_contains('content', $emphasis);
 });
+
+test('an explicit style survives the business that follows it, and a refusal does not', function () {
+    // "…-styled website for a bakery" used to reach nothing: the pattern
+    // wanted the sentence to end at the noun, and the business followed it.
+    assert_eq('bauhaus', ConceptSeeds::requestedStyle('Build me a bauhaus-styled website for a bakery.'));
+    assert_eq('bauhaus', ConceptSeeds::requestedStyle('Build me a bauhaus-styled website.'));
+    assert_eq('art-deco', ConceptSeeds::requestedStyle('Create an art deco styled landing page for a law firm.'));
+
+    // Only the business may follow. Another clause is another statement, and
+    // an exclusion read as a request states the opposite of the brief.
+    assert_eq('', ConceptSeeds::requestedStyle('I want an organically styled site, but not brutalist.'));
+    assert_eq('', ConceptSeeds::requestedStyle('Build me a bauhaus-styled website, though nothing severe.'));
+
+    // The wrapper is grammar, not the style's name, for a freeform key too.
+    assert_eq('bauhaus', ConceptSeeds::styleKey('bauhaus-styled'));
+    assert_eq('organic', ConceptSeeds::styleKey('organically styled'));
+});
+
+test('an unprompted default face is recorded, never replaced (frm PR-2ad)', function () {
+    // The deterministic substitution is gone so the model reaches the whole
+    // catalog. The measurement that justified it must not go with it.
+    $direction = ['type' => [
+        'heading' => ['family' => 'Inter'],
+        'body' => ['family' => 'Spectral'],
+        'accent' => ['family' => 'Playfair Display'],
+    ]];
+    $rows = DesignDirectionStep::monocultureFontWarnings($direction, 'A bakery in Lisbon.');
+    assert_eq(2, count($rows), 'both unprompted default faces are recorded');
+    assert_contains('type.heading.family', implode("\n", $rows));
+    assert_contains('type.accent.family', implode("\n", $rows));
+    assert_true(!str_contains(implode("\n", $rows), 'Spectral'), 'a face outside the list is not recorded');
+
+    // A face the brief asks for is a request, not a reflex.
+    $asked = DesignDirectionStep::monocultureFontWarnings($direction, 'A bakery in Lisbon. Set the headings in Inter.');
+    assert_eq(1, count($asked));
+    assert_contains('type.accent.family', $asked[0]);
+
+    // Nothing is substituted: the direction is untouched.
+    assert_eq('Inter', $direction['type']['heading']['family']);
+});
+

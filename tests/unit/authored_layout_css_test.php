@@ -56,3 +56,35 @@ test('authored cover minimum height overrides inline height at each breakpoint',
     assert_contains('min-height:42vh !important;', $result);
     assert_eq($result, AuthoredLayoutCss::reconcile($result, $html)['css']);
 });
+
+test('a promoted rhythm on a page-level band is recorded (frm PR-8d)', function () {
+    // Promoting is the point: an authored rhythm should reach the page. But
+    // section-rhythm is the one owner of a band's block spacing, and it has no
+    // important of its own, so the promotion wins silently. Two owners of one
+    // property is worth a row.
+    $markup = '<div class="wp-block-group design-studio-opening"><p>Copy.</p></div>'
+        . '<div class="wp-block-group design-card-shell"><div class="wp-block-group design-inner-note">'
+        . '<p>Nested.</p></div></div>';
+
+    $band = AuthoredLayoutCss::reconcile('.design-studio-opening{padding-block:9rem;}', $markup);
+    assert_contains('padding-block:9rem !important', $band['css'], 'the authored rhythm still wins');
+    assert_eq(1, count($band['warnings']), 'and the conflict is recorded');
+    assert_contains('section-rhythm', $band['warnings'][0]);
+    assert_contains('.design-studio-opening', $band['warnings'][0]);
+
+    // A nested group is not a band: section-rhythm does not own its spacing.
+    $nested = AuthoredLayoutCss::reconcile('.design-inner-note{padding-block:2rem;}', $markup);
+    assert_contains('padding-block:2rem !important', $nested['css']);
+    assert_eq([], $nested['warnings'], 'a nested group owns its own spacing');
+
+    // Inline-axis spacing is nobody else's: no row.
+    $inline = AuthoredLayoutCss::reconcile('.design-studio-opening{margin-inline:4rem;}', $markup);
+    assert_contains('margin-inline:4rem !important', $inline['css']);
+    assert_eq([], $inline['warnings'], 'the inline axis has one owner');
+
+    // min-height is not spacing and is nobody else's either.
+    $height = AuthoredLayoutCss::reconcile('.design-studio-opening{min-height:60vh;}', $markup);
+    assert_contains('min-height:60vh !important', $height['css']);
+    assert_eq([], $height['warnings']);
+});
+

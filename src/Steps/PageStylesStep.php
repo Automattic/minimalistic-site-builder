@@ -424,7 +424,7 @@ CSS;
         try {
             $layout = AuthoredLayoutCss::reconcile($css, $markup);
         } catch (\Throwable $error) {
-            $layout = ['css' => $css, 'repairs' => []];
+            $layout = ['css' => $css, 'repairs' => [], 'warnings' => []];
             $project->addWarnings($this->id(), [
                 'file=theme/style.css; block_path=design-* layout subjects; authored_value=generated spacing; '
                 . 'delivered_value=pre-reconciliation CSS; disposition=retained because layout ownership could not be checked: '
@@ -432,6 +432,9 @@ CSS;
             ]);
         }
         $css = $layout['css'];
+        if (($layout['warnings'] ?? []) !== []) {
+            $project->addWarnings($this->id(), $layout['warnings']);
+        }
         $project->writeText('logs/authored-layout-css.txt', implode("\n", $layout['repairs']) . "\n");
 
         // Replace only our delimited appendix on resume; preserve later static
@@ -616,7 +619,16 @@ CSS;
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
         $floor = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
-        $findings = CssContrastCheck::check($design, $markup, $floor);
+        // Shared chrome and section roots carry their surface as a WordPress
+        // preset class — `has-base-background-color` — whose value lives in
+        // theme.json, not in the design appendix. Handed only the appendix,
+        // the check could not resolve a background for those elements and
+        // every colour authored on a design hook came back
+        // `disposition=unverified`: the evidence build recorded four such
+        // rows, one of them the masthead's navigation link. The context below
+        // is analysis-only and is stripped before anything ships.
+        $context = self::contrastAnalysisContext($project);
+        $findings = CssContrastCheck::check($context . $design, $markup, $floor);
         // A resumed build hands this step the tail an earlier revision of the
         // code merged. Appending a second one leaves both in the cascade, and
         // a stale copy of a sibling page's rules is exactly the foreign CSS
@@ -629,13 +641,16 @@ CSS;
             self::withoutDeterministicStyles($currentStyle),
             $findings,
         );
-        $design = CssContrastAdjuster::apply(
-            $project,
-            'theme/style.css',
-            $design,
-            $markup,
-            $findings,
-            $floor,
+        $design = substr(
+            CssContrastAdjuster::apply(
+                $project,
+                'theme/style.css',
+                $context . $design,
+                $markup,
+                $findings,
+                $floor,
+            ),
+            strlen($context),
         );
         // Wrap policy first as the default. Generated text-wrap declarations
         // are stripped from every design selector, while heading wrap/hyphen
@@ -3991,6 +4006,41 @@ CSS;
     }
 
     /** Final theme and content-plugin markup in deterministic path order. */
+    /**
+     * Analysis-only CSS that gives the contrast check the palette context the
+     * delivered page has and the design appendix does not.
+     *
+     * Two halves. The custom properties resolve `var(--wp--preset--color--x)`
+     * in an authored declaration. The `has-…` rules resolve the preset class
+     * an element carries: WordPress paints those from theme.json at render
+     * time, so without them an element whose only background is
+     * `has-base-background-color` has no resolvable background at all, and
+     * every colour on it is reported unverified rather than checked.
+     *
+     * Never shipped: the caller strips exactly these bytes back off.
+     */
+    private static function contrastAnalysisContext(Project $project): string
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return '';
+        }
+        $variables = '';
+        $classes = '';
+        foreach (ContrastFixStep::paletteMap($project->readJson('theme/theme.json')) as $slug => $hex) {
+            if (preg_match('/^[a-z0-9-]+$/D', $slug) !== 1 || preg_match('/^#[0-9a-f]{6}$/iD', $hex) !== 1) {
+                continue;
+            }
+            $variables .= '--wp--preset--color--' . $slug . ':' . $hex . ';';
+            $classes .= '.has-' . $slug . '-background-color{background-color:' . $hex . ';}' . "\n"
+                . '.has-' . $slug . '-color{color:' . $hex . ';}' . "\n";
+        }
+        if ($variables === '') {
+            return '';
+        }
+
+        return ':root{' . $variables . "}\n" . $classes;
+    }
+
     private static function deliveredMarkup(Project $project): string
     {
         $files = $project->markupFiles();
@@ -4474,13 +4524,78 @@ CSS;
             static fn (string $class): string => preg_quote($class, '/'),
             array_keys(self::CLASSES),
         ));
-        // Conservative containment: descendant/child selectors are supported;
-        // sibling selectors and escapes cannot reach outside an authored root.
-        if (strpbrk($selector, '+~\\') !== false
+        // Escapes can spell an anchor that is not the one we read.
+        if (str_contains($selector, '\\')
             || preg_match('/^\.design-(?:frame|motif)(?![\w-])/', $selector) === 1) {
             return false;
         }
+        if (!self::siblingsStayInsideRoot($selector)) {
+            return false;
+        }
         return preg_match('/^\.(?:' . $allowed . '|design-[a-z0-9][a-z0-9_-]*)(?![\w-])/', $selector) === 1;
+    }
+
+    /**
+     * Whether every sibling combinator in an anchored selector selects inside
+     * the authored root rather than beside it.
+     *
+     * `.design-x + .design-y` is a sibling OF the root: the subject is an
+     * element the root does not own, which is the escape the containment rule
+     * exists to stop. `.design-x p + p` is not: a sibling of a descendant
+     * shares a parent inside the root, so it is a descendant too.
+     *
+     * The distinction is one descendant or child combinator. Refusing `+` and
+     * `~` outright refused both, and `p + p`, `li + li` and `> * + *` are how
+     * CSS states spacing BETWEEN siblings — the main tool an author has for
+     * the rhythm this channel exists to hand over. One was dropped from a
+     * generated site during review, with the disposition "not scoped under a
+     * documented utility class", which it was.
+     */
+    private static function siblingsStayInsideRoot(string $selector): bool
+    {
+        $descended = false;
+        $depth = 0;
+        $length = strlen($selector);
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $selector[$i];
+            if ($char === '[' || $char === '(') {
+                ++$depth;
+                continue;
+            }
+            if ($char === ']' || $char === ')') {
+                $depth = max(0, $depth - 1);
+                continue;
+            }
+            if ($depth > 0) {
+                continue;
+            }
+            if ($char === '+' || $char === '~') {
+                if (!$descended) {
+                    return false;
+                }
+                continue;
+            }
+            if ($char === '>') {
+                $descended = true;
+                continue;
+            }
+            if (!ctype_space($char)) {
+                continue;
+            }
+            // Whitespace is a descendant combinator only when it is not the
+            // padding around another one: the space in `.a + .b` belongs to
+            // the `+`, and reading it as a descendant would call a sibling of
+            // the root a descendant of it.
+            $next = $i + 1;
+            while ($next < $length && ctype_space($selector[$next])) {
+                ++$next;
+            }
+            if ($next < $length && !in_array($selector[$next], ['>', '+', '~'], true)) {
+                $descended = true;
+            }
+        }
+
+        return true;
     }
 
     /**
