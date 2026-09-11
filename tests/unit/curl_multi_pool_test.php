@@ -278,3 +278,27 @@ test('CurlMultiPool rejects a completion for an unregistered curl handle', funct
     $e = assert_throws(fn () => $pool->run(['a' => 1], $buildHandle, $classify, 1));
     assert_contains('unregistered curl handle', $e->getMessage(), 'an unknown handle is a loud failure');
 });
+
+test('CurlMultiPool starts siblings before the first transfer completes when the cache becomes ready', function () {
+    $gate = new Automattic\SiteBuild\PromptCacheGate();
+    $pool = new class($gate) extends FakeCurlMultiPool {
+        public int $round = 0;
+        public function __construct(private Automattic\SiteBuild\PromptCacheGate $gate) {
+            parent::__construct([[], ['a', 'b', 'c']]);
+        }
+        protected function multiExec(CurlMultiHandle $multi, ?int &$running): int {
+            $this->round++;
+            if ($this->round === 1) { $this->gate->release(); }
+            return parent::multiExec($multi, $running);
+        }
+    };
+    $starts = [];
+    $build = function ($key) use ($pool, &$starts): CurlHandle {
+        $starts[$key] = $pool->round;
+        return $pool->register($key, curl_init('http://localhost/unused'));
+    };
+    $results = $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build,
+        fn ($key) => ['ok' => true], 3, fn () => $gate->ready());
+    assert_eq(['a' => 0, 'b' => 1, 'c' => 1], $starts);
+    assert_eq(3, count($results));
+});
