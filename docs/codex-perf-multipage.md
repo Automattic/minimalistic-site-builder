@@ -1,12 +1,14 @@
-The four-page `tbilisi12` demo completed with the original API models and generated images. The fixes help, but they are not sufficient for multi-page sites.
+This report records the four-page `tbilisi12` audit before the subsequent multi-page fixes. It preserves the original measurements and defects.
 
-The build exposed an API schema error. PR #668 now fixes that error. The other findings below remain open.
+See [the fix verification](codex-perf-verification.md) for the subsequent PRs and tests.
+
+The build exposed an API schema error. PR #668 fixes that error. Subsequent PRs address the other findings below.
 
 The demo contains Home, Menu, About, and Visit, with 14 sections. Its theme and content plugin are complete on disk. Studio is unavailable, so no browser preview or visual site check ran.
 
 The build used `claude-opus-5`, `claude-haiku-4-5`, and `gemini-3.1-flash-image`. It used the original Tbilisi prompt, the blocks graph, and `--multi-page --with-images`. The default image policy generates homepage images, shared images, and interior hero images. It deferred nine other interior images to local placeholders. Thus this result does not measure a site with every image generated.
 
-The first attempt used combined commit `1d9ce7c041f35a3f74e3f9709c95604c32618c21`. The resumed attempt used `cc2510f2`, which adds the schema fix. All 13 implementation PRs remain separate, with `codex-perf` as their base. The combined implementation remains on `codex-perf-validation`.
+The first attempt used combined commit `1d9ce7c041f35a3f74e3f9709c95604c32618c21`. The resumed attempt used `cc2510f2`, which adds the schema fix. The `codex-perf` branch now contains all 13 original implementation PRs. The tables below describe the earlier test commits.
 
 | Measure | Result |
 |---|---:|
@@ -86,7 +88,7 @@ The following findings come from local boundary probes. They did not occur in th
 - The active CLI does not filter image requests against final references. All paid images in this demo remain referenced. The preparation API has the filter, but the CLI does not use it.
 - Image QA still has a barrier between generation, checks, and replacements. This demo tests only one successful check round. A larger fixture must test queue behavior and the memory limit.
 
-The checks therefore support the site-wide design changes, common cache reuse, image concurrency, and the attempt ledger. They do not support a claim that all multi-page contracts are correct. The schema fix is complete. The remaining live findings and boundary findings need further changes and tests.
+The original checks support the site-wide design changes, common cache reuse, image concurrency, and the attempt ledger. They do not establish that all multi-page contracts were correct at that time. The subsequent fixes require their own tests and comparison.
 
 All LLM transcripts appear below. Request durations overlap in concurrent phases and must not be added as build time. Failed schema requests report zero tokens. File numbers restart on resume; timestamps and command boundaries establish order.
 
