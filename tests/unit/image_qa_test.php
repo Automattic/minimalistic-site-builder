@@ -110,3 +110,14 @@ test('ImageQa retains rotation failures after the prompt permits the image kind 
     $tilt = ImageQa::verdict('{"upright": true, "rendered_text": false, "matches_subject": true, "note": "the screen has a gentle tilt"}');
     assert_eq(true, $tilt['ok']);
 });
+
+test('ImageQa excludes light and crop from subject failure', function () {
+    $verdict = ImageQa::verdict('{"upright":true,"rendered_text":false,"matches_subject":false,"subject_difference":"none","note":"The lamp glow and position differ."}');
+    assert_eq(true, $verdict['ok']);
+    $verdict = ImageQa::verdict('{"upright":true,"rendered_text":true,"matches_subject":false,"subject_difference":"none"}');
+    assert_eq(['rendered text or lettering in the picture'], $verdict['findings']);
+    foreach (['main_subject', 'vantage'] as $difference) {
+        $verdict = ImageQa::verdict(json_encode(['matches_subject' => false, 'subject_difference' => $difference]));
+        assert_eq(false, $verdict['ok']);
+    }
+});
