@@ -34,7 +34,7 @@ final class ImageQa
         if (ImageKind::inspectsEveryImage((string) ($spec['image_kind'] ?? ''))) {
             return true;
         }
-        if (!empty($spec['hero_slot']) || ($spec['image_slot'] ?? '') === 'cover') {
+        if (!empty($spec['hero_slot']) || in_array($spec['image_slot'] ?? '', ['cover', 'full-width'], true)) {
             return true;
         }
         if (preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1) {

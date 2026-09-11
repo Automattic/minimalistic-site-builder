@@ -54,7 +54,7 @@ final class ImageSlot
                         if (!$matches) {
                             continue;
                         }
-                        $candidate = $name === 'cover' ? 'cover' : 'image';
+                        $candidate = $name === 'cover' ? 'cover' : (($attrs['align'] ?? '') === 'full' ? 'full-width' : 'image');
                         for ($parent = $index; $parent !== null; $parent = $doc->parent($parent)) {
                             $parentAttrs = $doc->attrs($parent) ?? [];
                             if (isset($heroAnchors[$file][$parentAttrs['anchor'] ?? ''])) {
@@ -66,7 +66,7 @@ final class ImageSlot
                             }
                         }
                         // A shared asset must satisfy its largest slot.
-                        if ($slot === null || $candidate === 'cover' || ($slot === 'card' && $candidate === 'image')) {
+                        if ($slot === null || in_array($candidate, ['cover', 'full-width'], true) || ($slot === 'card' && $candidate === 'image')) {
                             $slot = $candidate;
                         }
                     }

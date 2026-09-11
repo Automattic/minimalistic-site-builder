@@ -75,7 +75,7 @@ final class ImageCrop
             return $current;
         }
 
-        if ($slot === 'cover' || ($slot === null && self::fullFrameSlot($current, $pageContext))) {
+        if (in_array($slot, ['cover', 'full-width'], true) || ($slot === null && self::fullFrameSlot($current, $pageContext))) {
             return $crop === 'panoramic' ? '21:9' : '16:9';
         }
 
