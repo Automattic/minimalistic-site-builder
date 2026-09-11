@@ -34,12 +34,19 @@ final class SectionImageContract
             $document = BlockMarkup::parse($markup);
             $path = 'image';
             $safe = true;
+            $inlineCaption = '';
             foreach ($document->indices() as $index) {
                 $end = $document->endOffset($index);
                 if ($position !== null && $document->openingOffset($index) <= $position && ($end === null || $position < $end)) {
                     $path = $document->name($index) . '[' . $index . ']';
-                    if ($document->name($index) === 'image' && $document->children($index) !== []) {
-                        $safe = false;
+                    if ($document->name($index) === 'image') {
+                        $html = $document->innerHtml($index);
+                        preg_match('/<figcaption\b[^>]*>(.*?)<\/figcaption>/is', $html, $caption);
+                        $inlineCaption = trim(strip_tags($caption[1] ?? ''));
+                        $withoutCaption = preg_replace('/<figcaption\b[^>]*>.*?<\/figcaption>/is', '', $html) ?? $html;
+                        if ($document->children($index) !== [] || trim(strip_tags($withoutCaption)) !== '') {
+                            $safe = false;
+                        }
                     }
                 }
             }
@@ -52,6 +59,9 @@ final class SectionImageContract
                 . '; delivered=' . ($removed ? 'removed' : Warnings::value($source))
                 . "; disposition=" . ($removed ? "removed the asset above the planned image count {$limit}"
                     : "retained the unsafe media boundary above the planned image count {$limit}; repair this asset");
+            if ($removed && $inlineCaption !== '') {
+                $result['removedCaptions'][] = ['text' => $inlineCaption];
+            }
             foreach ($result['removedCaptions'] as $caption) {
                 $warnings[] = "file='theme/parts/{$part}.html'; block='caption'; authored=" . Warnings::value($caption['text'])
                     . '; delivered=removed; disposition=removed the caption for the removed asset';
