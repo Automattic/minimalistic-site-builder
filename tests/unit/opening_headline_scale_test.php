@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Units\OpeningHeadlineScale;
 
 // Shapes taken from the tbilisi23 cohort site (BIGR-1015): `/menu/` authored
@@ -29,6 +30,56 @@ function ohs_opening(string $attrs, string $classes = 'wp-block-heading'): strin
         . '<!-- /wp:heading --></div>' . "\n"
         . '<!-- /wp:group -->';
 }
+
+/** Return the final HTML from the block fixer. */
+function ohs_fixed_markup(string $markup): string
+{
+    return with_temp_dir('opening_scale_', function (string $dir) use ($markup): string {
+        mkdir($dir . '/parts');
+        $path = $dir . '/parts/opening.html';
+        file_put_contents($path, $markup);
+        $fixer = new PhpBlockFixer();
+        assert_eq(0, $fixer->fixReport($dir)->failedCount(), 'the block fixer must complete');
+        $out = (string) file_get_contents($path);
+        $again = $fixer->fixReport($dir);
+        assert_eq(0, $again->failedCount(), 'the second pass must complete');
+        assert_eq(0, $again->changedCount(), 'the final HTML must reach a fixed point');
+        assert_eq($out, file_get_contents($path));
+        return $out;
+    });
+}
+
+test('the block fixer cannot restore the display class from comment attributes', function () {
+    foreach ([
+        'has-display-font-size',
+        "reveal-blur\thas-display-font-size\nhas-display-font-size-custom",
+    ] as $classes) {
+        $markup = ohs_opening(
+            (string) json_encode(['level' => 1, 'fontSize' => 'display', 'className' => $classes]),
+            'wp-block-heading ' . $classes,
+        );
+        $repairs = [];
+        $out = OpeningHeadlineScale::enforce($markup, 'page-about--hero', ohs_theme(), $repairs);
+        $final = ohs_fixed_markup($out);
+        assert_true(
+            preg_match('/(?<![\\w-])has-display-font-size(?![\\w-])/', $final) !== 1,
+            'the final HTML must remove the display token',
+        );
+        assert_contains('has-section-title-font-size', $final);
+        assert_eq(1, count($repairs));
+        assert_eq('display', $repairs[0]['authored']);
+        assert_eq('section-title', $repairs[0]['delivered']);
+        if (str_contains($classes, 'reveal-blur')) {
+            assert_contains('reveal-blur', $final);
+            assert_contains('has-display-font-size-custom', $final);
+        } else {
+            assert_true(!str_contains($out, '"className"'), 'remove the empty className attribute');
+        }
+        $again = [];
+        assert_eq($final, OpeningHeadlineScale::enforce($final, 'page-about--hero', ohs_theme(), $again));
+        assert_eq([], $again);
+    }
+});
 
 test('an inner opening h1 authored at the masthead preset is lowered to the section step', function () {
     $repairs = [];

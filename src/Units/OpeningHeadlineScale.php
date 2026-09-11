@@ -89,14 +89,25 @@ final class OpeningHeadlineScale
                 continue;
             }
             $attrs['fontSize'] = self::SECTION_TITLE_SLUG;
+            $displayClass = 'has-' . self::DISPLAY_SLUG . '-font-size';
+            if (is_string($attrs['className'] ?? null)) {
+                $classes = self::classTokens($attrs['className']);
+                $kept = array_values(array_filter(
+                    $classes,
+                    static fn (string $class): bool => $class !== $displayClass,
+                ));
+                if ($classes !== $kept) {
+                    if ($kept === []) {
+                        unset($attrs['className']);
+                    } else {
+                        $attrs['className'] = implode(' ', $kept);
+                    }
+                }
+            }
             $document->setAttrs($index, $attrs);
-            // The preset class must follow the preset attr: WordPress renders
-            // `.has-display-font-size` with !important, so a stale token would
-            // beat the new one. The class can also be absent entirely (the
-            // bare-H1 case) — the block fixer writes the matching token back
-            // from the attribute, so removing a token that is not there is
-            // the whole job here.
-            $document->removeClassTokenInOwnHtml($index, 'has-' . self::DISPLAY_SLUG . '-font-size');
+            // Remove the token from both sources so the block fixer cannot restore it.
+            // The block fixer adds the section-title class from the fontSize attribute.
+            $document->removeClassTokenInOwnHtml($index, $displayClass);
             $repairs[] = [
                 'part' => $part,
                 'block' => 'heading.level-1',
@@ -108,6 +119,12 @@ final class OpeningHeadlineScale
             $changed = true;
         }
         return $changed ? $document->render() : $markup;
+    }
+
+    /** @return list<string> */
+    private static function classTokens(string $classes): array
+    {
+        return preg_split('/[\x20\t\r\n\f]+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     }
 
     /**
