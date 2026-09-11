@@ -62,6 +62,11 @@ route, placeholder `#`, phone number, or external URL. A contact mailto or
 tel: is valid only when that exact address or number appears in SITE SPEC.
 Never invent an email, street address, phone number, or URL. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state.
 
+Naming the page's parts:
+- **Parallel grammar.** Every `title` on this page takes the same grammatical form as its siblings, and so does every `primary_action` `label`. All noun phrases or all verb phrases — never "Our work" beside "Get in touch". A mixed set reads as several people planning one page.
+- **The ordinary term wins.** Name a section what a visitor would call it ("Menu", "Hours", "Pricing", "Contact") unless this site's own world genuinely has a better word. A coined synonym for a familiar concept costs the reader a translation and buys nothing.
+- **A label states the visitor's outcome.** `label` says what the visitor gets or can now do ("Book a table", "See what a build costs"), never what the business does internally ("Reservation system", "Transparent pricing"). `intent` is where the planning sentence goes.
+
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text. ALWAYS pair it with background "image": the section delivers one wp:cover band, and only the "image" treatment lets the builder run that band edge to edge (any other background frames the cover inside a padded solid band, and the builder forces the pairing to "image" anyway).
 - asymmetric-split — one row of unequal regions, never equal. Two regions (e.g. 34/66 or 40/60) for a lead-and-support band about one thing; three (e.g. 50/25/25) for a magazine row mixing one wide feature with narrow notes. Pick two unless the content is genuinely several items.

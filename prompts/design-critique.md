@@ -15,6 +15,8 @@ Review all these dimensions:
 - responsiveness: mobile-first CSS, resilient narrow-screen layout, bounded media, usable navigation and tables
 - heading hierarchy: exactly one `h1`, no heading level skips, and headings matching section structure
 - content fidelity: specific real copy grounded in the supplied document, without unsupported factual invention
+- typographic craft: parallel grammar across each set of sibling labels, at most one emphasized phrase per section, and no justified body copy
+- subtraction: every section, image and rule earns its place — nothing is present only to fill a grid, and no image could be swapped for any stock photograph without changing the section's meaning
 - supported markup: no forms, SVG, custom elements, JavaScript, unsafe URLs, or scripted behavior
 
 Return `pass` only when no material revision is needed. Otherwise return `revise` with a short list of targeted notes. Each note must isolate one existing landmark using a CSS selector when possible (for example `#hero`, `header`, or `footer`), or an exact heading when no stable selector exists. Each instruction must describe the concrete source change needed without requesting a whole-document rewrite.

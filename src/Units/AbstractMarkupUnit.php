@@ -10,6 +10,7 @@ use Automattic\SiteBuild\PromptRenderer;
 abstract class AbstractMarkupUnit implements MarkupUnit
 {
     private const OUTPUT_CONTRACT_TEMPLATE = 'block-markup-output-contract.md';
+    private const COPY_CRAFT_TEMPLATE = 'copy-craft.md';
     private const SITE_CONTEXT_TEMPLATE = 'site-context.md';
 
     /**
@@ -72,6 +73,13 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         // controls where it belongs (the section places it in its build layer).
         $vars['block_markup_output_contract'] = rtrim(
             $this->renderer->render(self::OUTPUT_CONTRACT_TEMPLATE, []),
+            "\r\n",
+        );
+        // Same arrangement, same reason: the craft rules are identical for every
+        // markup author, so they live in one fragment and each prompt decides
+        // where it belongs (all four place it in a cached layer).
+        $vars['copy_craft'] = rtrim(
+            $this->renderer->render(self::COPY_CRAFT_TEMPLATE, []),
             "\r\n",
         );
         $request = ['prompt' => $this->renderer->render($template, $vars)];

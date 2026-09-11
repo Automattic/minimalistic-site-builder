@@ -26,7 +26,7 @@ test('SiteBuilder pipeline exposes the default blocks step order and stop ids', 
             // normalize-layout MUST precede contrast-fix and motion-sanity: the
             // attribute repair can activate previously-inert color/motion
             // attributes, which those policy passes must be able to see.
-            'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
+            'collect-images', 'normalize-layout', 'header-hero', 'typographic-hygiene', 'contrast-fix', 'motion-sanity', 'fix-blocks',
             'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $builder->pipeline()->stepIds());
         assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
@@ -51,7 +51,7 @@ test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallbac
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
             'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout', 'cta-budget',
-            'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
+            'collect-images', 'normalize-layout', 'header-hero', 'typographic-hygiene', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
             'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $pipeline->stepIds());
         // Only HTML-first has a design document that can fail, so only it is

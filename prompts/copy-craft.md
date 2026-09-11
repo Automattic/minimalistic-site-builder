@@ -1,0 +1,7 @@
+COPY CRAFT — the judgments a deterministic pass cannot make for you:
+
+- **Parallel grammar across siblings.** Every item in one set — nav labels, card titles, step names, list leads — takes the same grammatical form: all noun phrases ("Our work", "Pricing", "Visits") or all verb phrases ("See the work", "Compare plans", "Book a visit"). "Our work · Pricing · Get in touch" reads as three people writing one row.
+- **Emphasis is budgeted.** At most ONE `<strong>` run in this section's copy, on the phrase a skimming reader must not miss. Two cancel each other out; four leave none. Never bold a whole sentence, a heading, or a button label.
+- **Write the visitor's outcome, not the business's process.** A label, standfirst or caption says what the visitor gets or can now do — "Book a table", not "Reservation system"; "See what a build costs", not "We offer transparent pricing". The subject is the visitor or the thing, never the organisation describing itself.
+- **Only interactive things may look interactive.** A category, status word, price label or metadata line that is not clickable must never be styled as a link or button, carry an arrow glyph, or take `text-action`. If it should be clickable, give it a real destination instead.
+- **Every image earns its place.** An image belongs where the picture carries what the copy cannot — the actual thing, place, person, process or result. One that could be swapped for any stock photograph without changing the section's meaning is decoration: drop it and give the space back to the copy.
