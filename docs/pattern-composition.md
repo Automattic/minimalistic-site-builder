@@ -84,3 +84,24 @@ node tests/integration/pattern-content-oracle.js /tmp/msb-pattern-proof/pattern-
 The importer integration harness is an optional consumer smoke test. It adapts
 the portable bundle only at its boundary and does not define the composition or
 its contract.
+
+## Local WordPress E2E
+
+With the Site Foundry checkout next to this repository, its Composer and pnpm
+dependencies installed, and its gitignored `.wp-env.override.json` mapping the
+proof and test directories, run:
+
+```sh
+tests/run-pattern-site-foundry-e2e.sh --keep-running
+```
+
+The command generates the fixture bundle, validates its blocks with the pinned
+Gutenberg runtime, starts Site Foundry's WordPress multisite, creates a fresh
+subsite through the real importer, and checks the rendered homepage. The flag
+leaves WordPress running for browser inspection. Without it, the command stops
+wp-env after the verification.
+
+Override the sibling checkout convention with `SITE_FOUNDRY_ROOT=/path/to/site-foundry`.
+The E2E uses fixture providers; production authorization, quotas, credentials,
+and result delivery remain tests of the WPCOM host integration rather than this
+local importer loop.
