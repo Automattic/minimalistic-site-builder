@@ -26,7 +26,7 @@ namespace Automattic\SiteBuild;
  * intact. Only a genuinely mixed batch is serialized across transports, and it
  * still comes back keyed and ordered exactly as it went in.
  */
-final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
+final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm, CooperativeTransport
 {
     /** Transport that most recently served a single completion. */
     private ?Llm $lastUsed = null;
@@ -67,6 +67,12 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBa
      * the transport that would ACTUALLY serve it rather than a nominal default
      * the request never reaches.
      */
+    public function supportsCooperativeRequests(array $opts = []): bool
+    {
+        $transport = $this->transports[$this->transportFor($opts['model'] ?? null)];
+        return $transport instanceof CooperativeTransport && $transport->supportsCooperativeRequests($opts);
+    }
+
     public function transportFor(?string $model): string
     {
         $key = strtolower(trim((string) $model));
