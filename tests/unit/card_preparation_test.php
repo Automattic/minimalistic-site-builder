@@ -94,3 +94,29 @@ test('card surface repair proves contrast for authored palette colors', function
     assert_eq($raw, CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings, $theme));
     assert_contains('repair the card surface', implode("\n", $warnings));
 });
+
+test('card surface repair enforces the exact 4.5 contrast floor', function () {
+    $theme = ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#ffffff'], ['slug' => 'contrast', 'color' => '#6e7882'],
+    ]]]];
+    $ratio = \Automattic\SiteBuild\ContrastMath::ratio([255, 255, 255], [110, 120, 130]);
+    assert_true($ratio > 4.49 && $ratio < 4.5);
+    $raw = preparation_card(true);
+    $repairs = $warnings = [];
+    assert_eq($raw, CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings, $theme));
+    assert_contains('repair the card surface', implode("\n", $warnings));
+    $theme['settings']['color']['palette'][1]['color'] = '#767676';
+    $out = CardPreparation::enforce($raw, 'flush', 'page-menu--dishes', $repairs, $warnings, $theme);
+    assert_eq('base', \Automattic\SiteBuild\BlockMarkup::parse($out)->attrs(0)['backgroundColor']);
+});
+
+test('card surface repair uses the explicit theme text color', function () {
+    foreach (['var:preset|color|base', 'var(--wp--preset--color--base)', '#ffffff'] as $ink) {
+        $theme = ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#ffffff'], ['slug' => 'contrast', 'color' => '#000000'],
+        ]]], 'styles' => ['color' => ['text' => $ink]]];
+        $repairs = $warnings = [];
+        $out = CardPreparation::enforce(preparation_card(true), 'flush', 'page-menu--dishes', $repairs, $warnings, $theme);
+        assert_eq('contrast', \Automattic\SiteBuild\BlockMarkup::parse($out)->attrs(0)['backgroundColor']);
+    }
+});

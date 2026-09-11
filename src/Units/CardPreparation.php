@@ -97,6 +97,24 @@ final class CardPreparation
                 }
             }
         }
+        $defaultInk = 'contrast';
+        $authoredInk = $theme['styles']['color']['text'] ?? null;
+        if ($authoredInk !== null) {
+            if (!is_string($authoredInk)) {
+                return null;
+            }
+            if (preg_match('/^var:preset[|:]color[|:]([a-z0-9-]+)$/i', $authoredInk, $match)
+                || preg_match('/^var\(--wp--preset--color--([a-z0-9-]+)\)$/i', $authoredInk, $match)) {
+                $defaultInk = $match[1];
+            } else {
+                $rgb = ContrastMath::hexToRgb($authoredInk);
+                if ($rgb === null) {
+                    return null;
+                }
+                $defaultInk = '__theme-text';
+                $palette[$defaultInk] = $rgb;
+            }
+        }
         $inks = [];
         $indices = [$root];
         foreach ($document->indices() as $index) {
@@ -111,7 +129,7 @@ final class CardPreparation
             if ($index !== $root && !in_array($document->name($index), ['paragraph', 'heading', 'list', 'list-item', 'buttons'], true)) {
                 continue;
             }
-            $ink = 'contrast';
+            $ink = $defaultInk;
             for ($node = $index; $node !== null; $node = $document->parent($node)) {
                 $attrs = $document->attrs($node) ?? [];
                 $tag = MarkupScan::wrapperTag($document->ownHtml($node), 0);
@@ -138,7 +156,7 @@ final class CardPreparation
             $inks[$ink] = true;
         }
         $best = null;
-        $bestRatio = 4.49;
+        $bestRatio = 4.5;
         foreach (['base', 'contrast'] as $surface) {
             if (!isset($palette[$surface])) {
                 continue;
@@ -150,7 +168,7 @@ final class CardPreparation
                 }
                 $ratio = min($ratio, ContrastMath::ratio($palette[$surface], $palette[$ink]));
             }
-            if ($ratio > $bestRatio) {
+            if ($ratio >= 4.5 && ($best === null || $ratio > $bestRatio)) {
                 $best = $surface;
                 $bestRatio = $ratio;
             }
