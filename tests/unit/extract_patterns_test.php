@@ -1653,3 +1653,30 @@ test('a failed in-place rollback preserves the previous backup', function (): vo
         }
     });
 });
+
+test('pattern extraction removes an action whose target leaves the pattern', function () {
+    with_project('builder_pattern_dead_action_', function ($project) {
+        $body = '<!-- wp:paragraph --><p>Keep the restaurant details.</p><!-- /wp:paragraph -->';
+        $button = str_replace('/contact/', '#hours', extract_patterns_buttons('See the hours'));
+        $markup = '<!-- wp:group --><div class="wp-block-group">'
+            . '<!-- wp:heading --><h2>Contact</h2><!-- /wp:heading -->'
+            . $body . $button . '</div><!-- /wp:group -->';
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'contact', 'type' => 'contact', 'markup' => $markup],
+        ]);
+        $step = new ExtractPatternsStep();
+        $step->run($project);
+        $pattern = extract_patterns_for_label($project, 'contact');
+        assert_contains($body, $pattern);
+        assert_true(!str_contains($pattern, 'href="#"'));
+        assert_true(!str_contains($pattern, 'See the hours'));
+        $warnings = implode(' ', $project->readJson('warnings.json')['extract-patterns']);
+        assert_contains('theme/patterns/contact-', $warnings);
+        assert_contains('delivered=removed', $warnings);
+        assert_contains('See the hours', $warnings);
+        $before = extract_patterns_snapshot($project);
+        $step->run($project);
+        assert_eq($before, extract_patterns_snapshot($project));
+    });
+});

@@ -101,3 +101,66 @@ test('a content action label has plain text within the primary-action limit', fu
     assert_true(!str_contains($label, '<'));
     assert_true(mb_strlen($label) <= 80);
 });
+
+
+test('equivalent internal routes retain content and form actions', function () {
+    $pages = [['slug' => 'visit', 'path' => '/visit/', 'title' => 'Visit', 'sections' => [
+        ['slug' => 'contact', 'title' => 'Contact details'],
+    ]]];
+    $context = ActionCapabilities::context([], $pages);
+    foreach (['/visit', '/visit/', '/visit?source=menu'] as $url) {
+        assert_eq('Visit', ActionCapabilities::label('Reserve a table', $url, $context));
+    }
+    foreach (['/visit#contact', '/visit/#contact', '#contact'] as $url) {
+        assert_eq('Contact details', ActionCapabilities::label('Make a Reservation', $url, $context, '/visit/'));
+    }
+    $context['form_destinations']['/visit/#contact'] = true;
+    assert_eq('Make a Reservation', ActionCapabilities::label('Make a Reservation', '/visit#contact', $context));
+    assert_eq(null, ActionCapabilities::label('Make a Reservation', '//elsewhere.example/visit', $context));
+    assert_eq(null, ActionCapabilities::label('Make a Reservation', 'https://elsewhere.example/visit', $context));
+    assert_eq('Read reservation details', ActionCapabilities::label('Read reservation details', '/visit', $context));
+});
+
+test('a transaction title cannot hide another unsupported transaction', function () {
+    $pages = action_capability_pages();
+    $pages[0]['sections'][1]['title'] = 'Make a Reservation';
+    $context = ActionCapabilities::context([], $pages);
+    assert_eq(null, ActionCapabilities::label('Reserve a table', '#features', $context));
+    $context['contact_destinations']['https://booking.example/reserve'] = true;
+    assert_eq('Make a Reservation', ActionCapabilities::label('Make a Reservation', 'https://booking.example/reserve', $context));
+});
+
+test('the scoped homepage uses the full action contract without changing siblings', function () {
+    with_project('builder_scoped_action_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A restaurant.']);
+        $project->writeJson('siteSpec.json', ['name' => 'Tbilisi', 'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome.'],
+            ['slug' => 'visit', 'title' => 'Visit', 'purpose' => 'Contact details.'],
+        ]]);
+        $project->writeText('pages.json', '{"pages":[]}');
+        seed_test_design_direction($project);
+        $llm = new \Automattic\SiteBuild\Tests\FakeLlm();
+        $llm->queueJson(['sections' => [
+            plan_section(['slug' => 'hero', 'primary_action' => ['label' => 'Make a Reservation', 'intent' => 'Book a table.', 'destination' => '/visit']]),
+            plan_section(['slug' => 'food', 'layout_archetype' => 'feature-row-hairlines']),
+            plan_section(['slug' => 'details', 'layout_archetype' => 'asymmetric-split']),
+        ]]);
+        $step = new PagePlanStep($llm, new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+        $pages = $step->runForSlugs($project, ['home']);
+        assert_eq('Visit', $pages[0]['sections'][0]['primary_action']['label']);
+        assert_eq('{"pages":[]}', $project->readText('pages.json'));
+        assert_contains('Make a Reservation', implode(' ', $project->readJson('warnings.json')['page-plan']));
+    });
+});
+
+test('the pattern action check retains valid links and removes only dead actions', function () {
+    $sibling = '<!-- wp:paragraph --><p>Keep this text.</p><!-- /wp:paragraph -->';
+    $valid = capability_button('Make a Reservation', 'https://booking.example/reserve');
+    $markup = $sibling . capability_button('See contact details', '#') . $valid . $sibling;
+    $result = ActionCapabilities::repairMarkup($markup, [], 'theme/patterns/contact.php', deadOnly: true);
+    assert_eq($sibling . $valid . $sibling, $result['markup']);
+    assert_eq(1, count($result['warnings']));
+    assert_contains('delivered=removed', $result['warnings'][0]);
+    assert_contains('theme/patterns/contact.php', $result['warnings'][0]);
+    assert_eq(['markup' => $result['markup'], 'warnings' => []], ActionCapabilities::repairMarkup($result['markup'], [], 'theme/patterns/contact.php', deadOnly: true));
+});
