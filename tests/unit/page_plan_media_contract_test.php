@@ -66,3 +66,29 @@ test('media repair keeps siblings intact and reaches a fixed point', function ()
     $textOnly[0]['image_count'] = 0;
     assert_eq($textOnly, PagePlanStep::reconcileMediaAssignments($textOnly));
 });
+
+test('the media contract supports every count through twelve images', function () {
+    foreach (range(9, 12) as $count) {
+        $warnings = [];
+        $sections = [['slug' => 'collection', 'layout_archetype' => 'feature-row-hairlines', 'image_count' => $count]];
+        $out = PagePlanStep::reconcileMediaAssignments($sections, false, $warnings, 'home', false);
+        assert_eq('equal-card-grid', $out[0]['layout_archetype']);
+        assert_eq($count, $out[0]['image_count']);
+        assert_contains("preserve all {$count} requested images", $out[0]['content_notes']);
+    }
+});
+
+test('an out-of-schema image count records its delivered limit', function () {
+    $warnings = [];
+    $out = PagePlanStep::normalize([[
+        'slug' => 'collection', 'title' => 'Collection', 'type' => 'gallery', 'image_count' => 13,
+        'layout_archetype' => 'feature-row-hairlines', 'background' => 'base',
+        'vertical_density' => 'standard', 'text_placement' => 'left-column', 'handoff' => 'After the header.',
+    ]], false, null, [], $warnings, 'collection');
+    assert_eq(12, $out[0]['image_count']);
+    assert_eq('equal-card-grid', $out[0]['layout_archetype']);
+    $warning = implode("\n", $warnings);
+    assert_contains('.image_count', $warning);
+    assert_contains('authored=13', $warning);
+    assert_contains('delivered=12', $warning);
+});

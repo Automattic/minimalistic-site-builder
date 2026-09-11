@@ -1607,6 +1607,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $sectionPath,
             );
 
+            $authoredImageCount = $section['image_count'] ?? 0;
+            $imageCount = is_numeric($authoredImageCount) ? max(0, min(12, (int) $authoredImageCount)) : 0;
+            if (!is_numeric($authoredImageCount) || (float) $authoredImageCount !== (float) $imageCount) {
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, count($out)) . '.image_count',
+                    $authoredImageCount,
+                    $imageCount,
+                    'replaced an image count outside the supported integer range 0..12',
+                );
+            }
+
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -1614,7 +1625,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
-                'image_count'      => max(0, min(12, (int) ($section['image_count'] ?? 0))),
+                'image_count'      => $imageCount,
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
