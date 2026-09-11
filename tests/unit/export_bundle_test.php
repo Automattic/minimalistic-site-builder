@@ -198,3 +198,21 @@ test('the conference-hub fixture exports a bundle that passes its checks', funct
     assert_eq('twentytwentyfive', $bundle['theme']);
     assert_eq(5, count($bundle['pages'][0]['sections']));
 });
+
+/**
+ * A fixture run has to land the same bundle every time, or comparing two runs
+ * proves nothing. Verified across ten runs by hand; pinned here so a timestamp
+ * or a generated id cannot creep into the bundle unnoticed.
+ */
+test('the same inputs export a byte-identical bundle', function () {
+    $first = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+    $second = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+
+    (new ExportBundleStep())->run($first);
+    (new ExportBundleStep())->run($second);
+
+    assert_eq(
+        $first->readText(PatternArtifacts::BUNDLE),
+        $second->readText(PatternArtifacts::BUNDLE),
+    );
+});
