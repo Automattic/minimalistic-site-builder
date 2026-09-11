@@ -791,7 +791,8 @@ final class GenerateImagesStep implements Step
         string $imageCrop = '',
         ?string $subject = null,
     ): array {
-        $ratio = ImageCrop::generationRatio(
+        $isSiteLogo = ($spec['role'] ?? '') === 'site-logo';
+        $ratio = $isSiteLogo ? '1:1' : ImageCrop::generationRatio(
             $imageCrop,
             (string) ($spec['aspectRatio'] ?? 'landscape'),
             (string) ($spec['pageContext'] ?? ''),
@@ -809,7 +810,7 @@ final class GenerateImagesStep implements Step
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
-                imageCrop: $imageCrop,
+                imageCrop: $isSiteLogo ? '' : $imageCrop,
                 imageKind: ($spec['role'] ?? '') === 'site-logo' ? 'photo' : (string) ($spec['image_kind'] ?? ''),
                 screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
