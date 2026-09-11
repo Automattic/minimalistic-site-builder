@@ -1873,8 +1873,8 @@ test('generate-images checks independent assets together and pools only their fa
     [$project, $tmp] = generate_fixture();
     $first = $project->readJson('images.json')[0];
     $specs = [$first];
-    foreach (['hero-other.jpg', 'hero-pass.jpg'] as $filename) {
-        $specs[] = array_replace($first, ['filename' => $filename, 'src' => 'theme:./assets/' . $filename]);
+    foreach (['hero-other.jpg' => 'A park at dawn', 'hero-pass.jpg' => 'A lake at dawn'] as $filename => $subject) {
+        $specs[] = array_replace($first, ['filename' => $filename, 'src' => 'theme:./assets/' . $filename, 'subject' => $subject]);
     }
     $project->writeJson('images.json', $specs);
     $images = new FakeImageClient('JPEGDATA');
