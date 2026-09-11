@@ -22,6 +22,11 @@ test('theme compiler keeps the fixed design values outside the bounded model res
     assert_true(!str_contains(json_encode($schema), 'palette'));
     assert_true(!str_contains($request['prompt'], 'exactly five'));
     assert_contains('all six palette colors', $request['prompt']);
+    $htmlPrompt = file_get_contents(repo_path('prompts/theme-json.md'));
+    foreach (['base', 'contrast', 'primary', 'secondary', 'accent', 'band'] as $slug) {
+        assert_contains('"' . $slug . '"', $htmlPrompt);
+    }
+    assert_eq(true, ThemeJsonStep::compileDefaults([])['settings']['typography']['fluid']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -738,7 +738,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         return [
             'settings' => [
                 'color' => ['palette' => $palette],
-                'typography' => ['fontFamilies' => $fonts],
+                'typography' => ['fontFamilies' => $fonts, 'fluid' => true],
             ],
             'styles' => [
                 'typography' => ['fontWeight' => self::compiledWeight($direction, 'body', '400')],

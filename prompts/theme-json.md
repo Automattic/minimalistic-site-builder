@@ -60,6 +60,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     "primary"   = main brand color (headings, structure)
     "secondary" = supporting color (metadata, captions)
     "accent"    = CTAs / interaction
+    "band"      = the base-adjacent tinted section surface; never a text color
   Give each a human "name".
 - settings.color.gradients is OPTIONAL: when the committed direction explicitly needs a gradient, define at most ONE named preset (slug + name + gradient) built from the palette; otherwise omit it.
 - Do NOT emit settings.shadow.presets. The build injects exactly one `depth` preset from the committed **Depth** fact and owns its consumers.
