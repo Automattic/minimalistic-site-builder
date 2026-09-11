@@ -464,3 +464,18 @@ test('SectionUnit renders the pin directive for an asymmetric-split with an item
         'the pin authoring instruction never leaks into a prompt that must not pin',
     );
 });
+
+test('section requests carry the image count and omit media rules at zero', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'equal-card-grid';
+    $input['section']['image_count'] = 0;
+    $zero = section_unit_request_text($unit->request($input));
+    assert_contains('Image count: 0.', $zero);
+    assert_contains('This section permits no media.', $zero);
+    assert_true(!str_contains($zero, 'AI_IMAGE:'));
+    $input['section']['image_count'] = 6;
+    $six = section_unit_request_text($unit->request($input));
+    assert_contains('Image count: 6.', $six);
+    assert_contains('AI_IMAGE:', $six);
+});
