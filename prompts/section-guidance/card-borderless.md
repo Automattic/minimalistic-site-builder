@@ -1,0 +1,1 @@
+- `borderless` — no card box at all: the card group gets `"className":"card-style--borderless"` but NO background, border, radius, or padding; the cropped image sits above a plain text stack and whitespace alone separates cards. Here (and only here) the image may carry a small radius of its own.

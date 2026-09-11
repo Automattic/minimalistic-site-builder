@@ -66,32 +66,6 @@ test('section prompt keeps unbreakable contact tokens out of display type', func
     assert_true(!str_contains($prompt, 'inquiries@alcortaph'), 'malformed cohort identity copy is excluded');
 });
 
-test('centered-stack prompts commit the whole band to the theme-owned centering', function () {
-    // BIGR-952: the old contract kept wrapping copy start-aligned inside the
-    // centered band, and the delivered mix (centered heading, start-aligned
-    // copy) read as a defect. The theme now centers the band through the root
-    // marker class, so every prompt layer must stop asking for a start
-    // alignment there — an authored has-text-align-* class would beat the
-    // inherited center.
-    $section = (string) file_get_contents(repo_path('prompts/section.md'));
-    $composition = (string) file_get_contents(
-        repo_path('prompts/section-compositions/centered-stack.md')
-    );
-    $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
-
-    // The global discipline for every OTHER composition is unchanged.
-    assert_contains('center display type only', $section, 'short display lines may remain centered');
-    assert_contains('writing direction\'s start edge', $section, 'reading copy follows language direction');
-    assert_contains('`"align":"left"` for LTR', $section, 'LTR Gutenberg mapping is explicit');
-    assert_contains('`"align":"right"` for RTL', $section, 'RTL Gutenberg mapping is explicit');
-
-    // The centered-stack carve-out exists in all three layers.
-    assert_contains('exception is a `centered-stack` band', $section, 'the global rule names its one exception');
-    assert_contains('centers the whole band through the root marker class', $composition);
-    assert_contains('Do not set a start alignment', $composition);
-    assert_contains('theme centers every element in the band', $pagePlan);
-});
-
 test('section composition moves the assigned copy column without widening its measure', function () {
     $prompt = section_unit_request_text(
         (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
@@ -178,36 +152,6 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
-test('SectionUnit deterministically normalizes list-thumb delivery', function () {
-    $llm = new FakeLlm();
-    // The row sits under the section's one top-level group, as the section
-    // contract requires, so the archetype's root marker lands on that group.
-    $llm->queueText(
-        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
-        . '<!-- wp:columns {"className":"list-thumb-flush"} -->'
-        . '<div class="wp-block-columns list-thumb-flush">'
-        . '<!-- wp:column {"width":"18%"} --><div class="wp-block-column" style="flex-basis:18%">'
-        . '<!-- wp:image {"className":"card-media-thumb"} -->'
-        . '<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>'
-        . '<!-- /wp:image --></div><!-- /wp:column -->'
-        . '<!-- wp:column {"width":"82%"} --><div class="wp-block-column" style="flex-basis:82%">'
-        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Item</h3><!-- /wp:heading -->'
-        . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->'
-        . '</div><!-- /wp:column -->'
-        . '</div><!-- /wp:columns -->'
-        . '</div><!-- /wp:group -->',
-    );
-    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
-
-    $result = $unit->generate(section_unit_input());
-
-    assert_contains('"isStackedOnMobile":false', $result->markup);
-    assert_contains('is-not-stacked-on-mobile', $result->markup);
-    assert_contains('"blockGap":"var:preset|spacing|xs"', $result->markup);
-    assert_true(in_array('list-thumb-row-normalized', array_column($result->repairs, 'code'), true));
-    assert_eq([], $result->warnings);
-});
-
 test('SectionUnit executes a tinted plan with the committed band surface', function () {
     $llm = new FakeLlm();
     $llm->queueText(
@@ -284,83 +228,34 @@ test('SectionUnit teaches the attribute-light markup contract without sacrificin
     }
 });
 
-test('SectionUnit documents the nested flush-card body contract', function () {
-    $request = (new SectionUnit(
-        new FakeLlm(),
-        new PromptRenderer(repo_path('prompts')),
-    ))->request(section_unit_input());
-    $prompt = section_unit_request_text($request);
-
-    assert_contains(
-        'ONE inner `wp:group` with `"className":"card-body"`',
-        $prompt,
-        'flush cards give their padded text group the stable flex-body hook',
-    );
-    assert_contains(
-        '`"className":"card-body overlap-up"`',
-        $prompt,
-        'overlap cards retain both the flex-body and overlap hooks',
-    );
-    assert_contains(
-        'a nested `cta-bottom` can align with sibling cards',
-        $prompt,
-        'the placement requirement explains why the body hook is structural',
-    );
-    assert_contains(
-        'put ALL of that content in ONE such wrapper and give it `"className":"card-body"` regardless of treatment',
-        $prompt,
-        'every optional nested card text wrapper receives the shared structural hook',
-    );
-    assert_contains(
-        'REQUIRED for `flush` and `overlap`; it is OPTIONAL for `framed` and `borderless`',
-        $prompt,
-        'framed and borderless cards may stay flat but cannot create an unhooked nested body',
-    );
-    foreach (['flush', 'framed', 'overlap', 'borderless'] as $treatment) {
-        assert_contains(
-            '`card-style--' . $treatment . '`',
-            $prompt,
-            "the {$treatment} construction has one universal treatment marker",
-        );
+test('SectionUnit documents the selected card body and geometry contracts', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    foreach (['flush', 'framed', 'overlap', 'borderless'] as $style) {
+        $input = section_unit_input();
+        $input['section']['layout_archetype'] = 'equal-card-grid';
+        $input['card_style'] = $style;
+        $prompt = section_unit_request_text($unit->request($input));
+        assert_contains('`card-style--' . $style . '`', $prompt);
+        assert_contains('put ALL of that content in ONE such wrapper', $prompt);
+        assert_contains('"className":"card-body"', $prompt);
+        if (in_array($style, ['flush', 'overlap'], true)) {
+            assert_contains('ONE inner `wp:group`', $prompt);
+            assert_contains('a nested `cta-bottom` can align with sibling cards', $prompt);
+        }
+        if ($style === 'overlap') {
+            assert_contains('"className":"card-style--overlap card-flush"', $prompt);
+            assert_contains('"className":"card-body overlap-up"', $prompt);
+        }
+        if ($style === 'framed') {
+            assert_contains('ONE uniform literal pixel value for all four padding sides', $prompt);
+            assert_contains('max(R − P, 2px)', $prompt);
+        }
     }
-    assert_contains(
-        '`"className":"card-style--overlap card-flush"`',
-        $prompt,
-        'overlap cards carry the universal marker and flush behavior hook together',
-    );
-    assert_contains(
-        'ONE uniform literal pixel value for all four padding sides',
-        $prompt,
-        'framed geometry remains deterministic enough for the delivery contract to verify',
-    );
-});
-
-test('SectionUnit documents the complete list-thumb delivery contract', function () {
-    $request = (new SectionUnit(
-        new FakeLlm(),
-        new PromptRenderer(repo_path('prompts')),
-    ))->request(section_unit_input());
-    $prompt = section_unit_request_text($request);
-
-    assert_contains(
-        'One `wp:columns` per row with `"isStackedOnMobile":false`',
-        $prompt,
-        'the dense two-column row is kept horizontal at Core\'s mobile breakpoint',
-    );
-    assert_contains(
-        '`isStackedOnMobile:false` is MANDATORY for BOTH flush and framed rows',
-        $prompt,
-    );
-    assert_contains(
-        '`"style":{"spacing":{"blockGap":"var:preset|spacing|xs"}}`',
-        $prompt,
-        'the text column owns a tight intra-row rhythm',
-    );
-    assert_contains('`"className":"list-thumb-flush"`', $prompt);
 });
 
 test('SectionUnit gives standalone requests the authoritative machine card style', function () {
     $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'equal-card-grid';
     $input['design_direction'] = 'Direction prose with no card-treatment commitment.';
     $input['card_style'] = 'framed';
 
@@ -436,7 +331,10 @@ test('SectionUnit layered request loses only cache marker separators', function 
             []
         ),
     ]);
+    $rules = new \Automattic\SiteBuild\Units\SectionPromptRules($renderer);
     $rendered = $renderer->render('section.md', [
+        'card_instructions' => $rules->card($input['card_style']),
+        'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
             'theme_json'       => $input['theme_json'],

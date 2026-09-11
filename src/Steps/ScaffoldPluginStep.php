@@ -259,6 +259,23 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
+                // The build's own image references arrive in the served
+                // spelling: generate-images rewrites them before delivery,
+                // assembled plugin pages included, while every rule below is
+                // written against `theme:./assets/` — the sanitizer's inline
+                // `url()` allowlist included. Fold once here and both sides
+                // keep the one rule.
+                //
+                // Fold only what that allowlist accepts, and only where a value
+                // starts: a `theme:` URL it does not recognise is an unknown
+                // scheme that kses turns into '#', and a match mid-value would
+                // strand a host in front of the placeholder or launder a
+                // foreign one past the source guard.
+                $content = (string) preg_replace(
+                    '#(?<=["\'(\s])/wp-content/themes/[^/"\'\s]+/assets/([a-z0-9-]+\.(?:jpe?g|png))(?=["\')\s])#i',
+                    'theme:./assets/$1',
+                    $content
+                );
                 // Sanitize FIRST, on the same placeholder form the build's
                 // intake sanitizer saw, so one rule holds on both sides: an
                 // inline `url()` is allowed only when it names a
@@ -478,17 +495,11 @@ final class ScaffoldPluginStep implements Step
          * transparent one, so .png is the site mark or an ornament an older
          * project still carries, and a wheat sprig makes a terrible card.
          *
-         * Matches both spellings of a reference: pages keep
-         * "theme:./assets/<file>" until generate-images rewrites them to
-         * "/wp-content/themes/<slug>/assets/<file>", assembled plugin pages
-         * included. Must run before the markup is pointed at the media.
+         * Runs on the normalized placeholder form, before the markup is
+         * pointed at the imported media.
          */
         function {{FN_PREFIX}}_content_featured_image($content, $map) {
-            if (!preg_match_all(
-                '#(?:theme:\./|/wp-content/themes/[^/"\']+/)assets/([A-Za-z0-9-]+\.jpe?g)#i',
-                (string) $content,
-                $matches
-            )) {
+            if (!preg_match_all('#theme:\./assets/([A-Za-z0-9-]+\.jpe?g)#i', (string) $content, $matches)) {
                 return 0;
             }
             foreach ($matches[1] as $filename) {

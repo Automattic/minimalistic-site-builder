@@ -270,7 +270,7 @@ test('finalize-theme solidifies an overlay-prepared header when the behavior art
         ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
         ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
     ]]]]);
-    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+    $classes = 'header-behavior-overlay header-start-transparent '
         . 'header-scrolled-contrast header-foreground-base';
     $project->writeText(
         'theme/parts/header.html',
@@ -579,8 +579,8 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('position: fixed', $css);
-    assert_contains('mix-blend-mode: soft-light', $css);
+    assert_contains('position: absolute', $css);
+    assert_contains('mix-blend-mode: normal', $css);
     $php = $project->readText('theme/functions.php');
     assert_contains('assets/surface/surface.css', $php);
 
@@ -591,7 +591,7 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme warns when generated CSS already claimed body::before', function () {
+test('finalize-theme warns when generated CSS claims the section texture pseudo-element', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
@@ -599,16 +599,16 @@ test('finalize-theme warns when generated CSS already claimed body::before', fun
         ['slug' => 'base', 'color' => '#0B1B33'],
         ['slug' => 'contrast', 'color' => '#7EC8E3'],
     ]]]]);
-    $project->writeText('theme/style.css', 'body:where(.page)::before { content: "deco"; }');
+    $project->writeText('theme/style.css', '.surface--paper::before { content: "deco"; }');
     finalize_static_header($project);
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('rgba(11,27,51,', $css);
-    assert_contains('rgba(126,200,227,', $css);
+    assert_contains('%230b1b33', $css);
+    assert_contains('%237ec8e3', $css);
     $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
-    assert_contains('html body::before', $warning);
+    assert_contains('surface--paper::before', $warning);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -637,6 +637,38 @@ test('finalize-theme ships the device kit and prunes it for none', function () {
     assert_true(!str_contains($php, 'forno-vero-device'), 'stale device enqueue pruned');
     assert_true(!str_contains($php, 'assets/device/device.css'), 'stale editor device style pruned');
     assert_contains("add_editor_style('style.css');", $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships the display register for caps and prunes it otherwise (BIGR-997)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'caps-tight']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/type-treatment/type-treatment.css');
+    assert_contains('.wp-block-heading.has-display-font-size {', $css);
+    assert_contains('line-height: 0.92;', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-type-treatment', get_theme_file_uri('assets/type-treatment/type-treatment.css'), "
+            . "array('forno-vero-style'), \$ver);",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/type-treatment/type-treatment.css'));", $php);
+
+    // lowercase keeps its craft voice, so the kit is pruned again.
+    $project->writeJson('designDirection.json', ['description' => 'x', 'type_treatment' => 'lowercase']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(
+        !$project->exists('theme/assets/type-treatment/type-treatment.css'),
+        'stale display register pruned',
+    );
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-type-treatment'), 'stale register enqueue pruned');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -673,7 +705,7 @@ test('finalize-theme keeps a corrupt required theme artifact fatal', function ()
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
     $project->writeText('theme/theme.json', '{');
-    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+    $classes = 'header-behavior-overlay header-start-transparent '
         . 'header-scrolled-contrast header-foreground-base';
     $header = '<!-- wp:group {"className":"' . $classes . '","textColor":"base"} -->'
         . '<div class="wp-block-group ' . $classes . ' has-base-color has-text-color">'
@@ -713,7 +745,7 @@ test('finalize-theme omits a stale surface overlay from the loader when it canno
     }
 });
 
-test('finalize-theme tunes the overlay to a dark page base', function () {
+test('finalize-theme confines a dark palette texture below section content', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'concrete']);
@@ -725,11 +757,58 @@ test('finalize-theme tunes the overlay to a dark page base', function () {
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('mix-blend-mode: soft-light', $css);
-    assert_contains('opacity: 0.48', $css, 'a dark base carries the heavier grain');
+    assert_contains('mix-blend-mode: normal', $css);
+    assert_contains('opacity: 0.12', $css);
     assert_true(!str_contains($css, 'feTurbulence'));
-    assert_contains('z-index: 1', $css);
-    assert_contains('@supports (mix-blend-mode: soft-light)', $css);
+    assert_contains('z-index: -1', $css);
+    assert_contains('> .surface--concrete', $css);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships the heading-emphasis kit and prunes it for none (frm W5a)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'heading_emphasis' => 'two-tone']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('.wp-block-heading .emph', $project->readText('theme/assets/emphasis/emphasis.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-emphasis', get_theme_file_uri('assets/emphasis/emphasis.css'), "
+            . "array('forno-vero-style'), \$ver);",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/emphasis/emphasis.css'));", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'heading_emphasis' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/emphasis/emphasis.css'), 'stale emphasis kit pruned');
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-emphasis'), 'stale emphasis enqueue pruned');
+    assert_contains("add_editor_style('style.css');", $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships the section-label kit and prunes it for none (frm W6a)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'section_label' => 'section-badge']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('p.section-badge', $project->readText('theme/assets/label/label.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains("wp_enqueue_style('forno-vero-label', get_theme_file_uri('assets/label/label.css'), ", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'section_label' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/label/label.css'), 'stale label kit pruned');
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'forno-vero-label'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

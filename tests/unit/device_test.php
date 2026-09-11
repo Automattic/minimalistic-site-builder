@@ -129,3 +129,39 @@ test('the html-first path holds the device budget it promised the model', functi
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+
+test('an explicit custom-motion request keeps priority over a kit device', function () {
+    $block = static fn (string $class): string =>
+        '<!-- wp:group {"className":"section-composition--feature-row-hairlines"} --><div class="wp-block-group section-composition--feature-row-hairlines">'
+        . '<!-- wp:paragraph {"className":"' . $class . '","fontSize":"section-title"} --><p class="' . $class . ' has-section-title-font-size">More projects</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+
+    $budget = MotionSanityStep::newBudget();
+    $out = MotionSanityStep::sanitize($block('custom-motion marquee'), 'dramatic', $budget, false);
+    assert_contains('"className":"custom-motion"', $out['markup']);
+    assert_contains('class="custom-motion has-section-title-font-size"', $out['markup']);
+    assert_true(!str_contains($out['markup'], 'marquee'));
+    assert_eq(1, count($out['notes']));
+    assert_contains('custom-motion target', $out['notes'][0]);
+
+    // A counting figure is the other device.
+    $budget = MotionSanityStep::newBudget();
+    $figure = '<!-- wp:group --><div class="wp-block-group"><!-- wp:heading {"level":3,"className":"custom-motion count-up"} --><h3 class="wp-block-heading custom-motion count-up">120+</h3><!-- /wp:heading --></div><!-- /wp:group -->';
+    $out = MotionSanityStep::sanitize($figure, 'dramatic', $budget, false);
+    assert_contains('"className":"custom-motion"', $out['markup']);
+    assert_true(!str_contains($out['markup'], 'count-up'));
+
+    // No device beside the tag: the tag stays and preset motion is evicted as before.
+    $budget = MotionSanityStep::newBudget();
+    $out = MotionSanityStep::sanitize($block('custom-motion reveal-up'), 'dramatic', $budget, false);
+    assert_contains('"className":"custom-motion"', $out['markup']);
+    assert_true(!str_contains($out['markup'], 'reveal-up'));
+    assert_contains('custom-motion target', $out['notes'][0]);
+
+    // A profile that forbids the device evicts it and keeps the custom tag.
+    $budget = MotionSanityStep::newBudget();
+    $out = MotionSanityStep::sanitize($block('custom-motion marquee'), 'none', $budget, false);
+    assert_contains('custom-motion', $out['markup']);
+    assert_true(!str_contains($out['markup'], 'marquee'));
+});

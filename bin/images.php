@@ -9,11 +9,16 @@ use Automattic\SiteBuild\TransformArtifacts;
 /**
  * Generate (or regenerate) the AI images for an already-built project.
  *
- *   php bin/images.php <slug>
+ *   php bin/images.php <slug> [--all]
  *
- * Generates any pending images recorded in images.json via the WPCOM AI proxy
- * and wires the resulting assets into the theme. Useful to add images to a build
+ * Generates eligible pending images recorded in images.json via the WPCOM AI proxy
+ * and delivers local placeholders for interior non-hero images. Useful to add images to a build
  * made without --with-images. Already-completed images are left as-is.
+ *
+ * --all ignores the initial-image policy and generates every pending image,
+ * including the ones an earlier run left as placeholders. This is the only way
+ * back to a fully imaged build, so evals and demos are not stuck with the
+ * spending policy an initial build applied.
  *
  * images.json is written by the collect-images pipeline step (which runs before
  * fix-blocks, while the AI_IMAGE alts are still intact). We do NOT re-collect
@@ -24,9 +29,17 @@ use Automattic\SiteBuild\TransformArtifacts;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$slug = $argv[1] ?? null;
+$args = array_slice($argv, 1);
+$generateAll = in_array('--all', $args, true);
+$slug = null;
+foreach ($args as $arg) {
+    if (!str_starts_with($arg, '--')) {
+        $slug = $arg;
+        break;
+    }
+}
 if ($slug === null || trim($slug) === '') {
-    fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
+    fwrite(STDERR, "Usage: php bin/images.php <slug> [--all]\n");
     print_built_projects(STDERR);
     exit(1);
 }
@@ -53,9 +66,9 @@ if (!$project->exists('images.json')) {
     // HTML-first is what tells the collector to read prose alts as image subjects.
     (new CollectImagesStep(htmlFirst: $htmlFirst))->run($project);
 }
-$specs = $project->readJson('images.json');
-$pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');
-printf("  %d placeholder(s), %d to generate\n", count($specs), count($pending));
+// generate-images applies the policy and narrates what it decided; counting
+// here would only duplicate it with a second copy of the same rules.
+printf("  %d image(s) recorded%s\n", count($project->readJson('images.json')), $generateAll ? ', generating all' : '');
 
 // The Llm is only used to rewrite prompts the image safety filter rejects;
 // without LLM credentials the step still runs, minus that repair.
@@ -71,7 +84,8 @@ try {
 // — has to run here too, or a project that got its images this way keeps the
 // placeholders the pipeline left behind.
 $start = microtime(true);
-foreach (StepComposition::postImages(make_generate_images_step($llm), htmlFirst: $htmlFirst) as $step) {
+$imagesStep = make_generate_images_step($llm, generateAllImages: $generateAll);
+foreach (StepComposition::postImages($imagesStep, htmlFirst: $htmlFirst) as $step) {
     $step->run($project);
 }
 printf("  done in %.1fs\n", microtime(true) - $start);

@@ -59,7 +59,7 @@ test('markup generation units share one output-only contract', function () {
                 'type' => 'hero',
                 'purpose' => 'Introduce the site.',
                 'content_notes' => 'Lead with the value proposition.',
-                'layout_archetype' => 'centered-stack',
+                'layout_archetype' => 'bento-grid',
                 'background' => 'base',
                 'vertical_density' => 'standard',
                 'text_placement' => 'left-column',

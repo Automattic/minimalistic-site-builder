@@ -198,6 +198,7 @@ async function settleMotion(page, timeout) {
       '.reveal-aperture',
       '.reveal-zoom',
       '.stagger-children > *',
+      '.count-up',
     ].join(',');
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const targets = Array.from(document.querySelectorAll(selector));
@@ -211,8 +212,9 @@ async function settleMotion(page, timeout) {
     const root = document.documentElement;
     while (Date.now() < deadline
       && root.classList.contains('motion-js')
-      && targets.some((target) => target.classList.contains('motion-target')
-        && !target.classList.contains('is-visible'))) {
+      && targets.some((target) => (target.classList.contains('motion-target')
+        && !target.classList.contains('is-visible'))
+        || target.getAttribute('data-count-running') === 'true')) {
       await sleep(50);
     }
 

@@ -3982,3 +3982,129 @@ test('theme-json never ships a font face from a foreign host', function () {
     assert_contains('bundled theme files', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('theme.json custom CSS loses every rule on the emphasis hook at any depth, with a warning per declaration (frm PR-5g)', function () {
+    $theme = ['styles' => [
+        'css' => '.section-badge{gap:.5em} .emph{position:relative;white-space:nowrap}',
+        'blocks' => ['core/heading' => ['css' => '.emph{display:inline-block}']],
+    ]];
+    [$out, $warnings] = ThemeJsonStep::removeEmphasisHookCustomCss($theme);
+    assert_eq('.section-badge{gap:.5em} .emph{}', $out['styles']['css']);
+    assert_eq('.emph{}', $out['styles']['blocks']['core/heading']['css']);
+    assert_eq(3, count($warnings));
+    assert_contains('styles.css: authored declaration', $warnings[0]);
+    assert_contains('white-space:nowrap', $warnings[1]);
+    assert_contains('styles.blocks.core/heading.css', $warnings[2]);
+    assert_contains('the emphasis kit paints it', $warnings[2]);
+    [$same, $none] = ThemeJsonStep::removeEmphasisHookCustomCss(['styles' => ['css' => 'body{margin:0}']]);
+    assert_eq('body{margin:0}', $same['styles']['css']);
+    assert_eq([], $none);
+});
+
+test('theme-json records emphasis CSS removals and preserves sibling CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_emphasis_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+    $payload = valid_theme_payload();
+    $safe = '.note[data-copy=".emph"] { color: inherit; }';
+    $payload['styles']['css'] = $safe . '@media (max-width: 600px) { .emph { white-space: nowrap; } .sibling { padding: 1rem; } }';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $theme = $project->readJson('theme/theme.json');
+    assert_contains($safe, $theme['styles']['css']);
+    assert_contains('.sibling { padding: 1rem; }', $theme['styles']['css']);
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    foreach (['theme/theme.json styles.css', 'white-space: nowrap', 'delivered removed', 'disposition'] as $context) {
+        assert_contains($context, $warnings);
+    }
+    assert_eq([$theme, []], ThemeJsonStep::removeEmphasisHookCustomCss($theme));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme.json custom CSS loses every declaration that reassigns a preset variable (frm PR-4w)', function () {
+    // luzia-like38: the model redefined the contrast variable on the contrast band itself.
+    $theme = ['styles' => [
+        'css' => '.has-primary-background-color,.has-contrast-background-color{--wp--preset--color--contrast:var(--wp--preset--color--base);color:var(--wp--preset--color--base);} .card{padding:var(--wp--preset--spacing--md)}',
+        'blocks' => ['core/group' => ['css' => '.band{--wp--preset--spacing--xl:0;--tone:1}']],
+    ]];
+    [$out, $warnings] = ThemeJsonStep::removePresetVariableCustomCss($theme);
+    assert_eq('.has-primary-background-color,.has-contrast-background-color{color:var(--wp--preset--color--base);} .card{padding:var(--wp--preset--spacing--md)}', $out['styles']['css'], 'the reassignment goes, the read and the ink stay');
+    assert_eq('.band{--tone:1}', $out['styles']['blocks']['core/group']['css'], 'a local custom property that is not a preset stays');
+    assert_eq(2, count($warnings));
+    assert_contains('styles.css: authored declaration', $warnings[0]);
+    assert_contains('--wp--preset--color--contrast:var(--wp--preset--color--base)', $warnings[0]);
+    assert_contains('build-owned tokens', $warnings[0]);
+    assert_contains('styles.blocks.core/group.css', $warnings[1]);
+    [$same, $none] = ThemeJsonStep::removePresetVariableCustomCss(['styles' => ['css' => 'body{margin:0}']]);
+    assert_eq('body{margin:0}', $same['styles']['css']);
+    assert_eq([], $none);
+
+    // repairScaffold runs it.
+    [$scaffolded, $scaffoldWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_true(!str_contains(json_encode($scaffolded['styles']), '--wp--preset--color--contrast:'), 'repairScaffold drops the reassignment');
+    assert_true(count(array_filter($scaffoldWarnings, static fn (string $w): bool => str_contains($w, 'build-owned tokens'))) === 2);
+});
+
+test('CSS protection writes durable warnings and preserves valid sibling CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_css_protection_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+    $payload = valid_theme_payload();
+    $sibling = '.plain { color: var(--wp--preset--color--contrast); --local: 2; }';
+    $payload['styles']['css'] = $sibling . '.band{--wp--preset--color--contrast:white}';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $step = new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')));
+    $step->run($project);
+    $theme = $project->readJson('theme/theme.json');
+    assert_contains($sibling, $theme['styles']['css']);
+    assert_true(!str_contains($theme['styles']['css'], '--wp--preset--color--contrast:'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    foreach (['theme/theme.json', 'styles.css', '--wp--preset--color--contrast:white', 'delivered removed', 'disposition'] as $text) {
+        assert_contains($text, $warnings);
+    }
+    [$fixed, $again] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $fixed);
+    assert_eq([], $again);
+    assert_true(in_array('warnings.json', $step->declaration()->writes, true));
+    remove_tree($tmp);
+});
+
+
+test('preset registrations are removed through the theme step with durable warnings and a fixed point', function () {
+    with_project('preset_registration_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project);
+        $payload = valid_theme_payload();
+        $safe = '.plain{color:var(--wp--preset--color--contrast);--local:2}';
+        $local = '@property --local-tone{syntax:"<color>";inherits:false;initial-value:blue}';
+        $registration = '@property --wp--preset--color--contrast{syntax:"<color>";inherits:false;initial-value:white}';
+        $payload['styles']['css'] = $safe . $registration . $local;
+        $payload['styles']['blocks']['core/group']['css'] = '@media (min-width:1px){' . $registration . $safe . '}';
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        $step = new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')));
+        $step->run($project);
+        $theme = $project->readJson('theme/theme.json');
+        assert_eq($safe . $local, $theme['styles']['css']);
+        assert_eq('@media (min-width:1px){' . $safe . '}', $theme['styles']['blocks']['core/group']['css']);
+        $warnings = array_values(array_filter($project->readJson('warnings.json')['theme-json'] ?? [], static fn (string $warning): bool => str_contains($warning, 'preset registration')));
+        assert_eq(2, count($warnings));
+        foreach ($warnings as $warning) {
+            foreach (['theme/theme.json', \Automattic\SiteBuild\Warnings::value($registration), 'delivered removed', 'disposition'] as $context) {
+                assert_contains($context, $warning);
+            }
+        }
+        assert_contains('styles.css', $warnings[0]);
+        assert_contains('styles.blocks.core/group.css', $warnings[1]);
+        assert_eq([$theme, []], ThemeJsonStep::repairScaffold($theme));
+        assert_true(in_array('warnings.json', $step->declaration()->writes, true));
+    });
+});

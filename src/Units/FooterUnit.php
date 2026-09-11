@@ -56,6 +56,9 @@ final class FooterUnit extends AbstractMarkupUnit
         $repairs = [];
         $key = $this->key($input);
         $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        $labels = \Automattic\SiteBuild\SectionLabel::normalize($markup, 'none', $key);
+        $markup = $labels['markup'];
+        array_push($warnings, ...$labels['warnings']);
         $before = $markup;
         $markup = GeneratedMarkup::withoutRedundantLandmark($markup, 'footer');
         if ($markup !== $before) {

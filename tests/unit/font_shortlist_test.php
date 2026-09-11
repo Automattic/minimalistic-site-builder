@@ -59,3 +59,29 @@ test('the prompt paragraph names the candidates and stays silent for a degraded 
     assert_eq('', FontShortlist::promptParagraph('', 'tbilisi', $catalog));
     assert_eq('', FontShortlist::promptParagraph('cursive-futurist', 'tbilisi', $catalog));
 });
+
+test('a product tradition in a sans letterform asks for medium display weight and tight tracking (frm W5b)', function () {
+    $catalog = FontCatalog::load();
+    foreach (FontShortlist::PRODUCT_REGISTERS as $register) {
+        foreach (FontShortlist::PRODUCT_TYPE_REGISTERS as $typeRegister) {
+            $paragraph = FontShortlist::promptParagraph($typeRegister, 'zova', $catalog, $register);
+            assert_contains('MEDIUM weight', $paragraph, "{$register}/{$typeRegister}");
+            assert_contains('`type_treatment: "tight"`', $paragraph);
+        }
+    }
+    assert_true(!str_contains(FontShortlist::promptParagraph('grotesque', 'zova', $catalog, 'heritage'), 'MEDIUM weight'), 'a heritage concept keeps its own weight');
+    assert_true(!str_contains(FontShortlist::promptParagraph('didone', 'zova', $catalog, 'modernist'), 'MEDIUM weight'), 'a serif tradition keeps its own weight');
+    assert_true(!str_contains(FontShortlist::promptParagraph('grotesque', 'zova', $catalog), 'MEDIUM weight'), 'the default register adds nothing');
+
+    // The reference-corpus grotesks and geometrics that are not monoculture faces are shelved.
+    $shelves = FontShortlist::shelves();
+    foreach (['Inter Tight', 'Albert Sans', 'Be Vietnam Pro', 'Host Grotesk'] as $name) {
+        assert_true(in_array($name, $shelves['grotesque'], true), "{$name} on the grotesque shelf");
+    }
+    foreach (['Funnel Sans', 'Funnel Display'] as $name) {
+        assert_true(in_array($name, $shelves['geometric'], true), "{$name} on the geometric shelf");
+    }
+    foreach (['Instrument Sans', 'Geist', 'Plus Jakarta Sans'] as $name) {
+        assert_true(!in_array($name, $shelves['grotesque'], true), "{$name} stays off the shelf: monoculture list");
+    }
+});

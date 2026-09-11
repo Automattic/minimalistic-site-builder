@@ -17,8 +17,8 @@ test('ModelConfig reads the packaged provider matrix', function () {
     }
     assert_true(!ModelConfig::hasProvider('nope'), 'unknown provider is absent');
 
-    assert_eq('gpt-5.5', ModelConfig::tierModel('openai', 'large'));
-    assert_eq('gpt-5.4-mini', ModelConfig::tierModel('openai', 'small'));
+    assert_eq('gpt-6-astra', ModelConfig::tierModel('openai', 'large'));
+    assert_eq('gpt-5.6-terra', ModelConfig::tierModel('openai', 'small'));
     assert_eq('claude-opus-5', ModelConfig::tierModel('anthropic', 'large'));
     assert_eq('claude-haiku-4-5', ModelConfig::tierModel('anthropic', 'small'));
     assert_eq('moonshotai/kimi-k3', ModelConfig::tierModel('openrouter', 'large'));
@@ -66,13 +66,13 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
     try {
         assert_eq('openai', StepDefaults::provider());
         $models = StepDefaults::models();
-        // small tier → gpt-5.4-mini
-        assert_eq('gpt-5.4-mini', $models['site-spec']);
-        assert_eq('gpt-5.4-mini', $models['page-plan']);
-        // large tier → gpt-5.5
-        assert_eq('gpt-5.5', $models['design-direction']);
-        assert_eq('gpt-5.5', $models['sections']);
-        assert_eq('gpt-5.5', $models['theme-json']);
+        // The small tier uses Terra.
+        assert_eq('gpt-5.6-terra', $models['site-spec']);
+        assert_eq('gpt-5.6-terra', $models['page-plan']);
+        // The large tier uses Astra.
+        assert_eq('gpt-6-astra', $models['design-direction']);
+        assert_eq('gpt-6-astra', $models['sections']);
+        assert_eq('gpt-6-astra', $models['theme-json']);
     } finally {
         putenv('LLM_PROVIDER');
     }
@@ -199,7 +199,7 @@ test('LLM_MODEL_<STEP> overrides any provider tier, with any model id', function
         $models = StepDefaults::models();
         assert_eq('claude-haiku-4-5', $models['site-spec'], 'per-step override wins');
         assert_eq('gpt-5.5-pro', $models['sections'], 'per-step override wins on large tier');
-        assert_eq('gpt-5.4-mini', $models['page-plan'], 'untouched step keeps provider small tier');
+        assert_eq('gpt-5.6-terra', $models['page-plan'], 'untouched step keeps provider small tier');
     } finally {
         putenv('LLM_PROVIDER');
         putenv('LLM_MODEL_SITE_SPEC');

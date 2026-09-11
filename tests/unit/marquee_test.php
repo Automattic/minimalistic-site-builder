@@ -1,0 +1,143 @@
+<?php
+declare(strict_types=1);
+
+use Automattic\SiteBuild\Motion;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
+
+test('marquee is an ambient kit class with its own duration in every profile (frm W8c)', function () {
+    assert_true(in_array('marquee', Motion::AMBIENT_CLASSES, true));
+    assert_true(Motion::looksLikeMotionClass('marquee'));
+    assert_true(in_array('marquee', Motion::allowedClasses('calm'), true));
+    assert_true(!in_array('marquee', Motion::allowedClasses('minimal'), true), 'minimal allows hover only');
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    assert_contains('.marquee .marquee__track {', $css);
+    assert_contains('animation-name: motion-kit-marquee', $css);
+    assert_contains('animation-timing-function: linear', $css);
+    assert_contains('to { transform: translateX(-50%); }', $css);
+    assert_contains('.marquee:focus-within .marquee__track', $css, 'keyboard focus pauses the loop');
+    assert_true(strpos($css, '.marquee .marquee__track {') > strpos($css, 'prefers-reduced-motion: no-preference'), 'the loop is inert under reduced motion (the scale rule may sit outside, frm PR-8g)');
+    foreach (['calm', 'energetic', 'dramatic', 'minimal'] as $profile) {
+        assert_contains('--motion-marquee-duration:', (string) file_get_contents(repo_path("assets/motion/profiles/{$profile}.css")), $profile);
+    }
+    $js = (string) file_get_contents(repo_path('assets/motion/motion.js'));
+    assert_contains('function buildMarquees()', $js);
+    assert_contains("'.marquee:not(.marquee--built)'", $js);
+    assert_true(strpos($js, 'buildMarquees();') < strpos($js, "root.classList.add('motion-ready')"), 'the track is built before motion-ready');
+    assert_contains("setAttribute('aria-hidden', 'true')", $js, 'repeats are hidden from assistive tech');
+});
+
+test('a phrase repeated three or more times in one block collapses to the phrase and the marquee class (frm W8c)', function () {
+    $part = 'page-home--archive';
+    $paragraph = '<!-- wp:paragraph {"fontSize":"display","className":"has-text-align-left"} -->' . "\n"
+        . '<p class="has-text-align-left has-display-font-size">MORE PROJECTS — MORE PROJECTS — MORE PROJECTS — MORE PROJECTS —</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+    $repairs = [];
+    $out = GeneratedMarkup::collapseRepeatedPhrase($paragraph, $part, $repairs);
+    assert_contains('<p class="marquee has-text-align-left has-display-font-size">MORE PROJECTS</p>', $out);
+    assert_contains('"className":"marquee has-text-align-left"', $out);
+    assert_eq(1, count($repairs));
+    assert_eq('MORE PROJECTS', $repairs[0]['delivered']);
+
+    // No class attribute at all: one is created.
+    $bare = '<!-- wp:paragraph --><p>Studio · Studio · Studio</p><!-- /wp:paragraph -->';
+    $out = GeneratedMarkup::collapseRepeatedPhrase($bare, $part, $repairs);
+    assert_contains('<p class="marquee">Studio</p>', $out);
+    assert_contains('{"className":"marquee"}', $out);
+
+    // A heading collapses but never takes the kit class.
+    $heading = '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Work work work</h2><!-- /wp:heading -->';
+    $out = GeneratedMarkup::collapseRepeatedPhrase($heading, $part, $repairs);
+    assert_contains('<h2 class="wp-block-heading">Work</h2>', $out);
+    assert_true(!str_contains($out, 'marquee'));
+
+    // Twice is not a marquee; inline markup and ordinary prose are untouched.
+    foreach ([
+        '<!-- wp:paragraph --><p>Studio — Studio</p><!-- /wp:paragraph -->',
+        '<!-- wp:paragraph --><p><strong>Studio</strong> — Studio — Studio</p><!-- /wp:paragraph -->',
+        '<!-- wp:paragraph --><p>We design, we build, we ship, and we stay.</p><!-- /wp:paragraph -->',
+    ] as $untouched) {
+        $before = count($repairs);
+        assert_eq($untouched, GeneratedMarkup::collapseRepeatedPhrase($untouched, $part, $repairs));
+        assert_eq($before, count($repairs));
+    }
+});
+
+test('the kit owns the marquee scale and the boundary drops an authored size or face (frm PR-8g)', function () {
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    $base = substr($css, 0, strpos($css, 'prefers-reduced-motion: no-preference'));
+    assert_contains('.marquee {', $base, 'the scale applies in every motion preference');
+    assert_contains('font-size: var(--wp--preset--font-size--display, 3rem)', $base);
+    assert_contains('white-space: nowrap', $base);
+    assert_true(!str_contains($base, '!important'), 'no fight with the preset classes');
+
+    $authored = '<!-- wp:paragraph {"className":"marquee has-text-align-center","fontSize":"caption","fontFamily":"body","style":{"typography":{"letterSpacing":"0.1em"}}} -->'
+        . '<p class="has-text-align-center marquee has-body-font-family has-caption-font-size" style="letter-spacing:0.1em">Identity, editorial, packaging</p><!-- /wp:paragraph -->';
+    $repairs = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($authored, 'page-home--marquee', $repairs);
+    assert_true(!str_contains($out, '"fontSize"'), 'fontSize attribute dropped');
+    assert_true(!str_contains($out, 'has-caption-font-size'), 'size class dropped');
+    assert_true(!str_contains($out, 'has-body-font-family'), 'face class dropped');
+    assert_contains('marquee', $out);
+    assert_true(!str_contains($out, 'letter-spacing:0.1em'));
+    assert_eq(1, count($repairs));
+    $plain = '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">Plain</p><!-- /wp:paragraph -->';
+    assert_eq($plain, \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($plain, 'x', $repairs), 'nothing authored, nothing changed');
+});
+
+
+test('a marquee wraps whole under reduced motion or without the script, never an ellipsis (frm PR-8i)', function () {
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    $reduced = substr($css, (int) strpos($css, '@media screen and (prefers-reduced-motion: reduce)'));
+    $reduced = substr($reduced, 0, (int) strpos($reduced, "}\n}") + 3);
+    assert_contains('.marquee {', $reduced, 'the reduced-motion block addresses the marquee');
+    assert_contains('white-space: normal;', $reduced, 'the line wraps');
+    assert_contains('text-overflow: clip;', $reduced, 'no ellipsis');
+    assert_contains('text-wrap: balance;', $reduced);
+    assert_contains('html:not(.motion-js) .marquee,', $css, 'no script, no loop: the line wraps too');
+    $js = (string) file_get_contents(repo_path('assets/motion/motion.js'));
+    assert_contains("matchMedia('(prefers-reduced-motion: reduce)')", $js, 'the script never builds a track under reduced motion');
+});
+
+test('the marquee note has a separate budget from ambient motion', function () {
+    $result = Motion::validateNote('ken-burns, marquee', 'dramatic');
+    assert_eq(['ken-burns', 'marquee'], $result['classes']);
+    assert_eq([], $result['dropped']);
+});
+
+
+test('marquee scale repair preserves explicit custom-motion typography through the section boundary', function () {
+    $unit = (new ReflectionClass(\Automattic\SiteBuild\Units\SectionUnit::class))->newInstanceWithoutConstructor();
+    $finish = new ReflectionMethod($unit, 'finish');
+    foreach (['custom-motion marquee', 'marquee custom-motion'] as $classes) {
+        $markup = '<!-- wp:paragraph {"className":"' . $classes . '","fontSize":"section-title","fontFamily":"heading","style":{"typography":{"fontWeight":"700"}}} -->'
+            . '<p class="' . $classes . ' has-section-title-font-size has-heading-font-family" style="font-weight:700">More projects</p><!-- /wp:paragraph -->';
+        $result = $finish->invoke($unit, $markup, ['page' => ['slug' => 'home'], 'section' => ['slug' => 'test']]);
+        $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+        $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($result->markup, 'dramatic', $budget)['markup'];
+        assert_contains('"fontSize":"section-title"', $out);
+        assert_contains('"fontFamily":"heading"', $out);
+        assert_contains('font-weight:700', $out);
+        assert_contains('class="custom-motion has-section-title-font-size has-heading-font-family"', $out);
+        assert_eq([], $result->warnings);
+    }
+});
+
+
+test('only retained marquees surrender their typography and report the removal', function () {
+    $markup = '<!-- wp:paragraph {"className":"marquee","fontSize":"caption"} --><p class="marquee has-caption-font-size">More projects</p><!-- /wp:paragraph -->';
+    foreach (['none', 'minimal'] as $profile) {
+        $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+        $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($markup, $profile, $budget);
+        assert_contains('"fontSize":"caption"', $out['markup']);
+        assert_contains('has-caption-font-size', $out['markup']);
+    }
+    $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+    $out = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($markup . $markup, 'dramatic', $budget);
+    assert_eq(1, substr_count($out['markup'], '"fontSize":"caption"'), 'over-budget marquee keeps its size');
+    assert_contains('marquee typography: block=paragraph.marquee[0]; authored=fontSize', implode(' ', $out['notes']));
+    assert_contains('delivered=removed; disposition=removed', implode(' ', $out['notes']));
+    $budget = \Automattic\SiteBuild\Steps\MotionSanityStep::newBudget();
+    $again = \Automattic\SiteBuild\Steps\MotionSanityStep::sanitize($out['markup'], 'dramatic', $budget);
+    assert_eq($out['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+});

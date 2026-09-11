@@ -73,6 +73,9 @@ final class HeroUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        $labels = \Automattic\SiteBuild\SectionLabel::normalize($markup, 'none', $key);
+        $markup = $labels['markup'];
+        array_push($warnings, ...$labels['warnings']);
         $markup = GeneratedMarkup::withRootClassMarker(
             $markup,
             self::MARKER_PREFIX,
