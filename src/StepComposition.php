@@ -38,6 +38,7 @@ use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ThemeScreenshotStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
+use Automattic\SiteBuild\Steps\TypographicHygieneStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
@@ -243,6 +244,7 @@ final class StepComposition
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
             new HeaderHeroStep(htmlFirst: true),
+            new TypographicHygieneStep(),
             new ContrastFixStep(htmlFirst: true),
             new MotionSanityStep(htmlFirst: true),
             new FixBlocksStep($blockFixer, htmlFirst: true),
@@ -363,6 +365,12 @@ final class StepComposition
             // before contrast/fix-blocks so later serialization can mirror its
             // attributes into saved HTML.
             new HeaderHeroStep(),
+            // Craft floor on the delivered bytes: heading widows bound,
+            // typewriter punctuation set properly, justified alignment unset.
+            // AFTER header-hero so the header and hero parts are final and
+            // their copy is covered; BEFORE fix-blocks so the re-serialization
+            // syncs the one attribute it touches.
+            new TypographicHygieneStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the
             // fix-blocks re-serialization below regenerates the saved HTML

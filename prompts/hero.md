@@ -67,4 +67,6 @@ Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
 
 {{image_instructions}}
 
+{{copy_craft}}
+
 {{block_markup_output_contract}}

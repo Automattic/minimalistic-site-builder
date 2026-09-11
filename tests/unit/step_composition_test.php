@@ -106,7 +106,7 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
         'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout', 'cta-budget',
-        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
+        'collect-images', 'normalize-layout', 'header-hero', 'typographic-hygiene', 'contrast-fix', 'motion-sanity', 'fix-blocks',
         'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
     StepGraph::validate($steps, $c->seeds());
@@ -154,7 +154,7 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
-            'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
+            'collect-images', 'normalize-layout', 'header-hero', 'typographic-hygiene', 'contrast-fix', 'motion-sanity', 'fix-blocks',
             'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));

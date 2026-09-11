@@ -64,6 +64,8 @@ Visual richness — build atmosphere with tokens, not photo clutter and not `<st
 - **Decorative numbers are banned.** Never write sequence or index numbers on sections, cards, steps, or list items — no "01"/"02" prefixes, no numeral eyebrows or folio paragraphs, no identifier columns, no invented classes like `section-numeral`. This ban outranks any section note or plan copy that suggests a numbered label: drop the number and keep the words. The ONLY exceptions are numbers the SITE SPEC explicitly asks to display, and numbers that are real content (a price, a year, a time, an address). An ordered process reads as ordered through its copy, not through painted numerals.
 - **Lines are rationed.** `wp:separator` blocks and decorative borders (`"style":{"border":{...}}`) are the most overused decoration — a page stitched together with hairlines under every heading and boxes around every card reads as template filler, not design. Delineate content with whitespace, type scale, and the assigned band background first; those already carry the hierarchy. A separator or border is justified ONLY where it does real work: a genuinely tabular row. Never end or begin a section with a separator (section seams belong to the page-level rhythm pass), and never use one just to "close" a heading or split two paragraphs.
 
+{{copy_craft}}
+
 {{card_instructions}}
 
 For a prominent contained image or image-led feature band that is NOT an image card, add `"className":"feature-media"` to its `wp:image` and wrapper. The build maps that hook to the **Image crop** fact (including 21:9 for `panoramic`). Do not put it on a full-bleed hero/Cover background: viewport-spanning media keeps the hero blueprint's wide crop.

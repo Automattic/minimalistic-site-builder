@@ -361,6 +361,10 @@ test('SectionUnit layered request loses only cache marker separators', function 
             $renderer->render('block-markup-output-contract.md', []),
             "\r\n",
         ),
+        'copy_craft' => rtrim(
+            $renderer->render('copy-craft.md', []),
+            "\r\n",
+        ),
     ]);
     $withoutMarkers = rtrim(ltrim(str_replace([
         "<!-- cache-layer:site -->\n",

@@ -499,7 +499,7 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
-        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
+        'collect-images', 'normalize-layout', 'header-hero', 'typographic-hygiene', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
         'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));

@@ -39,4 +39,6 @@ Rules:
 
 {{image_instructions}}
 
+{{copy_craft}}
+
 {{block_markup_output_contract}}
