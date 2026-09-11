@@ -274,6 +274,7 @@ final class GenerateImagesStep implements Step
             ? \Automattic\SiteBuild\PreparedImageBatch::finalMarkup($project) : null;
         $requestKeys = [];
         $available = [];
+        $sourceScores = [];
         foreach ($specs as $i => $spec) {
             if ($markup !== null && !\Automattic\SiteBuild\PreparedImageBatch::referenced($spec, $markup)) {
                 $specs[$i]['status'] = 'unreferenced';
@@ -284,14 +285,21 @@ final class GenerateImagesStep implements Step
             }
             $key = ImageRequestReuse::key($spec, self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop));
             $requestKeys[$i] = $key;
+            $eligibleSource = false;
             if (($spec['status'] ?? '') === 'completed') {
                 $file = 'theme/assets/' . $spec['filename'];
                 if (($spec['request_fingerprint'] ?? '') === $key && $project->exists($file)
                     && GeminiImage::mimeFromBytes($project->readText($file)) === GeminiImage::mimeForFilename($spec['filename'])) {
-                    $available[$key] = $i;
+                    $eligibleSource = true;
                 }
             } elseif ($policy->shouldGenerate($spec)) {
-                $available[$key] ??= $i;
+                $eligibleSource = true;
+            }
+            $completed = ($spec['status'] ?? '') === 'completed';
+            $score = (ImageQa::applies($spec) && (!$completed || !empty($spec['qa_checked'])) ? 2 : 0) + ($completed ? 1 : 0);
+            if ($eligibleSource && (!isset($available[$key]) || $score > $sourceScores[$key])) {
+                $available[$key] = $i;
+                $sourceScores[$key] = $score;
             }
         }
         $freeAliases = [];
