@@ -30,6 +30,12 @@ Default blocks graph (`StepComposition::default()` → `StepComposition::blocks(
 
 `scaffold-theme -> scaffold-plugin -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> cta-budget -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> extract-patterns -> finalize-theme -> theme-screenshot -> validate-theme`
 
+Approved-pattern proof graph (`StepComposition::patterns()`), which preserves supplied layout/style bytes and exports content for an existing theme:
+
+`prepare-pattern-content -> personalize-pattern-content -> serialize-pattern-content -> export-content-bundle`
+
+This is the first extraction slice. It accepts supplied layouts and declared text/image/link slots; page planning, catalogue selection, image generation, link resolution and final validation are not yet part of this graph.
+
 Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
 
 `generate-images -> theme-screenshot -> cover-contrast -> extract-patterns -> validate-theme`

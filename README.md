@@ -134,6 +134,28 @@ services; page objects have the exact recursive `title` / `slug` / `purpose` /
 (including WordPress.com) maps that payload in its adapter rather than adding
 host-specific aliases to this package.
 
+### Embedding approved patterns for an existing theme
+
+The approved-pattern composition personalizes caller-supplied Gutenberg layouts
+while preserving their layout and style bytes. A host supplies explicit facts,
+fixed Brand values, declared editable slots, media files, and the slug of an
+existing destination theme:
+
+```php
+$project = $builder->createPatternProject($patternInputs, $projectSlug);
+$project->writeText('media/hero.jpg', $heroBytes);
+$builder->patternPipeline()->runThrough($project);
+```
+
+The result is `content-bundle.json` plus its project-local media files. It is a
+portable library contract; each production or local host adapts it to its own
+authorization, job, and importer boundaries. Input and output schemas are
+available through `Package::patternInputsSchemaPath()` and
+`Package::contentBundleSchemaPath()`, with a complete input payload at
+[`examples/pattern-inputs.json`](examples/pattern-inputs.json). See
+[`docs/pattern-composition.md`](docs/pattern-composition.md) for the graph,
+slot rules, retry behavior, and current scope.
+
 ### Choosing the model / provider
 
 `--provider=<anthropic|openai|xai|openrouter|baseten>` (or the `LLM_PROVIDER` env var) picks a whole

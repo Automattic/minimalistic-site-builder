@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\Patterns\PatternInputs;
+
 /**
  * Consumer-facing entry point for the default site-creation pipeline.
  *
@@ -83,6 +85,13 @@ final class SiteBuilder
     public function store(): ProjectStore
     {
         return new ProjectStore($this->outputRoot);
+    }
+
+    /** Approved-pattern composition targeting content for an existing theme. */
+    public function patternPipeline(): BuildPipeline
+    {
+        $composition = StepComposition::patterns($this->llm);
+        return new Pipeline($composition->steps(), $composition->seeds());
     }
 
     /**
@@ -193,6 +202,27 @@ final class SiteBuilder
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
         $project->writeJson('meta.json', array_merge($meta, $seed));
 
+        return $project;
+    }
+
+    /**
+     * Create a content-only pattern project from caller-supplied inputs.
+     * Validation happens before the output directory is claimed.
+     *
+     * @param array<mixed> $inputs PatternInputs version 1.
+     */
+    public function createPatternProject(array $inputs, ?string $slug = null): Project
+    {
+        $inputs = PatternInputs::validate($inputs);
+        $store = $this->store();
+        $project = $slug === null
+            ? $store->claimNew(ProjectStore::randomSlug())
+            : $store->create($slug);
+        $project->writeJsonAtomic('meta.json', [
+            'created_at' => gmdate('c'),
+            'graph' => StepComposition::GRAPH_PATTERNS,
+        ]);
+        $project->writeJsonAtomic('pattern-inputs.json', $inputs);
         return $project;
     }
 }

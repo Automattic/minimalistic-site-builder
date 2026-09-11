@@ -1,0 +1,91 @@
+{
+    "version": 1,
+    "facts": {
+        "business_name": "Harbor Studio",
+        "address": "12 Harbor Street",
+        "contact_url": "https://example.test/contact/",
+        "hero_image": "https://example.test/media/studio.jpg"
+    },
+    "brand": {
+        "name": "Harbor Studio",
+        "palette": {
+            "ink": "#243830",
+            "paper": "#f6f1e7"
+        },
+        "font_family": "system-ui"
+    },
+    "delivery": {
+        "theme": "approved-vip-theme",
+        "site_title": "Harbor Studio"
+    },
+    "media": [
+        {
+            "source": "media/studio.jpg",
+            "upload_path": "harbor-studio/studio.jpg",
+            "url": "https://example.test/wp-content/uploads/harbor-studio/studio.jpg",
+            "title": "Studio",
+            "slug": "studio",
+            "mime_type": "image/jpeg"
+        }
+    ],
+    "layouts": [
+        {
+            "id": "home",
+            "role": "page",
+            "page": {
+                "title": "Home",
+                "slug": "home"
+            },
+            "markup": "<!-- wp:group {\"className\":\"approved-hero\",\"style\":{\"spacing\":{\"padding\":{\"top\":\"48px\"}}}} -->\n<div class=\"wp-block-group approved-hero\" style=\"padding-top:48px\"><!-- wp:heading {\"level\":1} -->\n<h1 class=\"wp-block-heading\">Example heading</h1>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Example address</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:image {\"sizeSlug\":\"large\",\"linkDestination\":\"none\"} -->\n<figure class=\"wp-block-image size-large\"><img src=\"https://example.test/placeholder.jpg\" alt=\"Example image\"/></figure>\n<!-- /wp:image --></div>\n<!-- /wp:group -->",
+            "slots": [
+                {
+                    "id": "headline",
+                    "block_path": [0, 0],
+                    "field": "text",
+                    "max_words": 8,
+                    "fallback": "Welcome to our studio",
+                    "instruction": "A welcoming heading for the studio."
+                },
+                {
+                    "id": "address",
+                    "block_path": [0, 1],
+                    "field": "text",
+                    "binding": "address",
+                    "fallback": "Contact us for directions"
+                },
+                {
+                    "id": "hero-image",
+                    "block_path": [0, 2],
+                    "field": "url",
+                    "binding": "hero_image",
+                    "fallback": "https://example.test/placeholder.jpg"
+                },
+                {
+                    "id": "hero-alt",
+                    "block_path": [0, 2],
+                    "field": "alt",
+                    "fallback": ""
+                }
+            ]
+        },
+        {
+            "id": "footer",
+            "role": "shared-part",
+            "shared_part": {
+                "title": "Footer",
+                "slug": "footer",
+                "area": "footer"
+            },
+            "markup": "<!-- wp:paragraph -->\n<p>Example business</p>\n<!-- /wp:paragraph -->",
+            "slots": [
+                {
+                    "id": "business-name",
+                    "block_path": [0],
+                    "field": "text",
+                    "binding": "business_name",
+                    "fallback": "Our studio"
+                }
+            ]
+        }
+    ]
+}

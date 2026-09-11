@@ -24,9 +24,15 @@ final class JsJsonEncoder
      */
     public static function serializeAttributes(JsonObject $attributes): string
     {
-        $json = self::stringify($attributes);
+        return self::serializeCommentValue($attributes);
+    }
+
+    /** JSON.stringify one value and make it safe inside an HTML block comment. */
+    public static function serializeCommentValue(JsonValue $value): string
+    {
+        $json = self::stringify($value);
         if ($json === null) {
-            throw new \LogicException('A JSON object cannot stringify to undefined');
+            throw new \LogicException('An undefined JSON value cannot be serialized into a block comment');
         }
 
         return str_replace(

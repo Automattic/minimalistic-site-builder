@@ -34,6 +34,24 @@ final class Package
         return self::root() . '/examples/site-spec.json';
     }
 
+    /** JSON Schema for PatternInputs version 1. */
+    public static function patternInputsSchemaPath(): string
+    {
+        return self::root() . '/schemas/pattern-inputs.schema.json';
+    }
+
+    /** Complete PatternInputs version 1 payload for embedding hosts. */
+    public static function patternInputsExamplePath(): string
+    {
+        return self::root() . '/examples/pattern-inputs.json';
+    }
+
+    /** JSON Schema for the version 1 content-only delivery bundle. */
+    public static function contentBundleSchemaPath(): string
+    {
+        return self::root() . '/schemas/content-bundle.schema.json';
+    }
+
     /** Neutral local rasters, one per supported aspect ratio and format. */
     public static function imagePlaceholdersDir(): string
     {

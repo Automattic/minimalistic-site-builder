@@ -57,6 +57,24 @@ final class StepComposition
     public const GRAPH_HTML_FIRST = 'html-first';
     public const GRAPH_BLOCKS = 'blocks';
 
+    public const GRAPH_PATTERNS = 'patterns';
+
+    /**
+     * First approved-pattern extraction slice: supplied layouts to personalized
+     * content. Hosts seed meta.json (graph=patterns) and pattern-inputs.json.
+     * Planning, catalogue selection, media generation and bundle validation
+     * will extend this composition after the personalization/import proof.
+     */
+    public static function patterns(Llm $llm): self
+    {
+        return new self([
+            new Steps\PreparePatternContentStep(),
+            new Steps\PersonalizePatternContentStep($llm),
+            new Steps\SerializePatternContentStep(),
+            new Steps\ExportContentBundleStep(),
+        ], ['meta.json', 'pattern-inputs.json', 'media/*']);
+    }
+
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
         'meta.json',

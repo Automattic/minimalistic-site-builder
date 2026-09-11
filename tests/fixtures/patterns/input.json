@@ -1,0 +1,53 @@
+{
+    "version": 1,
+    "facts": {
+        "business_name": "Harbor Studio",
+        "address": "12 Harbor Street",
+        "contact_url": "https://example.test/contact/",
+        "hero_image": "https://example.test/media/studio.png"
+    },
+    "brand": {
+        "name": "Harbor Studio",
+        "palette": { "ink": "#243830", "paper": "#f6f1e7" },
+        "font_family": "system-ui"
+    },
+    "delivery": {
+        "theme": "twentytwentyfive",
+        "site_title": "Harbor Studio"
+    },
+    "media": [
+        {
+            "source": "media/studio.png",
+            "upload_path": "pattern-proof/studio.png",
+            "url": "http://localhost/wp-content/uploads/pattern-proof/studio.png",
+            "title": "Studio",
+            "slug": "studio",
+            "mime_type": "image/png"
+        }
+    ],
+    "layouts": [
+        {
+            "id": "home",
+            "role": "page",
+            "page": { "title": "Home", "slug": "home" },
+            "markup": "<!-- wp:group {\"className\":\"approved-hero\",\"style\":{\"spacing\":{\"padding\":{\"top\":\"48px\",\"bottom\":\"48px\"}}},\"layout\":{\"type\":\"constrained\"}} -->\n<div class=\"wp-block-group approved-hero\" style=\"padding-top:48px;padding-bottom:48px\"><!-- wp:heading {\"level\":1} -->\n<h1 class=\"wp-block-heading\">Example heading</h1>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph {\"className\":\"ai-ignore\"} -->\n<p class=\"ai-ignore\">Approved <strong>protected</strong> wording.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Example address</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:image {\"sizeSlug\":\"large\",\"linkDestination\":\"none\"} -->\n<figure class=\"wp-block-image size-large\"><img src=\"https://example.test/placeholder.png\" alt=\"Example image\"/></figure>\n<!-- /wp:image -->\n\n<!-- wp:buttons -->\n<div class=\"wp-block-buttons\"><!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\" href=\"https://example.test/\">Example action</a></div>\n<!-- /wp:button --></div>\n<!-- /wp:buttons --></div>\n<!-- /wp:group -->",
+            "slots": [
+                { "id": "headline", "block_path": [0, 0], "field": "text", "max_words": 8, "fallback": "Welcome to our studio", "instruction": "A welcoming heading for the studio." },
+                { "id": "address", "block_path": [0, 2], "field": "text", "binding": "address", "fallback": "Contact us for directions" },
+                { "id": "hero-image", "block_path": [0, 3], "field": "url", "binding": "hero_image", "fallback": "https://example.test/placeholder.png" },
+                { "id": "hero-alt", "block_path": [0, 3], "field": "alt", "fallback": "" },
+                { "id": "contact-label", "block_path": [0, 4, 0], "field": "text", "max_words": 4, "fallback": "Contact us" },
+                { "id": "contact-link", "block_path": [0, 4, 0], "field": "url", "binding": "contact_url", "fallback": "https://example.test/contact/" }
+            ]
+        },
+        {
+            "id": "footer",
+            "role": "shared-part",
+            "shared_part": { "title": "Footer", "slug": "footer", "area": "footer" },
+            "markup": "<!-- wp:group {\"className\":\"approved-footer\",\"layout\":{\"type\":\"constrained\"}} -->\n<div class=\"wp-block-group approved-footer\"><!-- wp:paragraph -->\n<p>Example business</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:group -->",
+            "slots": [
+                { "id": "business-name", "block_path": [0, 0], "field": "text", "binding": "business_name", "fallback": "Our studio" }
+            ]
+        }
+    ]
+}
