@@ -69,3 +69,14 @@ test('generate images uses local UI by default and preserves provider siblings a
     assert_eq($first, $project->readText('theme/assets/schedule.jpg'));
     remove_tree($tmp);
 });
+
+test('native UI preserves unsupported empty-space requests through provider fallback', function () {
+    foreach (['horizontal centre band kept empty and low in detail', 'top third kept empty', 'empty bottom third'] as $context) {
+        $spec = ['image_kind' => 'ui-mockup', 'subject' => 'week grid', 'pageContext' => $context];
+        assert_eq(null, UiMockupImage::layout($spec));
+        assert_eq(null, UiMockupImage::render($spec, '21:9'));
+    }
+    $svg = UiMockupImage::svg(['image_kind' => 'ui-mockup', 'subject' => 'week grid left half kept empty'], '4:5');
+    assert_contains('height="1920"', $svg);
+    assert_contains('x="921.6"', $svg);
+});
