@@ -16,7 +16,7 @@ final class ActionCapabilities
         $context['cta_type'] = trim((string) ($spec['cta_type'] ?? ''));
         $context['destination_titles'] = [];
         foreach ($pages as $page) {
-            $path = rtrim((string) ($page['path'] ?? '/'), '/') . '/';
+            $path = self::destinationKey((string) ($page['path'] ?? '/'));
             $context['destination_titles'][$path] = self::contentLabel((string) ($page['title'] ?? ''));
             foreach ((array) ($page['sections'] ?? []) as $section) {
                 if (!is_array($section) || empty($section['slug'])) {
@@ -46,7 +46,7 @@ final class ActionCapabilities
     /** @param array<string,mixed> $context */
     public static function transactionLabel(string $label, array $context): bool
     {
-        $pattern = '/^(?:(?:start|begin|activate|try|get)\b.{0,30}\btrial|reserve|book|sign[ -]?up|register|buy|purchase|checkout|subscribe|download|request|send|order)\b/iu';
+        $pattern = '/^(?:(?:start|begin|activate|try|get)\b.{0,30}\btrial|(?:make|place)\b.{0,20}\b(?:reservation|booking|order|purchase)|(?:schedule|arrange)\b.{0,20}\b(?:appointment|visit|call)|reserve|book|sign[ -]?up|register|buy|purchase|checkout|subscribe|download|request|send|order)\b/iu';
         return preg_match($pattern, $label) === 1
             || ($label !== '' && mb_strtolower($label) === mb_strtolower((string) ($context['primary_cta'] ?? ''))
                 && preg_match('/\b(?:trial|signup|reservation|booking|purchase|subscription|download|request|order)\b/iu', (string) ($context['cta_type'] ?? '')) === 1);
@@ -55,6 +55,7 @@ final class ActionCapabilities
     /** Return a truthful label, or null when the action has no usable destination. */
     public static function label(string $label, string $destination, array $context, string $currentPath = '/'): ?string
     {
+        $destination = trim($destination);
         if ($destination === '' || $destination === '#') {
             return null;
         }
@@ -64,7 +65,7 @@ final class ActionCapabilities
         if (isset($context['contact_destinations'][$destination])) {
             return $label;
         }
-        $key = str_starts_with($destination, '#') ? rtrim($currentPath, '/') . '/' . $destination : $destination;
+        $key = self::destinationKey($destination, $currentPath);
         if (isset($context['form_destinations'][$key])) {
             return $label;
         }
@@ -72,12 +73,29 @@ final class ActionCapabilities
         return $title !== '' && !self::transactionLabel($title, $context) ? $title : null;
     }
 
+    /** Use one key for equivalent internal page destinations. */
+    private static function destinationKey(string $destination, string $currentPath = '/'): string
+    {
+        if (str_starts_with($destination, '#')) {
+            $destination = rtrim($currentPath, '/') . '/' . $destination;
+        }
+        if (!str_starts_with($destination, '/') || str_starts_with($destination, '//')) {
+            return $destination;
+        }
+        $url = parse_url($destination);
+        if (!is_array($url)) {
+            return $destination;
+        }
+        return rtrim((string) ($url['path'] ?? '/'), '/') . '/'
+            . (isset($url['fragment']) ? '#' . $url['fragment'] : '');
+    }
+
     /**
      * Change only the affected action block. Preserve all other bytes.
      *
      * @return array{markup:string,warnings:list<string>}
      */
-    public static function repairMarkup(string $markup, array $context, string $file, string $currentPath = '/'): array
+    public static function repairMarkup(string $markup, array $context, string $file, string $currentPath = '/', bool $deadOnly = false): array
     {
         $doc = BlockMarkup::parse($markup);
         $changes = [];
@@ -107,7 +125,7 @@ final class ActionCapabilities
             } else {
                 $anchorOffset = $match[0][1];
                 $tag = MarkupScan::wrapperTag($inner, $anchorOffset);
-                $destination = html_entity_decode((string) (MarkupScan::tagAttribute($tag ?? '', 'href')[0] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $destination = trim(html_entity_decode((string) (MarkupScan::tagAttribute($tag ?? '', 'href')[0] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
                 $close = stripos($inner, '</a>', $anchorOffset + strlen($tag ?? ''));
                 if ($tag === null || $close === false) {
                     $warnings[] = "file={$file}; block=blocks[{$index}]; authored=malformed action; delivered=unchanged; disposition=repair skipped";
@@ -116,7 +134,8 @@ final class ActionCapabilities
                 $labelHtml = substr($inner, $anchorOffset + strlen($tag), $close - $anchorOffset - strlen($tag));
                 $label = trim(PlainText::fromMarkup($labelHtml));
             }
-            $delivered = self::label($label, $destination, $context, $currentPath);
+            $delivered = $deadOnly && $destination !== '' && $destination !== '#'
+                ? $label : self::label($label, $destination, $context, $currentPath);
             if ($delivered === $label) {
                 continue;
             }
