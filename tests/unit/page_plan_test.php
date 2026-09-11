@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
@@ -47,10 +48,14 @@ test('page-plan excludes a retired spec mood on resume and preserves the user br
 /** A valid planned section; override fields per test. */
 function plan_section(array $overrides = []): array
 {
+    $archetype = $overrides['layout_archetype'] ?? 'full-bleed-cover';
+    $imageCount = is_string($archetype) && SectionComposition::isKnown($archetype)
+        ? SectionComposition::metadata($archetype)['min_images'] : 0;
     return array_merge([
         'slug'             => 'hero',
         'title'            => 'Hero',
         'type'             => 'hero',
+        'image_count'      => $imageCount,
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
         'vertical_density' => 'standard',

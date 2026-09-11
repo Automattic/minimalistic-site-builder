@@ -162,32 +162,41 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     private function imageBatch(array $requests, ?callable $transport = null): array
     {
         $bodies = [];
+        $labels = [];
         $answers = array_fill_keys(array_keys($requests), null);
         foreach ($requests as $key => $req) {
+            $labels[$key] = (string) ($req['log_label'] ?? $key);
             $bodies[$key] = self::bodyForImage(
                 $req, $req['image_bytes'], $req['mime'], $this->model, $this->defaultMaxTokens,
             );
         }
-        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
-        self::retryTextBatch(
-            $bodies,
-            $transport,
-            [2, 5, 12],
-            onFailure: function (string|int $key, string $error, float $time) use ($requests, &$bodies): void {
-                LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]),
-                    ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
-            },
-            onSuccess: function (string|int $key, array $res) use ($requests, &$bodies, &$answers): void {
-                $this->requests++;
-                $this->inputTokens += $res['input'];
-                $this->outputTokens += $res['output'];
-                $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
-                $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
-                $answers[$key] = $res['text'];
-                LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]), $res, $res['time']);
-            },
-            tolerateFailures: true,
-        );
+        $events = $transport === null ? new LlmRequestEvents($bodies, $labels) : null;
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset, $events);
+        $eventOutcome = 'aborted';
+        try {
+            self::retryTextBatch(
+                $bodies,
+                $transport,
+                [2, 5, 12],
+                onFailure: function (string|int $key, string $error, float $time) use ($requests, &$bodies): void {
+                    LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]),
+                        ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+                },
+                onSuccess: function (string|int $key, array $res) use ($requests, &$bodies, &$answers): void {
+                    $this->requests++;
+                    $this->inputTokens += $res['input'];
+                    $this->outputTokens += $res['output'];
+                    $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
+                    $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
+                    $answers[$key] = $res['text'];
+                    LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]), $res, $res['time']);
+                },
+                tolerateFailures: true,
+            );
+            $eventOutcome = 'returned';
+        } finally {
+            $events?->finish($eventOutcome);
+        }
         return $answers;
     }
 
@@ -206,12 +215,17 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
 
         $label = (string) ($opts['log_label'] ?? 'request');
         $tolerateEmpty = ($opts['tolerate_empty'] ?? false) === true;
+        $events = $this->singleTransport === null ? new LlmRequestEvents([0 => $body], [0 => $label]) : null;
+        $eventOutcome = 'aborted';
         try {
-            $res = $this->requestWithRetry($body, $tolerateEmpty);
+            $res = $this->requestWithRetry($body, $tolerateEmpty, $events);
+            $eventOutcome = 'returned';
         } catch (\Throwable $e) {
             // Log the failed call too, so an aborted build is still inspectable.
             LlmLogger::log($label, $loggedBody, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
             throw $e;
+        } finally {
+            $events?->finish($eventOutcome);
         }
 
         $this->requests++;
@@ -301,7 +315,12 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
         // (already a clean name like "header" or "section-hero"). Keys may be
         // ints too (PHP coerces numeric keys), so the type must admit both.
         $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
-        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
+        $labels = [];
+        foreach ($requests as $key => $_) {
+            $labels[$key] = $labelFor($key);
+        }
+        $events = $transport === null ? new LlmRequestEvents($bodies, $labels) : null;
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset, $events);
 
         // Accrue and log each successful request as soon as its transport
         // outcome is final. The batch can still abort when a sibling fails;
@@ -320,15 +339,21 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
         // Run them all concurrently, retrying only the transient failures. A
         // request that fails for good is logged before the batch aborts, so the
         // call that broke the build is still inspectable.
-        $results = self::retryTextBatch(
-            $bodies,
-            $transport,
-            [2, 5, 12],
-            function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
-                LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
-            },
-            onSuccess: $onSuccess,
-        );
+        $eventOutcome = 'aborted';
+        try {
+            $results = self::retryTextBatch(
+                $bodies,
+                $transport,
+                [2, 5, 12],
+                function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
+                    LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+                },
+                onSuccess: $onSuccess,
+            );
+            $eventOutcome = 'returned';
+        } finally {
+            $events?->finish($eventOutcome);
+        }
 
         $out = [];
         foreach ($results as $key => $res) {
@@ -703,14 +728,16 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
      * outcomes that retryTextBatch re-sends after its backoff.
      *
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @param ?CurlMultiPool $pool A local test can supply a pool that redirects handles.
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,stop_reason?:?string}>
      */
-    private function streamMulti(array $bodies): array
+    private function streamMulti(array $bodies, ?LlmRequestEvents $events = null, ?CurlMultiPool $pool = null): array
     {
         $raw = [];
         $schedule = PromptCacheGate::applies($bodies) ? new PromptCacheSchedule($bodies) : null;
+        $events?->admitAttempts(array_keys($bodies), $schedule);
 
-        $buildHandle = function (string|int $key, array $body) use (&$raw, $schedule): \CurlHandle {
+        $buildHandle = function (string|int $key, array $body) use (&$raw, $schedule, $events): \CurlHandle {
             $raw[$key] = '';
             $schedule?->start($key);
             $ch = curl_init(self::ENDPOINT);
@@ -726,9 +753,10 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 CURLOPT_TIMEOUT       => 600,
                 CURLOPT_LOW_SPEED_LIMIT => 1,
                 CURLOPT_LOW_SPEED_TIME  => 90,
-                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $schedule) {
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $schedule, $events) {
                     $raw[$key] .= $chunk;
                     $schedule?->observe($key, $raw[$key]);
+                    $events?->observe($key, $raw[$key]);
                     return strlen($chunk);
                 },
             ]);
@@ -737,7 +765,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
 
         // interpretStream marks severed streams and never-responded transfers
         // (status 0, the pool's CURLM-failure fallback) transient.
-        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw): array {
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, $events): array {
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
@@ -745,16 +773,29 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 $httpStatus,
                 (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
             );
+            $events?->complete($key, $outcome + [
+                'http_status' => $httpStatus, 'curl_errno' => curl_errno($ch), 'completion_boundary' => 'curl_completion',
+            ]);
             unset($raw[$key]);
             return $outcome;
         };
 
-        return (new CurlMultiPool())->run(
+        $results = ($pool ?? new CurlMultiPool())->run(
             $bodies, $buildHandle, $classify, self::MAX_CONCURRENCY,
-            $schedule === null ? null : fn (string|int $key): bool => $schedule->canStart($key),
+            $schedule === null ? null : fn (string|int $key): bool => $events === null
+                ? $schedule->canStart($key) : $events->gateChecked($key, $schedule->canStart($key)),
             $schedule === null ? null : fn (string|int $key) => $schedule->release($key),
             lane: 'anthropic',
+            onCancel: fn (string|int $key, \CurlHandle $ch) => $events?->cancel($key, [
+                'http_status' => curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                'curl_errno' => curl_errno($ch), 'time' => curl_getinfo($ch, CURLINFO_TOTAL_TIME),
+            ]),
+            onStart: fn (string|int $key) => $events?->start($key),
         );
+        foreach ($results as $key => $outcome) {
+            $events?->complete($key, $outcome + ['completion_boundary' => 'batch_return']);
+        }
+        return $results;
     }
 
     /**
@@ -863,11 +904,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}
      */
-    private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
+    private function requestWithRetry(array &$body, bool $tolerateEmpty = false, ?LlmRequestEvents $events = null): array
     {
         return self::retrySingleRequest(
             $body,
-            $this->singleTransport ?? fn (array $requestBody): array => $this->streamRequest($requestBody),
+            $this->singleTransport ?? fn (array $requestBody): array => $this->streamRequest($requestBody, $events),
             [2, 5, 12],
             $tolerateEmpty,
         );
@@ -927,7 +968,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
      * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}
      * @throws TransientApiException on a retryable failure (DNS, stall, 429, 5xx, overload)
      */
-    private function streamRequest(array $body): array
+    private function streamRequest(array $body, ?LlmRequestEvents $events = null): array
     {
         $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
@@ -948,19 +989,35 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             CURLOPT_LOW_SPEED_TIME  => 90, // ... for 90s (a true stall; pings keep a live stream above this)
             // Accumulate the stream; bytes flowing keeps the connection from
             // idling. We parse the assembled SSE body once below.
-            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw) {
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $events) {
                 $raw .= $chunk;
+                $events?->observe(0, $raw);
                 return strlen($chunk);
             },
         ]);
 
         if (ImageTransportScheduler::current() !== null) {
             do {
+                $events?->admitAttempts([0]);
                 $transfer = (new CurlMultiPool())->run([0 => $body], fn () => $ch,
-                    static fn ($key, $handle, $status): array => [
-                        'ok' => true, 'errno' => curl_errno($handle), 'error' => curl_error($handle),
-                        'status' => $status, 'time' => (float) curl_getinfo($handle, CURLINFO_TOTAL_TIME),
-                    ], self::MAX_CONCURRENCY, lane: 'anthropic')[0];
+                    static function ($key, $handle, $status) use ($events): array {
+                        $transfer = [
+                            'ok' => true, 'errno' => curl_errno($handle), 'error' => curl_error($handle),
+                            'status' => $status, 'time' => (float) curl_getinfo($handle, CURLINFO_TOTAL_TIME),
+                        ];
+                        $events?->complete(0, [
+                            'outcome' => 'transport_completed', 'http_status' => $status,
+                            'curl_errno' => $transfer['errno'], 'time' => $transfer['time'],
+                            'completion_boundary' => 'curl_completion',
+                        ]);
+                        return $transfer;
+                    }, self::MAX_CONCURRENCY, lane: 'anthropic',
+                    onCancel: fn ($key, $handle) => $events?->cancel(0, [
+                        'time' => curl_getinfo($handle, CURLINFO_TOTAL_TIME),
+                    ]),
+                    onStart: fn () => $events?->start(0),
+                )[0];
+                $events?->complete(0, $transfer + ['completion_boundary' => 'batch_return']);
                 if (!empty($transfer['held'])) {
                     ImageTransportScheduler::pause(2);
                 }
@@ -970,11 +1027,17 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             $status = $transfer['status'] ?? 0;
             $time = $transfer['time'] ?? 0.0;
         } else {
+            $events?->admitAttempts([0]);
+            $events?->start(0, 'curl_exec');
             curl_exec($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
             $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+            $events?->complete(0, [
+                'outcome' => 'transport_completed', 'http_status' => $status, 'curl_errno' => $errno,
+                'time' => $time, 'completion_boundary' => 'curl_exec_return',
+            ]);
         }
         curl_close($ch);
 

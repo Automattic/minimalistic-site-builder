@@ -1749,7 +1749,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $delivered = 'asymmetric-split';
         $bestScore = PHP_INT_MAX;
         foreach (['asymmetric-split', 'equal-card-grid', 'bento-grid'] as $candidate) {
-            if (SectionComposition::metadata($candidate)['max_images'] < $count) {
+            if (!self::archetypeSupportsImageCount($candidate, $count)) {
                 continue;
             }
             $trial = $sections;
@@ -1796,16 +1796,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         foreach ($sections as $index => $section) {
             $count = (int) ($section['image_count'] ?? 0);
             $authored = (string) ($section['layout_archetype'] ?? '');
-            if ($count === 0 || !SectionComposition::isKnown($authored)
+            if (!SectionComposition::isKnown($authored)
                 || ($frontHeroLocked && $index === 0)
-                || SectionComposition::metadata($authored)['max_images'] >= $count
+                || self::archetypeSupportsImageCount($authored, $count)
             ) {
                 continue;
             }
             $candidates = [];
             foreach (['equal-card-grid', 'bento-grid', 'offset-grid', 'asymmetric-split'] as $candidate) {
                 if (!self::archetypeEligible($candidate, $allowOffsetGrid)
-                    || SectionComposition::metadata($candidate)['max_images'] < $count
+                    || !self::archetypeSupportsImageCount($candidate, $count)
                 ) {
                     continue;
                 }
@@ -1821,10 +1821,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $sections[$index]['layout_archetype'] = $delivered;
-            $sections[$index]['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+            $sections[$index]['content_notes'] = trim((string) ($section['content_notes'] ?? '')
                 . " Build correction: preserve all {$count} requested images and their subjects."
                 . " Use the {$delivered} recipe. This assignment replaces the earlier {$authored} structure."
-                . ' Use image cards instead of text-only rows or ruled tables.';
+                . ($count > 0 ? ' Use image cards instead of text-only rows or ruled tables.' : ' Keep the section without images.'));
             $sections[$index]['handoff'] = self::withSeamCorrection(
                 $section['handoff'] ?? '',
                 "this section now uses {$delivered} to preserve its {$count} images",
@@ -1860,7 +1860,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 foreach (self::ARCHETYPES as $candidate) {
                     if ($candidate === 'full-bleed-cover'
                         || !self::archetypeEligible($candidate, $allowOffsetGrid)
-                        || SectionComposition::metadata($candidate)['max_images'] < (int) ($section['image_count'] ?? 0)
+                        || !self::archetypeSupportsImageCount($candidate, (int) ($section['image_count'] ?? 0))
                     ) {
                         continue;
                     }
@@ -1898,6 +1898,23 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'retained repeated layouts after bounded repair to preserve all sections and planned images');
         }
         return $sections;
+    }
+
+    /** Keep every layout choice within both image bounds. */
+    private static function archetypeSupportsImageCount(string $archetype, int $count): bool
+    {
+        $metadata = SectionComposition::metadata($archetype);
+        return $metadata['min_images'] <= $count && $count <= $metadata['max_images'];
+    }
+
+    /** Exclude layouts that cannot preserve the section's image count. */
+    private static function incompatibleImageArchetypes(array $section): array
+    {
+        $count = max(0, min(12, (int) ($section['image_count'] ?? 0)));
+        return array_values(array_filter(
+            self::ARCHETYPES,
+            static fn (string $archetype): bool => !self::archetypeSupportsImageCount($archetype, $count),
+        ));
     }
 
     /** Count layout conflicts independently of content and surface rules. */
@@ -3428,13 +3445,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         );
         $authoredArchetypes = $archetypes;
 
-        $pick = function (int $i, string ...$exclude) use (&$archetypes, $allowOffsetGrid): string {
+        $pick = function (int $i, string ...$exclude) use (&$archetypes, $sections, $allowOffsetGrid): string {
             // A mechanical guess never lands on 'full-bleed-cover'. The
             // archetype walks first in the catalog, but normalize() forces it
             // onto the 'image' background (BIGR-955), so introducing one here
             // would demand an image band the plan never budgeted — the same
             // reason repairFields() and pickLevelRow() exclude it.
-            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, 'full-bleed-cover', ...$exclude);
+            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, 'full-bleed-cover',
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
         };
 
         foreach ($archetypes as $i => $archetype) {
@@ -3447,7 +3465,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
-            $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
+            $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i,
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
         }
 
         // Interior-opening pass: normalize() rejects an interior page whose
@@ -3497,7 +3516,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
-            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used, ...$exclude);
+            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used,
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
             if ($replacement === $archetype) {
                 // Nothing eligible left. normalize() still reports it, so the
                 // model repair loop gets the last word rather than the build
@@ -3532,6 +3552,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     );
                 }
             }
+        }
+
+        if (self::layoutErrorCount($sections) > 0) {
+            $warnings[] = self::valueLossWarning(self::sectionPath($pageSlug, 0) . '.layout_archetype',
+                $authoredArchetypes, $archetypes,
+                'retained repeated layouts after bounded repair to preserve all sections and planned images');
         }
 
         $sections = self::withPacingBand($sections, $pageSlug, $warnings);

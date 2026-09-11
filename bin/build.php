@@ -533,13 +533,15 @@ if ($withImages) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
+    $postImagesCompleted = false;
     try {
         $applicationImages = $earlyImages->applicationClient();
         foreach (StepComposition::postImages(make_generate_images_step($llm, $applicationImages)) as $step) {
             $runExtraStep($step);
         }
+        $postImagesCompleted = true;
     } finally {
-        $earlyImages->finishRaw(publish: true);
+        $earlyImages->finishRaw(publish: true, cleanup: $postImagesCompleted);
     }
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];

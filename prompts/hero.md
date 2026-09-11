@@ -71,3 +71,18 @@ Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
 
 Use the `body` preset for a paragraph longer than 120 characters. Keep `lead` for a short introduction.
 Use h2 for peer headings below the hero h1. Keep their assigned font-size preset.
+
+FACT PRIORITY:
+The SITE SPEC supplies business facts; the outline, title, purpose, notes, and design direction do not.
+Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts.
+Use an actual supplied value before you claim hours, service periods, schedule changes, contact details, reservation policies, or walk-in policies.
+When no value exists, omit the claim, including approximate or qualitative substitutes.
+Do not promise absent details on another page or tell visitors to enquire without a supplied contact channel.
+
+If the planned title promises absent information, use a truthful title and a shorter section about the supplied facts.
+Preserve the assigned anchor, layout, image count, image subjects, and valid links.
+Let menu and visit links name the destination's known content, without promises of absent facts.
+
+Before you return markup, check every heading and link label against the content it describes.
+Replace a heading that promises hours, contact, reservations, or other details that the section does not supply.
+Omit unsupported fields and empty placeholders from headings and copy.

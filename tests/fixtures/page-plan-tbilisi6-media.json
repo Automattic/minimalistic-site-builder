@@ -1,0 +1,171 @@
+{
+  "hero_blueprint": {
+    "version": 1,
+    "recipe": "foreground-split",
+    "media_mode": "foreground-image",
+    "headline_register": "display",
+    "text_anchor": "center-start",
+    "headline_line_target": {
+      "desktop": [
+        1,
+        3
+      ],
+      "mobile": [
+        2,
+        5
+      ]
+    },
+    "focal_region": "none",
+    "text_safe_region": "full",
+    "height_profile": "standard",
+    "cta_treatment": "prominent",
+    "mobile_transformation": "stack-copy-first",
+    "media_aspect": "landscape",
+    "media_weight": "balanced"
+  },
+  "pages": {
+    "home": {
+      "sections": [
+        {
+          "slug": "hero",
+          "title": "Welcome to Tbilisi Tavern",
+          "type": "hero",
+          "purpose": "Introduce Tbilisi Tavern as an authentic Georgian and Caucasian dining destination in the heart of the Old Town, setting the atmosphere and inviting visitors to experience traditional cuisine.",
+          "content_notes": "Lead with the restaurant name and location (Tbilisi Old Town) in the headline. One supporting line about traditional Georgian and Caucasian cuisine served in a historic setting. The asymmetric-split layout pairs foreground text on the left with a landscape image of the restaurant interior or table setting on the right—warm midday light through Old Town balconies, deep wine reds in the food and textiles, muted backgrounds. Use the hero blueprint's center-start anchor and balanced media weight.",
+          "image_count": 1,
+          "layout_archetype": "asymmetric-split",
+          "background": "base",
+          "vertical_density": "standard",
+          "item_pattern": null,
+          "text_placement": "split",
+          "handoff": "The hero sits on the base ground with a centered, welcoming tone. Below it follows a feature section on equal-card-grid with a tinted background, breaking the rhythm and introducing the restaurant's core identity through practical detail cards (address, hours, cuisine focus).",
+          "primary_action": null
+        },
+        {
+          "slug": "essence",
+          "title": "A taste of <span class=\"emph\">tradition</span> and place",
+          "type": "story",
+          "purpose": "Establish Tbilisi Tavern's identity as a keeper of classic Georgian and Caucasian recipes, rooted in the Old Town's culinary heritage.",
+          "content_notes": "Two to three short paragraphs (one side of an asymmetric split) describing the restaurant's commitment to traditional recipes, the warmth of Georgian hospitality, and the significance of the Old Town location. The split layout places copy on the left (split text_placement), with an empty right zone or supporting detail. Tone is editorial and inviting, reflecting the washed-linen intimacy of the brand voice.",
+          "image_count": 0,
+          "layout_archetype": "asymmetric-split",
+          "background": "base",
+          "vertical_density": "standard",
+          "item_pattern": null,
+          "text_placement": "split",
+          "handoff": "The story section rests on base ground, using asymmetric-split to move away from the hero's media-forward split. Below it comes a feature-row-hairlines section on tinted background, shifting to a compact three-item row that captures the restaurant's defining principles without repeating the split composition.",
+          "primary_action": null
+        },
+        {
+          "slug": "signatures",
+          "title": "The classics that <span class=\"emph\">define</span> us",
+          "type": "featured-dishes",
+          "purpose": "Highlight three to four signature Georgian and Caucasian dishes that embody the restaurant's culinary identity and invite exploration of the full menu.",
+          "content_notes": "Use feature-row-hairlines layout with three to four short columns (dish name as heading, one line of description each, separated by hairlines). Examples: khachapuri (cheese-filled bread), khinkali (soup dumplings), mtsvadi (grilled meat skewers), ajapsandali (vegetable medley). Keep descriptions minimal and poetic, echoing menu-card language. No item images, just clean typography with purposeful hairlines between items. Set on tinted background (#E6D4C9) to pace the page and signal a shift from story to culinary focus.",
+          "image_count": 0,
+          "layout_archetype": "feature-row-hairlines",
+          "background": "tinted",
+          "vertical_density": "compact",
+          "item_pattern": null,
+          "text_placement": "centered",
+          "handoff": "The signatures section sits on tinted background with a compact, quiet three-to-four-item row that contrasts with the asymmetric story below it. Above it is the base-ground story band; below it comes an offset-grid of featured dish photographs on base background, reintroducing imagery and breaking the textual rhythm.",
+          "primary_action": null
+        },
+        {
+          "slug": "featured",
+          "title": "Flavors of the <span class=\"emph\">table</span>",
+          "type": "gallery",
+          "purpose": "Show the visual beauty and abundance of Georgian and Caucasian dishes, inviting diners to explore the restaurant's range through photography.",
+          "content_notes": "Use offset-grid layout with four to six square photographs of signature dishes, styled with warm midday light, deep wine reds and herb greens prominent, muted backgrounds. Each image is ringed with a hairline, square-cropped, and set flush inside a card (media bleeds to card edges, padding wraps text only). No text per image—the offset grid is visual only, allowing the photographs to speak. Images should show khachapuri, khinkali, mtsvadi, wine pours, herb plates, and bread—the visual vocabulary of a Georgian feast.",
+          "image_count": 6,
+          "layout_archetype": "offset-grid",
+          "background": "base",
+          "vertical_density": "compact",
+          "item_pattern": "card",
+          "text_placement": "centered",
+          "handoff": "The featured gallery sits on base background with offset-grid composition, moving away from the tinted, text-led signatures row above. Below it comes a closing cta-panel on base background, anchoring the next step (visiting or reserving) in a contained, rounded panel with a single action.",
+          "primary_action": null
+        },
+        {
+          "slug": "closing",
+          "title": "Ready to dine with us?",
+          "type": "cta",
+          "purpose": "Close the page with a clear, inviting call to action that guides visitors toward making a reservation or visiting Tbilisi Tavern in person.",
+          "content_notes": "A single contained cta-panel with a warm, welcoming heading and one short line of copy inviting diners to visit or reserve. Include one prominent action button linking to the Visit page for practical details, hours, and reservation instructions. The panel sits on the base ground, optionally with a small square photograph of the restaurant's entrance or a festive table setting positioned beside the copy (one image max, square-cropped, ringed with a hairline, flush-card construction). Keep the text brief and the action clear—this is the page's final stepping stone.",
+          "image_count": 1,
+          "layout_archetype": "cta-panel",
+          "background": "base",
+          "vertical_density": "standard",
+          "item_pattern": null,
+          "text_placement": "split",
+          "handoff": "The closing cta-panel anchors the page on base background, following the offset-grid gallery above. The panel's contained, rounded form and single action provide visual closure before the site footer renders directly below on the base ground, maintaining continuity without redundancy.",
+          "primary_action": null
+        }
+      ]
+    },
+    "about": {
+      "sections": [
+        {
+          "slug": "hero",
+          "title": "Our Story",
+          "type": "story-hero",
+          "purpose": "Orient the visitor on the About page and establish Tbilisi Tavern's culinary heritage and commitment to traditional Georgian and Caucasian recipes.",
+          "content_notes": "Open with a warm, measured introduction to the restaurant's origins, location in Tbilisi Old Town, and the guiding philosophy behind its kitchen. Position as a brief, inviting entry point—not a full narrative—that leads into deeper sections below. Keep copy to 2–3 short paragraphs. No image in the hero itself; let the base page ground and typography carry the welcome. The site header floats above this section.",
+          "image_count": 0,
+          "layout_archetype": "asymmetric-split",
+          "background": "base",
+          "vertical_density": "compact",
+          "item_pattern": null,
+          "text_placement": "left-column",
+          "handoff": "Asymmetric-split hero on base background transitions into the next section via a tinted band that breaks the visual rhythm and signals a shift from introduction to deeper story.",
+          "primary_action": null
+        },
+        {
+          "slug": "culinary-philosophy",
+          "title": "Culinary Philosophy & Traditional Roots",
+          "type": "philosophy",
+          "purpose": "Articulate Tbilisi Tavern's commitment to authentic recipes, seasonal ingredients, and the cultural significance of Georgian and Caucasian dining.",
+          "content_notes": "Use a two-zone split composition with text on the leading side (left) and one large square feature photograph on the trailing side (right). The photograph shows a table laden with traditional Georgian dishes—khachapuri, khinkali, fresh herbs, and wine—lit by warm Old Town daylight. Write 2–3 paragraphs on the kitchen's philosophy: respect for family recipes passed down through generations, sourcing from local Kakhetian producers, and the role of food in Georgian hospitality. Keep measure standard and line height generous. This band sits on a tinted background (#E8C2CC blend into base) to mark the transition from hero orientation into the restaurant's deeper narrative.",
+          "image_count": 1,
+          "layout_archetype": "asymmetric-split",
+          "background": "tinted",
+          "vertical_density": "standard",
+          "item_pattern": null,
+          "text_placement": "split",
+          "handoff": "Tinted asymmetric-split band above; below flows into a feature-row section on base background. The tint creates a gentle pause before the rhythm returns to the page's default surface, allowing the eye to settle on the philosophy before moving into the kitchen's distinctive approaches.",
+          "primary_action": null
+        },
+        {
+          "slug": "kitchen-principles",
+          "title": "The Kitchen's Approach",
+          "type": "principles",
+          "purpose": "Highlight three or four core practices that define how Tbilisi Tavern prepares its dishes and honors the culinary traditions it represents.",
+          "content_notes": "Three to four short principles, each a two-word heading over one or two lines of supporting copy (e.g. 'Slow Fire', 'Local Harvest', 'Hand-Formed', 'Fermented Traditions'). Use feature-row-hairlines layout with text columns separated by purposeful hairlines, no cards and no images. Keep each principle's explanation to one or two sentences. This row sits on base background and reads as a quiet, measured beat that follows the philosophy band—a compact set of practices the visitor should remember.",
+          "image_count": 0,
+          "layout_archetype": "feature-row-hairlines",
+          "background": "base",
+          "vertical_density": "compact",
+          "item_pattern": null,
+          "text_placement": "centered",
+          "handoff": "Base-background principles row follows the tinted philosophy band. Hairline-separated text columns create rhythm through typography and rule weight rather than color, returning the page to its resting surface. Below, a closing call-to-action panel invites the visitor onward to the menu or reservation.",
+          "primary_action": null
+        },
+        {
+          "slug": "visit-link",
+          "title": "Plan Your Visit",
+          "type": "next-step",
+          "purpose": "Provide a secondary pathway to visit information, ensuring the visitor knows how to reach the restaurant and make a reservation.",
+          "content_notes": "A single line or short paragraph offering directions to /visit/ for hours, location details, and reservation options. This can be styled as a quiet secondary action or as simple body text below the primary cta-panel, emphasizing that practical details (address in Old Town, operating hours, contact) await on the Visit page. Keep it brief and approachable—a gentle reminder rather than a second hard sell.",
+          "image_count": 0,
+          "layout_archetype": "cta-panel",
+          "background": "base",
+          "vertical_density": "compact",
+          "item_pattern": null,
+          "text_placement": "centered",
+          "handoff": "Compact secondary panel on base background sits just above the footer, providing a soft landing for visitors who want to move directly to reservation or location details. The footer follows immediately below, maintaining base background and framing the site's global navigation and contact information.",
+          "primary_action": null
+        }
+      ]
+    }
+  }
+}

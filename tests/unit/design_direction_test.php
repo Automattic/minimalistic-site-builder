@@ -652,7 +652,7 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
     }
 
     $direction = $renderer->render('design-direction.md', [
-        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed', 'seed_selection' => 'Expand this seed.',
         'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',
@@ -2509,6 +2509,9 @@ test('design-direction asks a judge to pick among distinct seeds and expands its
     foreach ([0, 1, 2, 3] as $i) {
         assert_contains('[' . $i . '] Seed ' . ($i + 1), $judge, 'every distinct seed is on the ballot');
     }
+    assert_contains('No candidate is selected yet.', $judge);
+    assert_true(!str_contains($judge, 'already selected for this site'));
+    assert_true(!str_contains($judge, 'was already chosen for this site'));
     assert_eq('design-direction', $llm->calls[1]['opts']['log_label'] ?? null);
 
     $expansion = $llm->calls[1]['prompt'];
@@ -2605,6 +2608,8 @@ test('a round with one distinct seed skips the judge', function () {
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq(2, count($llm->calls), 'nothing to judge: seeds, expansion');
+    assert_contains('already selected for this site', $llm->calls[1]['prompt']);
+    assert_true(!str_contains($llm->calls[1]['prompt'], 'No candidate is selected yet.'));
     assert_contains('Seed choice: single seed', $project->readText('logs/design-direction.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -2759,7 +2764,7 @@ test('format renders the tension and subject anchor as facts every downstream pr
 test('the expansion prompt asks for a tension and a subject anchor and states the swap test', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $direction = $renderer->render('design-direction.md', [
-        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed', 'seed_selection' => 'Expand this seed.',
         'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',

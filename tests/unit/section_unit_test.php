@@ -48,6 +48,19 @@ function section_unit_request_text(array $request): string
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
+test('SectionUnit gives supplied facts priority after the complete section brief', function () {
+    $request = (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strpos($request['prompt'], 'UNIT-NOTES-SENTINEL'));
+    assert_contains('Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts.', $prompt);
+    assert_contains('use a truthful title and a shorter section about the supplied facts', $request['prompt']);
+    assert_contains('Preserve the assigned anchor, layout, image count, image subjects, and valid links.', $request['prompt']);
+    assert_true(!str_contains($prompt, 'a relative or qualitative phrase in your own words'));
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strrpos($request['prompt'], 'UNIT-TITLE-SENTINEL'));
+    assert_true(str_ends_with($request['prompt'], 'Omit unsupported fields and empty placeholders from headings and copy.'));
+});
+
 test('section prompt keeps dash-free headings semantically lossless', function () {
     $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
 

@@ -468,7 +468,7 @@ final class StepComposition
             new ThemeScreenshotStep(),
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
-            new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+            new CoverContrastStep($blockFixer ?? BlockFixers::default(), htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
             // Cover contrast can rewrite assembled page markup after the graph.
             // Refresh pattern winners from those final bytes, then re-validate
             // the delivered theme (the in-graph ValidateThemeStep ran before

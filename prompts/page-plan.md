@@ -8,6 +8,11 @@ USER PROMPT:
 SITE SPEC (JSON):
 {{site_spec}}
 
+Plan business facts only when the SITE SPEC supplies them. This includes prices, hours, service days, address details, business age, reservation policies, and precise directions.
+Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts. A fact needs an actual supplied value.
+When a value is absent, omit that detail. Do not plan bracket placeholders or ask a section author to supply the value.
+A menu without supplied prices describes dishes without prices. A contact page can describe the known location, but it must not promise absent contact details.
+
 DESIGN DIRECTION (the committed creative concept for THIS site — let it shape the section ideas and flow):
 {{design_direction}}
 
@@ -137,4 +142,3 @@ Rules:
 - When the DESIGN DIRECTION's **Device** is not `none`, assign that device to at most ONE non-hero section by naming the class in that section's `content_notes` (e.g. "this band carries device--stamp"). Never the hero. Never two bands.
 - "handoff" must name the actual neighbors' assignments — the archetype and background of the section above, the archetype and background of the section below, and why this section's own assignment makes that transition work — in your own words each time. For the first section the neighbor above is the site header; for the last it is the footer.
 - Before returning, re-check the finished list top-to-bottom: if any two ADJACENT sections share a layout_archetype, if any archetype is used more than twice on the page, if "equal-card-grid" appears more than twice, or if a page of {{min_banded_sections}}+ sections has every section on "base" or more than {{max_non_base_sections}} non-base backgrounds, change one of them — the plan is rejected or deterministically repaired otherwise.
-

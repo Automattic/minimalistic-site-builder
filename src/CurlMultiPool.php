@@ -43,16 +43,17 @@ class CurlMultiPool
      * @param null|callable(string|int,mixed):bool $canStart permits a queued request to start
      * @param null|callable(string|int):void $onComplete receives each completed key, including held requests
      * @param null|callable(string|int,\CurlHandle):void $onCancel records an active attempt when the shared scheduler stops
+     * @param null|callable(string|int,\CurlHandle):void $onStart records a handle after cURL accepts it
      * @return array<array-key,array<string,mixed>> outcomes keyed and ordered
      *         as $items
      */
-    public function run(array $items, callable $buildHandle, callable $classify, int $cap, ?callable $canStart = null, ?callable $onComplete = null, ?string $lane = null, ?callable $onCancel = null): array
+    public function run(array $items, callable $buildHandle, callable $classify, int $cap, ?callable $canStart = null, ?callable $onComplete = null, ?string $lane = null, ?callable $onCancel = null, ?callable $onStart = null): array
     {
         if ($items === []) {
             return [];
         }
         if ($lane !== null && ImageTransportScheduler::current() !== null) {
-            return ImageTransportScheduler::current()->batch($items, $buildHandle, $classify, $cap, $canStart, $onComplete, $lane, $onCancel);
+            return ImageTransportScheduler::current()->batch($items, $buildHandle, $classify, $cap, $canStart, $onComplete, $lane, $onCancel, $onStart);
         }
         $multi = $this->multiInit();
         /** @var array<int,array{0:string|int,1:\CurlHandle}> $inFlight key + handle by spl_object_id(handle) */
@@ -61,7 +62,7 @@ class CurlMultiPool
         $queuedOutcomes = [];
         $holding = false;
 
-        $start = function (string|int $key, mixed $item) use ($multi, $buildHandle, &$inFlight, &$queuedOutcomes, &$holding): void {
+        $start = function (string|int $key, mixed $item) use ($multi, $buildHandle, $onStart, &$inFlight, &$queuedOutcomes, &$holding): void {
             if ($holding) {
                 $queuedOutcomes[$key] = [
                     'ok' => false,
@@ -83,6 +84,9 @@ class CurlMultiPool
                 return;
             }
             $inFlight[spl_object_id($ch)] = [$key, $ch];
+            if ($onStart !== null) {
+                $onStart($key, $ch);
+            }
         };
 
         // Classify one finished transfer and release its handle (and slot).

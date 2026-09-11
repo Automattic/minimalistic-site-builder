@@ -3,6 +3,19 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\CurlMultiPool;
 
+test('the pool start callback excludes refused and held requests', function () {
+    $pool = new FakeCurlMultiPool([['limited']], ['limited' => 429]);
+    $pool->refuseAdds = ['refused'];
+    $started = [];
+    $results = $pool->run(['refused' => [], 'limited' => [], 'held' => []],
+        fn ($key) => $pool->register($key, curl_init('http://localhost/unused')),
+        fn () => ['ok' => false], 1,
+        onStart: static function ($key) use (&$started): void { $started[] = $key; });
+    assert_eq(['limited'], $started);
+    assert_eq(true, $results['held']['held']);
+    assert_eq(false, $results['refused']['ok']);
+});
+
 test('CurlMultiPool completes real local transfers without deprecations and releases its handles', function () {
     $references = [];
     $build = static function (string|int $key) use (&$references): \CurlHandle {

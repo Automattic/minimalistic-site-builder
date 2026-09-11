@@ -621,6 +621,11 @@ final class ScaffoldThemeStep implements Step
                 :is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link) {
                 color: var(--wp--preset--color--base) !important;
             }
+            /* Transparent buttons also move from the photograph to this dark panel. */
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .cover-contrast-transparent-button .wp-block-button__link {
+                color: var(--wp--preset--color--base) !important;
+            }
             .hero-mobile--flatten-layers .hero-composition__layers,
             .hero-mobile--flatten-layers .hero-composition__copy,
             .hero-mobile--flatten-layers .hero-composition__media {

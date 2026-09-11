@@ -9,3 +9,7 @@ Normal image apply consumes each current asset once. Unused results remain avail
 A graph failure retains raw results and prints their directory. A resume can reuse successful results. A failure during serial apply closes the scheduler and preserves the raw attempt log. Cancellation records active provider attempts without asset delivery. Queued requests receive no attempt row.
 
 The build report retains the provider totals from the original client. `images.prepared_results_consumed` counts raw results consumed without a new request. The image phase includes the wait for incomplete raw results. Imported attempt rows have stable `stage_attempt_id` values, so repeated publication adds no duplicate rows. Logs from an earlier failed process remain separate from the current process totals.
+
+A successful run removes complete raw stages after all post-image steps and durable attempt log publication succeed. Cleanup includes earlier complete stages from the initial directory snapshot. Partial stages and newer sibling stages remain available. A failed log publication preserves raw files. An invalid or unreadable older log retains its stage and prints a message. Valid older records still reach the project log. Cleanup never follows symlinks or recursively removes unknown files.
+
+Run one build per project. Concurrent builds of the same project are unsupported. They share project artifacts without a project lock.

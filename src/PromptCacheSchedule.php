@@ -46,6 +46,12 @@ final class PromptCacheSchedule
         return true;
     }
 
+    /** Return the request keys that own this request's cache prefixes. */
+    public function dependenciesFor(string|int $key): array
+    {
+        return array_keys($this->dependencies[$key]);
+    }
+
     public function start(string|int $key): void
     {
         $this->gates[$key] = new PromptCacheGate($this->clock);

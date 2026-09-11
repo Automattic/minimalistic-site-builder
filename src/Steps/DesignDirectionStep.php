@@ -452,6 +452,7 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            'seed_selection' => 'The concept seed below is already selected for this site. Expand it without a new selection.',
             // Empty when a degraded seed committed no light/dark coordinate.
             'ground_key'  => $seedGround === ''
                 ? 'not committed by the seed — choose one and say which'
@@ -631,6 +632,7 @@ final class DesignDirectionStep implements Step
                     . json_encode($prepared['blueprint'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             }
             $vars['seed'] = implode("\n\n", $candidates);
+            $vars['seed_selection'] = 'Select one candidate below with the criteria above. Expand only that candidate. No candidate is selected yet.';
             foreach (['ground_key', 'ground_tint', 'register', 'type_register', 'color_economy'] as $field) {
                 $vars[$field] = 'the selected candidate value for ' . $field;
             }

@@ -161,13 +161,13 @@ final class ImageTransportScheduler
         }
     }
 
-    public function batch(array $items, callable $build, callable $classify, int $cap, ?callable $canStart, ?callable $onComplete, string $lane, ?callable $onCancel = null): array
+    public function batch(array $items, callable $build, callable $classify, int $cap, ?callable $canStart, ?callable $onComplete, string $lane, ?callable $onCancel = null, ?callable $onStart = null): array
     {
         $id = $this->nextJob++;
         $this->jobs[$id] = [
             'items' => $items, 'pending' => $items, 'build' => $build, 'classify' => $classify,
             'cap' => max(1, $cap), 'canStart' => $canStart, 'onComplete' => $onComplete,
-            'onCancel' => $onCancel, 'lane' => $lane, 'active' => 0, 'results' => [], 'held' => false,
+            'onCancel' => $onCancel, 'onStart' => $onStart, 'lane' => $lane, 'active' => 0, 'results' => [], 'held' => false,
         ];
         while (count($this->jobs[$id]['results']) < count($items)) {
             self::pause();
@@ -212,6 +212,9 @@ final class ImageTransportScheduler
                 $this->handles[spl_object_id($handle)] = ['job' => $id, 'key' => $key, 'handle' => $handle];
                 $job['active']++;
                 $this->laneCounts[$lane] = ($this->laneCounts[$lane] ?? 0) + 1;
+                if ($job['onStart'] !== null) {
+                    ($job['onStart'])($key, $handle);
+                }
             }
         }
         unset($job);

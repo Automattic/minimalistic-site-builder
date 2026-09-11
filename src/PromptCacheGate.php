@@ -27,9 +27,13 @@ final class PromptCacheGate
 
     public function observe(string $raw): void
     {
-        if ($this->released) {
-            return;
+        if (!$this->released && self::hasMessageStart($raw)) {
+            $this->release();
         }
+    }
+
+    public static function hasMessageStart(string $raw): bool
+    {
         $events = preg_split('/\r?\n\r?\n/', $raw);
         array_pop($events);
         foreach ($events as $event) {
@@ -40,11 +44,11 @@ final class PromptCacheGate
                 $data = json_decode(trim(substr($line, 5)), true);
                 if (is_array($data) && ($data['type'] ?? '') === 'message_start'
                     && is_array($data['message'] ?? null)) {
-                    $this->release();
-                    return;
+                    return true;
                 }
             }
         }
+        return false;
     }
 
     public static function applies(array $bodies): bool

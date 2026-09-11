@@ -38,7 +38,7 @@ Rules:
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
 - LANGUAGE: write ALL user-facing copy — headings, body text, captions, list items, labels, image alt text, button text — in {{language}}. Do NOT mix languages within the page; the only exceptions are proper nouns and the spec's verbatim identity values.
 - IDENTITY: the spec's `name` and `persona_name` are the site's ONE committed identity. Wherever this section names the brand or the person, use those exact values. NEVER invent alternate names or personas.
-- HARD FACTS: dates, times, prices, street addresses, phone numbers, email addresses, URLs, and capacities come only from SITE SPEC, verbatim. Never invent an email, street address, phone number, or URL — not even at `email_domain`, not even a plausible local-part like hello@ or info@. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state. Independently authored sections must agree on facts. When the spec lacks the specific value, write copy that does not need it — a relative or qualitative phrase in your own words, or omit the contact line — never a concrete number, date, or contact detail of your own.
+- HARD FACTS: dates, times, prices, street addresses, phone numbers, email addresses, URLs, and capacities come only from SITE SPEC, verbatim. Never invent an email, street address, phone number, or URL — not even at `email_domain`, not even a plausible local-part like hello@ or info@. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state. Independently authored sections must agree on facts. When the spec lacks the value, omit the claim. Do not replace it with approximate hours, qualitative service claims, or an unsupported policy.
 
 Section discipline:
 - **Outer rhythm is deterministic:** add `"style":{"spacing":{"margin":{"top":"0","bottom":"0"}}}` to the section's top-level group, but do NOT set its top/bottom padding and do not put a spacer at either edge. For an image band, do not set top/bottom padding or margins on its direct cover either. A later page-level pass applies the plan's compact/standard/spacious density inside the correct visual band and reconciles continuous-surface seams. You own internal composition spacing only.
@@ -125,6 +125,21 @@ Use the `body` preset for a paragraph longer than 120 characters. Keep `lead` fo
 {{header_contract}}
 
 - Wrap the whole section in a single top-level <!-- wp:group --> that ALWAYS declares `"layout":{"type":"constrained"}` — including when the band is `"align":"full"` (a full-bleed band is align:full PLUS constrained layout). A top-level group with no "layout" attribute is flow layout: its children render edge-to-edge at the viewport with no page gutter, which reads as broken. Give that group the section's anchor — `"anchor":"{{section_slug}}"` in its JSON attributes; the build restores the matching wrapper `id` — so navigation and buttons can deep-link it (href="#{{section_slug}}" within the page, href="{{page_path}}#{{section_slug}}" from other pages — a deep link always carries the owning page's path, since a bare "#anchor" only resolves on the page that renders it).
-- Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS above. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
+- Where imagery strengthens this section, emit image placeholders that follow IMAGE INSTRUCTIONS and the supplied facts.
 
 - **Section label:** when the DESIGN DIRECTION carries a **Section label** fact of `section-badge` AND this section is not a page opening, the heading stack may open with exactly ONE `wp:paragraph` carrying `"className":"section-badge"` and `"fontSize":"caption"`, holding one or two words that name the section's topic (never the heading's words), placed directly above the section heading and aligned like it. Author no colour, border, background, letter-spacing or uppercase on it; the build paints the pill and its dot. When the fact is `side-label` instead (and this section is not a page opening), build the section as ONE `wp:columns` (`"align":"wide"`): the leading `wp:column` (`"width":"25%"`) holds exactly ONE `wp:paragraph` with `"className":"side-label"` and `"fontSize":"caption"` naming the topic in one or two words, and the trailing `wp:column` (`"width":"75%"`) holds the whole heading stack and body; the build paints the label and keeps it in view. A side label above a heading, or outside that leading column, is removed as an eyebrow. Without either fact, never emit a label: eyebrows stay banned.
+
+FACT PRIORITY:
+The SITE SPEC supplies business facts; the outline, title, purpose, notes, and design direction do not.
+Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts.
+Use an actual supplied value before you claim hours, service periods, schedule changes, contact details, reservation policies, or walk-in policies.
+When no value exists, omit the claim, including approximate or qualitative substitutes.
+Do not promise absent details on another page or tell visitors to enquire without a supplied contact channel.
+
+If the planned title promises absent information, use a truthful title and a shorter section about the supplied facts.
+Preserve the assigned anchor, layout, image count, image subjects, and valid links.
+Let menu and visit links name the destination's known content, without promises of absent facts.
+
+Before you return markup, check every heading and link label against the content it describes.
+Replace a heading that promises hours, contact, reservations, or other details that the section does not supply.
+Omit unsupported fields and empty placeholders from headings and copy.

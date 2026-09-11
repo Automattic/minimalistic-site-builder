@@ -40,3 +40,11 @@ Rules:
 {{image_instructions}}
 
 {{block_markup_output_contract}}
+
+FACT PRIORITY:
+Use service days, service periods, hours, and business policies only when SITE SPEC supplies an actual value.
+A section title, page purpose, or proposed closing line does not supply an operational value.
+Do not infer daily service, approximate hours, walk-in policies, or schedule changes.
+Do not promise absent contact details or an enquiry response without a supplied contact channel.
+When a value is absent, omit that claim from all text, including the copyright and credit lines.
+Preserve the site identity, valid links, required legal and copyright text, and assigned layout.
