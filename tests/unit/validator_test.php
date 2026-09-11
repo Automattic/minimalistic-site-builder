@@ -1148,3 +1148,34 @@ test('degraded image spacing survives FixBlocks before the final validator', fun
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('an embed block is reported instead of shipping as a third-party fetch', function () {
+    // The scrub drops an <iframe>, but a wp:embed serializes to a figure and a
+    // bare URL, so it survives everything and WordPress fetches the remote
+    // host at render. Nothing in the prompts asks for one.
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/page-visit--find.html',
+        '<!-- wp:heading --><h2>Find us</h2><!-- /wp:heading -->'
+        . '<!-- wp:embed {"url":"https://www.google.com/maps/place/Paris","type":"rich"} -->'
+        . '<figure class="wp-block-embed"><div class="wp-block-embed__wrapper">'
+        . 'https://www.google.com/maps/place/Paris</div></figure><!-- /wp:embed -->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    assert_contains('contains an embed block', $joined);
+    assert_contains('www.google.com', $joined, 'the host it would fetch is named');
+});
+
+test('a file with no embed block is not searched for one', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/page-visit--find.html',
+        '<!-- wp:paragraph --><p>We are on Main St. Come by.</p><!-- /wp:paragraph -->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    assert_true(!str_contains($joined, 'embed block'), "clean part was flagged: {$joined}");
+});
