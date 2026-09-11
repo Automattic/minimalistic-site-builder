@@ -26,7 +26,7 @@ namespace Automattic\SiteBuild;
  * intact. Only a genuinely mixed batch is serialized across transports, and it
  * still comes back keyed and ordered exactly as it went in.
  */
-final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLlm, PrefixPrimingLlm
+final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
 {
     /** Transport that most recently served a single completion. */
     private ?Llm $lastUsed = null;
@@ -153,6 +153,34 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLl
         }
         $this->lastUsed = $llm;
         return $llm->completeWithImage($prompt, $imageBytes, $mime, $opts);
+    }
+
+    /** @inheritDoc */
+    public function completeImageBatch(array $requests): array
+    {
+        $answers = array_fill_keys(array_keys($requests), null);
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $llm = $this->transports[$name];
+            if ($llm instanceof VisionBatchLlm) {
+                try {
+                    $answers = array_replace($answers, $llm->completeImageBatch($group));
+                } catch (\Throwable $e) {
+                    Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
+                }
+            } elseif ($llm instanceof VisionLlm) {
+                foreach ($group as $key => $req) {
+                    try {
+                        $answers[$key] = $llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
+                            array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image check {$key} unavailable: {$e->getMessage()}\n");
+                    }
+                }
+            } else {
+                Narrator::write("    Image checks unavailable: {$name} cannot carry an image.\n");
+            }
+        }
+        return $answers;
     }
 
     /**

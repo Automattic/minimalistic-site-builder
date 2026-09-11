@@ -471,8 +471,7 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
         ],
     ]);
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
-    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
-    $llm->queueJson(['direction' => [
+    $llm->queueJson(['winner' => 0, 'why' => 'The concept fits the subject.', 'direction' => [
         'title' => 'Hearth & Grain',
         'description' => "Editorial warmth. <script>{$canary}()</script> Serif display over grotesque body.",
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
@@ -677,8 +676,7 @@ test('red team: the HTML-first graph delivers no executable or fetching model by
             'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []]],
         ]);
         $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
-        $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
-        $llm->queueJson(['direction' => [
+        $llm->queueJson(['winner' => 0, 'why' => 'The concept fits the subject.', 'direction' => [
             'title' => 'Flour Archive',
             'description' => "Warm editorial system. <script>{$canary}()</script>",
             'palette' => ['base' => '#FFF8EA', 'contrast' => '#251D16', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],

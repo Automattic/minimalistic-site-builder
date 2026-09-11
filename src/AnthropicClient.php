@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionLlm, PrefixPrimingLlm
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -148,6 +148,45 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     {
         $body = self::bodyForImage(['prompt' => $prompt] + $opts, $imageBytes, $mime, $this->model, $this->defaultMaxTokens);
         return $this->send($body, $opts, self::redactImages($body));
+    }
+
+    /** @inheritDoc */
+    public function completeImageBatch(array $requests): array
+    {
+        return $this->imageBatch($requests);
+    }
+
+    /** Run image checks through the bounded transport pool. */
+    private function imageBatch(array $requests, ?callable $transport = null): array
+    {
+        $bodies = [];
+        $answers = array_fill_keys(array_keys($requests), null);
+        foreach ($requests as $key => $req) {
+            $bodies[$key] = self::bodyForImage(
+                $req, $req['image_bytes'], $req['mime'], $this->model, $this->defaultMaxTokens,
+            );
+        }
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
+        self::retryTextBatch(
+            $bodies,
+            $transport,
+            [2, 5, 12],
+            onFailure: function (string|int $key, string $error, float $time) use ($requests, &$bodies): void {
+                LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]),
+                    ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+            },
+            onSuccess: function (string|int $key, array $res) use ($requests, &$bodies, &$answers): void {
+                $this->requests++;
+                $this->inputTokens += $res['input'];
+                $this->outputTokens += $res['output'];
+                $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
+                $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
+                $answers[$key] = $res['text'];
+                LlmLogger::log((string) ($requests[$key]['log_label'] ?? $key), self::redactImages($bodies[$key]), $res, $res['time']);
+            },
+            tolerateFailures: true,
+        );
+        return $answers;
     }
 
     /**
@@ -552,6 +591,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
      * @param null|callable(string|int,array<string,mixed>):void $onSuccess
      *        Called once when a request succeeds for good, even if a sibling
      *        later aborts the batch.
+     * @param bool $tolerateFailures Continue independent checks after a terminal failure.
      * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}>
      */
     public static function retryTextBatch(
@@ -561,6 +601,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
         ?callable $onFailure = null,
         ?callable $sleeper = null,
         ?callable $onSuccess = null,
+        bool $tolerateFailures = false,
     ): array
     {
         $sleeper ??= static function (int $seconds): void {
@@ -632,7 +673,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                         $terminalFailure ??= [$key, $error];
                     }
                 }
-                if ($terminalFailure !== null) {
+                if ($terminalFailure !== null && !$tolerateFailures) {
                     [$key, $error] = $terminalFailure;
                     throw new \RuntimeException("LLM batch request '{$key}' failed: {$error}");
                 }

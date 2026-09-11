@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\UiMockupImage;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\ImagePlaceholder;
@@ -25,6 +26,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
 use Automattic\SiteBuild\VisionLlm;
+use Automattic\SiteBuild\VisionBatchLlm;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -305,6 +307,37 @@ final class GenerateImagesStep implements Step
             $project->addWarnings($this->id(), ['file=' . Warnings::value(implode(', ', $unplanned))
                 . '; delivered=generated; disposition=' . count($unplanned) . ' image(s) whose source parts'
                 . ' pages.json does not name, generated rather than deferred by a policy that cannot place them']);
+        }
+
+        // Draw supported interface illustrations before the network batch.
+        $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
+        foreach ($pending as $i => $spec) {
+            if (UiMockupImage::layout($spec) === null
+                || GeminiImage::mimeForFilename((string) $spec['filename']) !== 'image/jpeg'
+            ) {
+                continue;
+            }
+            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
+            $bytes = UiMockupImage::render($spec, $genSpec['aspect_ratio'], $theme);
+            if ($bytes === null) {
+                continue;
+            }
+            $this->finish($project, $specs, $i, $genSpec,
+                ['ok' => true, 'bytes' => $bytes, 'renderer' => 'native-ui', 'model' => 'native-ui'],
+                $resolved, $imageGrade, $imageCrop);
+            if (($specs[$i]['status'] ?? '') !== 'completed') {
+                continue;
+            }
+            $specs[$i]['renderer'] = 'native-ui';
+            $project->addWarnings($this->id(), [
+                'file=' . Warnings::value('theme/assets/' . $spec['filename'])
+                . '; block=' . Warnings::value(implode(', ', (array) ($spec['sources'] ?? [])))
+                . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                . '; delivered=' . Warnings::value(UiMockupImage::layout($spec) . ' interface illustration')
+                . '; disposition=local layout uses placeholder bars and geometric tiles; exact screen details and photos are omitted',
+            ]);
+            unset($pending[$i]);
+            $project->writeJsonAtomic('images.json', $specs);
         }
 
         // Generate every pending image through ONE pooled batch: concurrency
@@ -590,7 +623,7 @@ final class GenerateImagesStep implements Step
      * @param array<string,mixed> $spec one images.json row
      * @return array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}
      */
-    private static function generationSpec(
+    public static function generationSpec(
         array $spec,
         string $siteContext,
         string $imageGrade,
@@ -624,6 +657,7 @@ final class GenerateImagesStep implements Step
             // decoratives render small on the page and stay at 1K whatever
             // their ratio.
             'sample_image_size' => GeminiImage::sampleImageSize($ratio, $mime === 'image/png'),
+            'asset' => (string) ($spec['filename'] ?? ''),
             'mime'              => $mime,
         ];
     }
@@ -770,6 +804,10 @@ final class GenerateImagesStep implements Step
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
+        if (isset($result['renderer'])) {
+            $logRequest['renderer'] = $result['renderer'];
+            $logRequest['model'] = $result['model'] ?? $result['renderer'];
+        }
         $iconBytes = null;
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
@@ -877,17 +915,7 @@ final class GenerateImagesStep implements Step
         return ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed];
     }
 
-    /**
-     * Look at every hero / full-frame image this run delivered (BIGR-979).
-     * The ladder per image: a failing verdict earns one regeneration with a
-     * corrected subject and a second look; an image that still fails, or
-     * whose regeneration failed, is kept and recorded in warnings.json. No
-     * verdict (transport error, unreadable answer) delivers the image as is
-     * with a narration line only: nothing about the delivered output changed.
-     *
-     * @param array<int,array<string,mixed>> $specs   images.json rows, mutated in place
-     * @param list<int>                      $indices rows this run generated
-     */
+    /** Check independent assets together. Preserve each asset's retry order. */
     private function inspectDelivered(
         Project $project,
         array &$specs,
@@ -896,166 +924,146 @@ final class GenerateImagesStep implements Step
         string $imageGrade,
         string $imageCrop,
     ): void {
+        $active = [];
         foreach ($indices as $i) {
             $spec = $specs[$i];
-            if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec)) {
-                continue;
+            if (($spec['status'] ?? '') === 'completed' && ImageQa::applies($spec)
+                && $project->exists('theme/assets/' . $spec['filename'])) {
+                $active[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
             }
-            $filename = (string) $spec['filename'];
-            $rel = 'theme/assets/' . $filename;
-            if (!$project->exists($rel)) {
-                continue;
-            }
-
-            $verdict = $this->inspect($project, $spec, $rel);
-            if ($verdict === null || $verdict['ok']) {
-                if ($verdict !== null) {
-                    Narrator::write("    QA {$filename}: upright, no text, on subject\n");
+        }
+        while ($active !== []) {
+            $verdicts = $this->inspectBatch($project, array_intersect_key($specs, $active));
+            $regenerations = [];
+            $subjects = [];
+            foreach ($active as $i => &$state) {
+                $spec = $specs[$i];
+                $filename = (string) $spec['filename'];
+                $verdict = $verdicts[$i] ?? null;
+                if ($state['attempts'] > 0) {
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $state['finding']];
                 }
+                if ($verdict === null || $verdict['ok']) {
+                    Narrator::write("    QA {$filename}: " . ($verdict === null ? 'unverified' : 'passes') . "\n");
+                    unset($active[$i]);
+                    continue;
+                }
+                $state['finding'] = implode('; ', $verdict['findings']);
+                $state['budget'] ??= ImageKind::regenerationBudget(ImageKind::effectiveKind($spec), $verdict['findings']);
+                if ($state['attempts'] >= $state['budget']) {
+                    $specs[$i]['qa']['finding'] = $state['finding'];
+                    $plural = $state['budget'] === 1 ? 'one regeneration' : "{$state['budget']} regenerations";
+                    $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                        (string) ($spec['subject'] ?? ''), $verdict['findings'], "still failing after {$plural}")]);
+                    unset($active[$i]);
+                    continue;
+                }
+                $state['attempts']++;
+                $subjects[$i] = ImageQa::correctedSubject((string) ($spec['subject'] ?? ''), $verdict, ImageKind::effectiveKind($spec));
+                $regenerations[$i] = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subjects[$i]);
+                Narrator::write("    QA {$filename}: {$state['finding']}; regenerate {$state['attempts']} of {$state['budget']}\n");
+            }
+            unset($state);
+            if ($regenerations === []) {
                 continue;
             }
-            $kind = ImageKind::effectiveKind($spec);
-            $authored = (string) ($spec['subject'] ?? '');
-            // A product screen earns more than one retry. A reworded prompt
-            // does not move a painted-pixel defect (BIGR-956 measured the same
-            // thing on painted photo borders): an A/B over nine screens left
-            // the first-pass leak rate flat at 6 of 9 clean under both the old
-            // and the reworded clause. Each sample is an independent draw, so
-            // the lever that does move the delivered rate is the number of
-            // draws, and ImageQa reads every one of them.
-            $budget = ImageKind::regenerationBudget($kind, $verdict['findings']);
-            $finding = implode('; ', $verdict['findings']);
-            $attempts = 0;
-
-            while ($attempts < $budget) {
-                $attempts++;
-                $left = $budget - $attempts;
-                Narrator::write("    QA {$filename}: {$finding}; regenerating (attempt {$attempts} of {$budget})\n");
-
-                $subject = ImageQa::correctedSubject($authored, $verdict, $kind);
-                $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
-                $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
+            $this->drainBatch($regenerations, function (int $i, array $result) use (
+                $project, &$specs, &$active, $regenerations, $subjects, $imageGrade, $imageCrop, $verdicts
+            ): void {
+                $spec = $specs[$i];
+                $filename = (string) $spec['filename'];
+                $error = $this->deliverRegeneration($project, $spec, $regenerations[$i], $result,
+                    $imageGrade, $imageCrop, $subjects[$i], $active[$i]['finding']);
                 if ($error !== null) {
-                    Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the last image\n");
-                    $specs[$i]['qa'] = ['regenerated' => $attempts > 1, 'finding' => $finding];
-                    $project->addWarnings($this->id(), [ImageQa::warningRow(
-                        $filename,
-                        $authored,
-                        $verdict['findings'],
-                        "regeneration failed: {$error}",
-                    )]);
-                    continue 2;
+                    $specs[$i]['qa'] = ['regenerated' => $active[$i]['attempts'] > 1, 'finding' => $active[$i]['finding']];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                        (string) ($spec['subject'] ?? ''), $verdicts[$i]['findings'], "regeneration failed: {$error}")]);
+                    unset($active[$i]);
                 }
+                $project->writeJsonAtomic('images.json', $specs);
+            });
+        }
+    }
 
-                $next = $this->inspect($project, $spec, $rel);
-                if ($next === null || $next['ok']) {
-                    Narrator::write("    QA {$filename}: regenerated image " . ($next === null ? 'unverified' : 'passes') . "\n");
-                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                    continue 2;
+    /** Limit image payload memory and preserve successful checks after a sibling fails. */
+    private function inspectBatch(Project $project, array $specs): array
+    {
+        $verdicts = [];
+        foreach (array_chunk($specs, 10, true) as $chunk) {
+            $requests = [];
+            foreach ($chunk as $i => $spec) {
+                $filename = (string) $spec['filename'];
+                try {
+                    $prompt = $this->renderer->render('image-qa.md', [
+                        'subject' => (string) ($spec['subject'] ?? ''),
+                        'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
+                        'text_rule' => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
+                    ]);
+                } catch (\Throwable $e) {
+                    Narrator::write("    Image check {$filename} unavailable: {$e->getMessage()}\n");
+                    continue;
                 }
-                $verdict = $next;
-                $finding = implode('; ', $next['findings']);
-                if ($left === 0) {
-                    $plural = $budget === 1 ? 'one regeneration' : "{$budget} regenerations";
-                    Narrator::write("    QA {$filename}: still failing ({$finding}); delivered with a warning\n");
-                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                    $project->addWarnings($this->id(), [ImageQa::warningRow(
-                        $filename,
-                        $authored,
-                        $next['findings'],
-                        "still failing after {$plural}",
-                    )]);
+                $requests[$i] = [
+                    'prompt' => $prompt,
+                    'image_bytes' => $project->readText('theme/assets/' . $filename),
+                    'mime' => GeminiImage::mimeForFilename($filename),
+                    'max_tokens' => 300,
+                    'log_label' => 'image-qa-' . $filename,
+                ] + ($this->repairModel !== null ? ['model' => $this->repairModel] : []);
+            }
+            $answers = [];
+            if ($this->llm instanceof VisionBatchLlm) {
+                try {
+                    $answers = $this->llm->completeImageBatch($requests);
+                } catch (\Throwable $e) {
+                    Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
+                }
+            } elseif ($this->llm instanceof VisionLlm) {
+                foreach ($requests as $i => $req) {
+                    try {
+                        $answers[$i] = $this->llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
+                            array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image check {$req['log_label']} unavailable: {$e->getMessage()}\n");
+                    }
                 }
             }
+            foreach ($requests as $i => $_) {
+                $verdicts[$i] = isset($answers[$i]) ? ImageQa::verdict($answers[$i]) : null;
+            }
         }
+        return $verdicts;
     }
 
-    /**
-     * One vision call over the delivered file. Null when there is no usable
-     * verdict; that is never treated as a defect.
-     *
-     * @param array<string,mixed> $spec
-     * @return array{ok:bool,findings:list<string>,note:string}|null
-     */
-    private function inspect(Project $project, array $spec, string $rel): ?array
-    {
-        if (!$this->llm instanceof VisionLlm) {
-            return null;
-        }
-        $filename = (string) ($spec['filename'] ?? '');
-        try {
-            $prompt = $this->renderer->render('image-qa.md', [
-                'subject'      => (string) ($spec['subject'] ?? ''),
-                'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
-                'text_rule'    => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
-            ]);
-            $answer = $this->llm->completeWithImage(
-                $prompt,
-                $project->readText($rel),
-                GeminiImage::mimeForFilename($filename),
-                ['max_tokens' => 300, 'log_label' => 'image-qa']
-                    + ($this->repairModel !== null ? ['model' => $this->repairModel] : []),
-            );
-        } catch (\Throwable $e) {
-            Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
-            return null;
-        }
-        $verdict = ImageQa::verdict($answer);
-        if ($verdict === null) {
-            Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
-        }
-        return $verdict;
-    }
-
-    /**
-     * Regenerate one image in place. On success the asset file is replaced
-     * and null is returned; on any failure the first image stays on disk and
-     * the error is returned. images.json is not touched here: the row is
-     * already completed, and a failed regeneration must not turn a delivered
-     * image into a removed one.
-     *
-     * @param array<string,mixed> $spec
-     * @param array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string} $genSpec
-     */
-    private function regenerate(
+    /** Keep the last usable bytes when a regeneration fails. */
+    private function deliverRegeneration(
         Project $project,
         array $spec,
-        string $rel,
         array $genSpec,
+        array $result,
         string $imageGrade,
         string $imageCrop,
         string $subject,
         string $finding,
     ): ?string {
-        $filename = (string) ($spec['filename'] ?? '');
-        $logRequest = $this->requestLog($spec, $genSpec, $imageGrade, $imageCrop, $subject)
-            + ['image_qa' => $finding];
-        $error = null;
-        $this->drainBatch([$genSpec], function (int $pos, array $result) use (
-            $project, $rel, $filename, $genSpec, $logRequest, $spec, &$error
-        ): void {
-            try {
-                if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
-                    throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
-                }
-                ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
-                    (string) $result['bytes'],
-                    $genSpec['mime'],
-                    ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
-                );
-            } catch (\Throwable $e) {
-                $error = $e->getMessage();
-                ImageLogger::log($filename, $logRequest, [], $error);
-                return;
+        $filename = (string) $spec['filename'];
+        $rel = 'theme/assets/' . $filename;
+        $logRequest = $this->requestLog($spec, $genSpec, $imageGrade, $imageCrop, $subject) + ['image_qa' => $finding];
+        try {
+            if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
+                throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
             }
-            $project->writeText($rel, $bytes);
-            ImageLogger::log($filename, $logRequest, [
-                'path'  => $rel,
-                'bytes' => strlen($bytes),
-                'border_trimmed' => $borderTrimmed,
-            ]);
-        });
-        return $error;
+            ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
+                (string) $result['bytes'], $genSpec['mime'],
+                ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
+            );
+        } catch (\Throwable $e) {
+            ImageLogger::log($filename, $logRequest, [], $e->getMessage());
+            return $e->getMessage();
+        }
+        $project->writeText($rel, $bytes);
+        ImageLogger::log($filename, $logRequest, ['path' => $rel, 'bytes' => strlen($bytes), 'border_trimmed' => $borderTrimmed]);
+        return null;
     }
 
     /**
