@@ -153,7 +153,8 @@ final class GeminiImage
         $filename = basename((string) ($spec['filename'] ?? ''));
         $hero = preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1
             || preg_match('/\bhero\b/iu', $context) === 1;
-        $wide = ImageCrop::fullFrameSlot($ratio, $context);
+        $widthContext = preg_replace('/\bedge[- ]to[- ]edge\b/iu', '', $context) ?? $context;
+        $wide = ImageCrop::fullFrameSlot('1:1', $widthContext);
         if ($hero || $wide) {
             return $size;
         }
