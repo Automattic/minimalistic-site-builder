@@ -624,6 +624,7 @@ final class GenerateImagesStep implements Step
             // decoratives render small on the page and stay at 1K whatever
             // their ratio.
             'sample_image_size' => GeminiImage::sampleImageSize($ratio, $mime === 'image/png'),
+            'asset' => (string) ($spec['filename'] ?? ''),
             'mime'              => $mime,
         ];
     }
