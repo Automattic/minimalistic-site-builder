@@ -221,3 +221,28 @@ test('the active image step excludes orphan and unlisted references', function (
         assert_eq('completed', $project->readJson('images.json')[1]['status']);
     });
 });
+
+
+test('a stale orphan cover cannot change the final card slot', function () {
+    with_project('builder_active_slot_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('theme/parts/orphan.html', '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div></div><!-- /wp:cover -->');
+        $project->writeText('plugin/pages/home.html', '<!-- wp:image {"className":"card-media"} --><figure><img src="theme:./assets/hero.jpg"></figure><!-- /wp:image -->');
+        $specs = \Automattic\SiteBuild\ImageSlot::annotate($project, $project->readJson('images.json'));
+        assert_eq('card', $specs[0]['image_slot']);
+    });
+});
+
+test('resumed image collection keeps the planned hero through its final section anchor', function () {
+    with_project('builder_resumed_hero_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('plugin/pages/about.html', '<!-- wp:group {"anchor":"intro"} --><div id="intro"><!-- wp:image --><figure><img src="theme:./assets/room.jpg"></figure><!-- /wp:image --></div><!-- /wp:group -->');
+        $specs = \Automattic\SiteBuild\ImageSlot::annotate($project, [[
+            'filename' => 'room.jpg', 'src' => 'theme:./assets/room.jpg', 'sources' => ['plugin/pages/about.html'],
+        ]]);
+        assert_eq('image', $specs[0]['image_slot']);
+        assert_eq(true, $specs[0]['hero_slot']);
+        assert_eq(true, \Automattic\SiteBuild\ImageQa::applies($specs[0]));
+        assert_eq(true, \Automattic\SiteBuild\ImageQa::applies(['filename' => 'hero-room.jpg', 'image_slot' => 'image']));
+    });
+});
