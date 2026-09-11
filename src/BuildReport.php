@@ -47,6 +47,7 @@ final class BuildReport
 
     private ?array $imageRequests = null;
     private int $localImages = 0;
+    private int $imagesReused = 0;
 
     private bool $hasPatterns = false;
     private int $sectionPatternsWritten = 0;
@@ -126,6 +127,12 @@ final class BuildReport
     {
         $this->imageRequests = $requests;
         $this->localImages = $localImages;
+    }
+
+    /** Record separate assets that share an equivalent provider request. */
+    public function setImageReuse(int $reused): void
+    {
+        $this->imagesReused = $reused;
     }
 
     /** Record the reusable-pattern tally (only when patterns.json exists). */
@@ -318,7 +325,9 @@ final class BuildReport
             $this->imagesTotal
         ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '')
             . ($this->localImages > 0 ? sprintf(', %d local renders', $this->localImages) : '')
-            . ($this->imageRequests !== null ? sprintf(', %d provider attempts', $this->imageRequests['attempts']) : '');
+            . ($this->imageRequests !== null ? sprintf(', %d provider attempts', $this->imageRequests['attempts']) : '')
+
+            . ($this->imagesReused > 0 ? sprintf(', %d reused assets', $this->imagesReused) : '');
     }
 
     /** The patterns summary line, or null when no pattern manifest exists. Pure. */
@@ -411,6 +420,7 @@ final class BuildReport
                 'local_renders' => $this->localImages,
                 'provider_requests' => $this->imageRequests,
             ] : null,
+            'images_reused' => $this->imagesReused,
             'steps'         => array_map(
                 static fn (array $r): array => [
                     'id'            => $r['id'],
