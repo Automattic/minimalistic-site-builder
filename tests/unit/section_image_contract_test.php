@@ -64,3 +64,18 @@ test('an image that owns a text block retains the text boundary', function () {
     assert_eq($raw, SectionImageContract::enforce($raw, 'page-visit--contact', 0, $repairs, $warnings));
     assert_contains('retained the unsafe media boundary', implode("\n", $warnings));
 });
+
+test('excess image repair retains raw prose inside the image boundary', function () {
+    $raw = '<!-- wp:image --><figure><img src="theme:./assets/extra.jpg"/><p>Retain these words.</p></figure><!-- /wp:image -->';
+    $repairs = $warnings = [];
+    assert_eq($raw, SectionImageContract::enforce($raw, 'page-visit--contact', 0, $repairs, $warnings));
+    assert_contains('retained the unsafe media boundary', implode("\n", $warnings));
+});
+
+test('excess image removal records its inline caption', function () {
+    $raw = '<!-- wp:image --><figure><img src="theme:./assets/extra.jpg"/><figcaption>The old dining room.</figcaption></figure><!-- /wp:image -->';
+    $repairs = $warnings = [];
+    assert_eq('', SectionImageContract::enforce($raw, 'page-visit--contact', 0, $repairs, $warnings));
+    assert_contains('The old dining room.', implode("\n", $warnings));
+    assert_contains("block='caption'", implode("\n", $warnings));
+});

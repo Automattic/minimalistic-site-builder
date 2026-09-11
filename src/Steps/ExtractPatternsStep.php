@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ActionCapabilities;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\NativeStagedFileWriter;
 use Automattic\SiteBuild\LinkTargets;
@@ -394,6 +395,10 @@ final class ExtractPatternsStep implements Step
                     $log[] = "repair {$winner['key']}: band-level CTA removal failed: {$error->getMessage()}";
                 }
             }
+            // Extraction can remove local targets. Keep valid actions and remove only dead actions.
+            $actions = ActionCapabilities::repairMarkup($deliveredMarkup, [], $patternFile, deadOnly: true);
+            $deliveredMarkup = $actions['markup'];
+            array_push($warnings, ...$actions['warnings']);
             $winner['delivered_markup'] = $deliveredMarkup;
             $stagedFiles[$winner['key'] . '.php'] = $this->patternFile($project, $winner);
             $manifestPatterns[] = $this->manifestPattern($project, $winner);

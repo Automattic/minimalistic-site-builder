@@ -142,6 +142,7 @@ final class HeroUnit extends AbstractPageSectionUnit
             $warnings,
             ...HeroComposition::markupWarnings($markup, $context['recipe'], $key, $context['blueprint']),
         );
+        $markup = SectionReadabilityContract::enforce($markup, $input, $key, $repairs, $warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 
