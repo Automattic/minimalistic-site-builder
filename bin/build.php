@@ -527,14 +527,16 @@ if ($withImages) {
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
     $generated = 0;
     $failed = 0;
+    $placeholders = 0;
     foreach ($specs as $spec) {
         match ($spec['status'] ?? '') {
             'completed' => $generated++,
             'failed'    => $failed++,
+            'placeholder' => $placeholders++,
             default     => null,
         };
     }
-    $report->setImages($generated, $failed, count($specs));
+    $report->setImages($generated, $failed, count($specs), $placeholders);
 }
 
 if ($project->exists('patterns.json')) {

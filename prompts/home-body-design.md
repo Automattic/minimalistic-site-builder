@@ -31,6 +31,7 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 
 - Do not emit a <header>.
 - Do not repeat the hero from the design preview. Start with the first section below the fold.
+- {{section_budget}} The shared header and footer do not count. Combine related topics within this budget; do not add a band for every topic in the spec.
 - Do not emit `<!doctype>`, `<html>`, `<head>`, or `<body>`.
 - Include exactly one `<main>` and exactly one `<footer>`.
 - Return a bare <main> with no attributes. Put all classes and IDs on its child sections.
