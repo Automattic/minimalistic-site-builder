@@ -246,10 +246,13 @@ final class DesignDirectionStep implements Step
             $seed,
             $warnings,
         );
-        // The recipe is code-owned and seeded, and so are its media axes
-        // (BIGR-912). The prompt below tells the model to preserve the defaults
-        // it is handed, so handing every site the same aspect and weight would
-        // make the merged contained-split recipe draw one composition forever.
+        $recipeAssigned = trim((string) Env::get(self::HERO_RECIPE_ENV)) !== ''
+            || array_key_exists('hero_assignment', $meta);
+        $openComposition = !$recipeAssigned
+            && ($meta['graph'] ?? 'blocks') !== 'html-first'
+            && HeroComposition::isCompatible(HeroComposition::AUTHORED, $constraints);
+        // Explicit assignments keep reproducible media defaults. Ordinary
+        // builds receive the compatible choices instead of an assigned recipe.
         $blueprintDefaults = array_merge(
             HeroBlueprint::defaultFor($recipe, $constraints),
             HeroComposition::selectMediaAxes(
@@ -269,6 +272,12 @@ final class DesignDirectionStep implements Step
                 [],
             ),
         ]);
+
+        if (!$recipeAssigned) {
+            $heroComposition = $openComposition
+                ? HeroComposition::choicePrompt($constraints)
+                : HeroComposition::recipeChoicePrompt($constraints);
+        }
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
@@ -303,6 +312,12 @@ final class DesignDirectionStep implements Step
                 $seedRegister,
             ),
             'hero_composition' => $heroComposition,
+            'hero_blueprint_shape' => json_encode(
+                $openComposition
+                    ? HeroBlueprint::promptValues(HeroBlueprint::defaultFor(HeroComposition::AUTHORED))
+                    : $blueprintDefaults,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
         ]);
         try {
             $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
@@ -314,6 +329,23 @@ final class DesignDirectionStep implements Step
             $warnings[] = 'designDirection.json: generated JSON remained unusable after its repair attempt ('
                 . $e->getMessage() . '); deterministic seed-derived direction delivered for field direction; '
                 . 'disposition fallback';
+        }
+
+        if ($openComposition) {
+            // Default blocks builds author their own composition. A generated
+            // recipe label cannot silently re-enable a fixed template.
+            $recipe = HeroComposition::AUTHORED;
+        } elseif (!$recipeAssigned) {
+            $authoredRecipe = $payload['direction']['hero_blueprint']['recipe'] ?? null;
+            if (is_string($authoredRecipe) && HeroComposition::isKnown($authoredRecipe)
+                && ($openComposition || !HeroComposition::isAuthored($authoredRecipe))
+                && HeroComposition::isCompatible($authoredRecipe, $constraints)) {
+                $recipe = $authoredRecipe;
+            } else {
+                $warnings[] = 'file=designDirection.json; path=hero_blueprint.recipe; authored='
+                    . self::describe($authoredRecipe) . '; delivered=' . self::describe($recipe)
+                    . '; disposition=missing or incompatible model choice replaced by stable compatible fallback';
+            }
         }
 
         $repairs = [];
@@ -1820,7 +1852,9 @@ final class DesignDirectionStep implements Step
         // keyword. Directions persisted before the field existed carry none.
         $canvas = trim((string) ($direction['canvas'] ?? ''));
         if ($canvas === 'framed') {
-            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
+            $facts[] = HeroComposition::isAuthored((string) ($direction['hero_blueprint']['recipe'] ?? ''))
+                ? '- **Canvas**: framed — keep a visible mat of page background around the bands, including a framed hero when that serves its composition. Use wide alignment and deliberate gutters. Only an overlay header requires a continuous protected top surface.'
+                : '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
@@ -2099,7 +2133,7 @@ final class DesignDirectionStep implements Step
             throw new \RuntimeException('designDirection.json has no structured hero_blueprint');
         }
         $recipe = trim((string) ($blueprint['recipe'] ?? ''));
-        if (!in_array($recipe, HeroComposition::RECIPES, true)) {
+        if (!HeroComposition::isKnown($recipe)) {
             throw new \RuntimeException("designDirection.json has unknown hero_blueprint recipe '{$recipe}'");
         }
         $repairs = [];
@@ -2125,7 +2159,7 @@ final class DesignDirectionStep implements Step
         HeroBlueprint::recipe($blueprint);
         return "## Front-page hero blueprint (front page only)\n\n```json\n"
             . json_encode(
-                $blueprint,
+                HeroBlueprint::promptValues($blueprint),
                 JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
             )
             . "\n```";

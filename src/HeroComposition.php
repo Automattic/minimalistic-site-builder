@@ -4,14 +4,32 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Reviewed, code-owned catalog and objective selector for front-page heroes.
- *
- * Selection filters caller-owned capabilities first, then uses a stable hash
- * only inside the compatible pool. No prompt prose or site-industry keywords
- * participate in the decision.
+ * Open hero authoring plus optional reviewed recipes. The model composes an
+ * unconstrained opening from the concept; explicit capability limits and
+ * recipe assignments use the catalog. Stable selection is the fallback.
  */
 final class HeroComposition
 {
+    /** An authoring mode, not a fourth layout template. RECIPES remain opt-in references. */
+    public const AUTHORED = 'authored';
+
+    public static function isAuthored(string $recipe): bool
+    {
+        return $recipe === self::AUTHORED;
+    }
+
+    public static function isKnown(string $recipe): bool
+    {
+        return self::isAuthored($recipe) || isset(self::CATALOG[$recipe]);
+    }
+
+    public static function isAuthoredMarkup(string $markup): bool
+    {
+        $doc = BlockMarkup::parse($markup);
+        $root = $doc->topLevel();
+        $classes = $root === null ? '' : (string) (($doc->attrs($root) ?? [])['className'] ?? '');
+        return in_array('hero-composition--authored', preg_split('/\s+/', trim($classes)) ?: [], true);
+    }
     /** @var list<string> */
     public const RECIPES = [
         'cinematic-safe-zone',
@@ -179,9 +197,67 @@ final class HeroComposition
         ],
     ];
 
+    /** Supported structures, exposed for concept-led choice rather than random assignment. */
+    public static function choicePrompt(array $constraints = []): string
+    {
+        // Count/mode/copy ceilings currently have executable guarantees in
+        // the recipe path. Never advertise a freer mode that ignores them.
+        if (!self::isCompatible(self::AUTHORED, $constraints)) {
+            return self::recipeChoicePrompt($constraints);
+        }
+        return "Choose the hero composition by starting with this site's concept, not a template. "
+            . "Set hero_blueprint.recipe to authored (the default authoring mode, not a layout). "
+            . "In rationale name the primary impression and why it belongs to THIS subject and requested style. "
+            . "In composition name the focal point, how image and headline work together, and the essential content; "
+            . "identify supporting details better placed later rather than filling the opening with everything available. "
+            . "Describe actual grouping, alignment and spacing relationships, not independent coordinates for each element. "
+            . "In mobile_layout preserve that hierarchy in a deliberate source reading order, not a blind stack of desktop columns. "
+            . "Use source_order for an optional ordered list of unique design-* class names on disjoint meaningful elements "
+            . "(such as a principal image and supporting details) whose relative DOM order matters. Name the corresponding "
+            . "elements in composition; do not prescribe every wrapper or add elements just to populate the list. "
+            . "An empty list is valid. This is not a universal image-first rule, content quota or first-screen height limit. "
+            . "Before returning the blueprint, resolve competing focal points and details that delay its primary impression. "
+            . "Include at least one image; "
+            . "multiple images are welcome when they serve the concept. media_mode is foreground-image, cover-image, or mixed. "
+            . "The supported blocks own their responsive behavior. "
+            . "Do not map aesthetic labels to fixed templates; give the required imagery a meaningful role. "
+            . "Keep hero-specific composition in this blueprint, not the site-wide narrative. "
+            . "Caller limits (capabilities, not creative targets): "
+            . json_encode(self::validateConstraints($constraints), JSON_THROW_ON_ERROR)
+            . "\nBlueprint shape (example values are not assignments):\n"
+            . json_encode(HeroBlueprint::promptValues(HeroBlueprint::defaultFor(self::AUTHORED)), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+    }
+
+    /** Recipe-only reference data for callers that explicitly want a catalog. */
+    public static function recipeChoicePrompt(array $constraints = []): string
+    {
+        $choices = [];
+        foreach (self::compatible($constraints) as $recipe) {
+            $meta = self::metadata($recipe);
+            $choices[$recipe] = [
+                'structure' => $meta['layout_archetype'],
+                'media_modes' => $meta['media_modes'],
+                'headline_registers' => $meta['headline_registers'],
+                'height_profiles' => $meta['height_profiles'],
+                'mobile_transformations' => $meta['mobile_transformations'],
+                'media_aspects' => $meta['media_aspects'],
+                'media_weights' => $meta['media_weights'],
+                'blueprint_example' => HeroBlueprint::defaultFor($recipe, $constraints),
+            ];
+        }
+        return "Choose the hero composition that best expresses the user's requested style and this concept. "
+            . "Set hero_blueprint.recipe to one of the compatible choices below. These are supported structures, "
+            . "not a ranking: choose deliberately, not by list position. Choose the permitted media aspect, weight, "
+            . "headline register, height and mobile transformation yourself; example values are not assignments. "
+            . "A cinematic cover centers restrained copy on a photograph; foreground-split pairs copy with one "
+            . "contained image; layered-poster gives display typography the leading role over a photographic plate. "
+            . "Describe the hero only in hero_blueprint, not in the site-wide narrative.\n\n"
+            . json_encode($choices, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
     public static function assertKnown(string $recipe): void
     {
-        if (!isset(self::CATALOG[$recipe])) {
+        if (!self::isKnown($recipe)) {
             throw new \InvalidArgumentException(
                 "unknown hero recipe '{$recipe}' (use one of: " . implode(', ', self::RECIPES) . ')'
             );
@@ -192,6 +268,35 @@ final class HeroComposition
     public static function metadata(string $recipe): array
     {
         self::assertKnown($recipe);
+        if (self::isAuthored($recipe)) {
+            return [
+                'canvases' => self::CANVASES,
+                'media_modes' => ['foreground-image', 'cover-image', 'mixed'],
+                'min_images' => 1, 'max_images' => PHP_INT_MAX,
+                'backgrounds' => ['base', 'tinted', 'contrast', 'image'],
+                'default_background' => 'base', 'fallback_background' => 'base',
+                'header_modes' => ['stacked', 'overlay'],
+                'copy_capacity' => 'expanded',
+                'mobile_transformations' => ['authored'],
+                'layout_archetype' => self::AUTHORED,
+                'fallback_family' => 'typographic',
+                'root_hook' => '.hero-composition--authored',
+                'prompt' => 'hero.md',
+                'headline_registers' => HeroBlueprint::HEADLINE_REGISTERS,
+                'height_profiles' => HeroBlueprint::HEIGHT_PROFILES,
+                'media_aspects' => self::MEDIA_ASPECTS,
+                'media_weights' => self::MEDIA_WEIGHTS,
+                'defaults' => [
+                    'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                    'text_anchor' => 'center-start',
+                    'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [1, 6]],
+                    'focal_region' => 'none', 'text_safe_region' => 'full',
+                    'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                    'mobile_transformation' => 'authored',
+                    'media_aspect' => 'landscape', 'media_weight' => 'balanced',
+                ],
+            ];
+        }
         return self::CATALOG[$recipe];
     }
 
@@ -236,7 +341,8 @@ final class HeroComposition
                 return false;
             }
             $mode = strtolower(trim((string) ($recipeOrBlueprint['media_mode'] ?? '')));
-            return in_array($mode, self::IMAGE_MEDIA_MODES, true);
+            return in_array($mode, self::IMAGE_MEDIA_MODES, true)
+                || (self::isAuthored($recipe) && $mode === 'mixed');
         }
         $meta = self::metadata($recipeOrBlueprint);
         return (int) $meta['min_images'] > 0
@@ -373,6 +479,10 @@ final class HeroComposition
     public static function isCompatible(string $recipe, array $constraints = []): bool
     {
         self::assertKnown($recipe);
+        if (self::isAuthored($recipe)) {
+            $constraints = self::validateConstraints($constraints);
+            return array_diff_key($constraints, ['hero_canvas' => true]) === [];
+        }
         return in_array($recipe, self::compatible($constraints), true);
     }
 
@@ -463,6 +573,24 @@ final class HeroComposition
         array $blueprint = [],
     ): array {
         self::assertKnown($recipe);
+        // Authored heroes require imagery, but no fixed topology, image upper
+        // limit, copy count or mandatory helper regions. Missing media cannot
+        // be placed safely without making a new composition decision.
+        if (self::isAuthored($recipe)) {
+            $warnings = preg_match('~<img\b~i', $markup) === 1 ? [] : [
+                self::markupWarning(
+                    $part,
+                    'hero image',
+                    ['image_count' => 0],
+                    ['image_count' => 0],
+                    'safe hero retained without its required imagery; add at least one image that serves the composition; no copy or sibling was removed',
+                ),
+            ];
+            array_push($warnings, ...self::sourceOrderWarnings(
+                $markup, $blueprint['source_order'] ?? [], "theme/parts/{$part}.html",
+            ));
+            return $warnings;
+        }
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
@@ -548,44 +676,39 @@ final class HeroComposition
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
         }
-        // BIGR-775 advisory copy-budget check: every hero holds at most the
-        // headline plus ONE supporting paragraph (naturaleza9's three stacked
-        // bodies read as clutter even inside the old standard budget).
-        // copy_capacity stays a selection-only dimension. Overrun keeps the
-        // safe hero and stays actionable.
+        // Match the delivery budget: headline, support, and optionally one
+        // short caption before the headline. Keep excess copy advisory here.
         $copyTextBlocks = 0;
+        $captionAllowed = false;
+        $seenHeadline = false;
         foreach ($document->indices() as $index) {
             if (!in_array($document->name($index), ['heading', 'paragraph'], true)) {
                 continue;
             }
             if (self::hasAncestorClass($document, $index, 'hero-composition__copy')) {
                 $copyTextBlocks++;
+                $attrs = $document->attrs($index) ?? [];
+                if ($document->name($index) === 'heading' && ($attrs['level'] ?? 2) === 1) {
+                    $seenHeadline = true;
+                }
+                if (!$seenHeadline && $document->name($index) === 'paragraph'
+                    && ($attrs['fontSize'] ?? null) === 'caption'
+                ) {
+                    $text = PlainText::fromMarkup($document->innerHtml($index));
+                    $captionAllowed = $captionAllowed || ($text !== '' && mb_strlen($text, 'UTF-8') <= 80);
+                }
             }
         }
-        $textBudget = 2;
+        $textBudget = 2 + (int) $captionAllowed;
         if ($copyTextBlocks > $textBudget) {
             $warnings[] = self::markupWarning(
                 $part,
                 'hero copy budget',
                 ['copy_capacity' => $meta['copy_capacity'], 'max_text_blocks' => $textBudget],
                 ['text_blocks' => $copyTextBlocks],
-                'safe parseable hero was retained; fold the overflow lines into the standfirst instead of stacking more copy',
+                'safe parseable hero was retained; move excess copy into a following section, keeping one headline, '
+                    . 'one short standfirst and at most one optional caption label',
             );
-        }
-
-        // BIGR-775 advisory headline-punctuation check: an em/en dash joins
-        // two thoughts the H1 should not carry together (audited: atlas7).
-        if (preg_match('~<h1\b[^>]*>(.*?)</h1>~is', $markup, $h1Match) === 1) {
-            $headline = PlainText::fromMarkup($h1Match[1]);
-            if (preg_match('/[\x{2013}\x{2014}]/u', $headline) === 1) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'hero headline punctuation',
-                    ['headline' => 'a short phrase without em/en dashes'],
-                    ['headline' => $headline],
-                    'safe parseable hero was retained; move the dash-joined clause into the standfirst',
-                );
-            }
         }
 
         $images = self::imageFacts($markup);
@@ -673,6 +796,60 @@ final class HeroComposition
             return '';
         }
         return html_entity_decode((string) ($match[1] ?? $match[2] ?? $match[3] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    /**
+     * Advisory DOM-order check, not a visual-quality score or a repair.
+     * The model names its own disjoint targets; no class means "image first"
+     * universally. Inspect saved HTML, not comment attributes. Missing,
+     * duplicated or overlapping targets cannot prove a reading order.
+     *
+     * @param list<string> $order normalized hero_blueprint.source_order
+     * @return list<string>
+     */
+    public static function sourceOrderWarnings(string $markup, array $order, string $file, ?string $anchor = null): array
+    {
+        if ($order === []) {
+            return [];
+        }
+        $dom = Html::loadUtf8Html($markup, LIBXML_NONET);
+        $root = $anchor === null ? $dom?->documentElement : $dom?->getElementById($anchor);
+        $found = array_fill_keys($order, []);
+        $sequence = [];
+        if ($root !== null) {
+            foreach ([$root, ...iterator_to_array($root->getElementsByTagName('*'))] as $node) {
+                $classes = preg_split('/\s+/', trim($node->getAttribute('class'))) ?: [];
+                foreach ($order as $class) {
+                    if (in_array($class, $classes, true)) {
+                        $found[$class][] = $node;
+                        $sequence[] = $class;
+                    }
+                }
+            }
+        }
+        $counts = array_map('count', $found);
+        $overlap = false;
+        $targets = array_merge(...array_values($found));
+        foreach ($targets as $i => $node) {
+            foreach ($targets as $j => $other) {
+                if ($i === $j) {
+                    continue;
+                }
+                for ($ancestor = $node; $ancestor !== null; $ancestor = $ancestor->parentNode) {
+                    if ($ancestor->isSameNode($other)) {
+                        $overlap = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ($root !== null && !$overlap && $sequence === $order && count(array_filter($counts, static fn ($count) => $count !== 1)) === 0) {
+            return [];
+        }
+        return ['file=' . self::describe($file) . '; block=' . self::describe($anchor ?? 'hero root')
+            . '; path=hero_blueprint.source_order; authored=' . self::describe($order)
+            . '; delivered=' . self::describe(['sequence' => $sequence, 'target_counts' => $counts, 'overlapping_targets' => $overlap])
+            . '; disposition=retained content unchanged; reconcile the named targets and their DOM order with the hero intent; no visual order was inferred'];
     }
 
     private static function imageAspect(string $alt): string

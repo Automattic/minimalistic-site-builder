@@ -4,10 +4,11 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Guarantees the hero headline is set at the masthead scale, and that its
- * longest word fits its copy measure.
+ * Bounds hero display words to their estimated copy measure. Named recipes
+ * also promote the masthead and apply their line target; authored heroes keep
+ * their chosen preset and line count, with only a responsive word-fit guard.
  *
- * Three passes, in that order.
+ * The recipe path has three passes, in this order.
  *
  * PROMOTION. The `display` preset exists for exactly one thing — the hero
  * masthead — and the hero model picks the H1's preset itself. When it picks
@@ -132,9 +133,11 @@ final class HeroHeadlineFit
      * @param list<int>|null $desktopLineTarget the blueprint's desktop
      *        [min, max] headline line target; without it only the word-fit
      *        pass bounds the headline.
+     * @param bool $authored preserve the chosen preset and line count; only
+     *        guard display words against their rail and responsive hero width
      * @return array{markup:string, notes:list<string>}
      */
-    public static function apply(string $markup, array $theme, ?array $desktopLineTarget = null): array
+    public static function apply(string $markup, array $theme, ?array $desktopLineTarget = null, bool $authored = false): array
     {
         $displayMax = self::displayMaxPx($theme);
         if ($displayMax === null || !is_finite($displayMax) || $displayMax <= 0 || $displayMax > PHP_INT_MAX) {
@@ -146,7 +149,9 @@ final class HeroHeadlineFit
         }
 
         $notes = [];
-        self::promoteMasthead($doc, $theme, $displayMax, $desktopLineTarget, $notes);
+        if (!$authored) {
+            self::promoteMasthead($doc, $theme, $displayMax, $desktopLineTarget, $notes);
+        }
         $masthead = self::mastheadIndex($doc);
         foreach ($doc->indices() as $i) {
             if ($doc->name($i) !== 'heading' || !$doc->isStructurallySafe($i)) {
@@ -180,7 +185,7 @@ final class HeroHeadlineFit
             // the pin threshold can hold stays unpinned: that target is
             // already lost, and a sub-threshold masthead is worse than an
             // extra wrapped line.
-            $lineCap = $i === $masthead
+            $lineCap = !$authored && $i === $masthead
                 ? self::lineTargetCapPx($doc, $i, $theme, $attrs, $desktopLineTarget, $displayMax)
                 : null;
             if ($lineCap !== null && ($lineCap < self::MINIMUM_CAP_PX || $lineCap >= $displayMax)) {
@@ -190,21 +195,35 @@ final class HeroHeadlineFit
                 [$wordCap, $lineCap],
                 static fn (?int $value): bool => $value !== null,
             ));
-            if ($caps === []) {
+            if ($caps === [] && !$authored) {
                 continue;
             }
-            $cap = min($caps);
+            $cap = $caps === [] ? null : min($caps);
             // The preset class must go with the preset attr: WordPress
             // renders `.has-display-font-size` with !important, which would
             // beat the pinned inline size. The min() keeps the preset var,
             // so fluid behaviour below the cap is unchanged.
             unset($attrs['fontSize']);
-            $attrs = self::withPinnedFontSize(
-                $attrs,
-                'min(var(--wp--preset--font-size--display), ' . $cap . 'px)',
-            );
+            $sizeBounds = ['var(--wp--preset--font-size--display)'];
+            if ($cap !== null) {
+                $sizeBounds[] = $cap . 'px';
+            }
+            if ($authored) {
+                // A mobile word must fit the hero even when the desktop rail
+                // is ample. Its root is the query container, so a frame and
+                // root padding are already excluded. Keep the chosen preset
+                // without a line count or masthead promotion; wrapping is the
+                // last resort for a still narrower authored container.
+                $em = number_format($fit['wordEm'] / self::MEASURE_SAFETY, 3, '.', '');
+                $sizeBounds[] = 'calc(100cqi / ' . $em . ')';
+            }
+            $attrs = self::withPinnedFontSize($attrs, 'min(' . implode(', ', $sizeBounds) . ')');
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-display-font-size');
+            if ($authored) {
+                $notes[] = "headline word-fit: bounded authored display for '{$fit['word']}' without a line-count target or preset promotion";
+                continue;
+            }
             $notes[] = $cap === $wordCap
                 ? sprintf(
                     "headline word-fit: '%s' (%d chars%s, ~%.2fem) cannot fit the %dpx measure at the display "

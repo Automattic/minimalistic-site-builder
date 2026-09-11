@@ -33,6 +33,13 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     // makes the utility CSS (equal-cards, layout utilities) actually apply.
     assert_contains("wp_enqueue_style('forno-vero-style', get_stylesheet_uri()", $php);
     assert_contains("add_editor_style('style.css')", $php);
+    assert_contains("wp_enqueue_script('forno-vero-heading-fit', get_theme_file_uri('assets/heading-fit.js'), array(), \$ver, true)", $php);
+    assert_eq(
+        file_get_contents(repo_path('assets/heading-fit.js')),
+        $project->readText('theme/assets/heading-fit.js'),
+        'the trusted heading fitter ships unchanged, including on resumed finalization',
+    );
+    assert_true(in_array('theme/assets/heading-fit.js', (new FinalizeThemeStep())->declaration()->writes, true));
     // The generated fonts module is loaded guardedly, so a fontless theme stays valid.
     assert_contains("require_once __DIR__ . '/fonts.php'", $php);
     assert_contains('is_readable', $php);

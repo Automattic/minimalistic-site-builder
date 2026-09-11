@@ -322,7 +322,7 @@ test('HeroUnit generate returns a JSON-serializable repairs and warnings envelop
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
-test('HeroUnit warns for removed eyebrow and separator content while preserving headline-first copy', function () {
+test('HeroUnit preserves an optional caption, divider and authored copy order', function () {
     $eyebrow = '<!-- wp:paragraph {"fontSize":"caption"} -->'
         . '<p class="has-caption-font-size">Tbilisi Old Town</p><!-- /wp:paragraph -->';
     $support = '<!-- wp:paragraph --><p>The exact support paragraph survives.</p><!-- /wp:paragraph -->';
@@ -338,22 +338,9 @@ test('HeroUnit warns for removed eyebrow and separator content while preserving 
 
     $first = $unit->finish($raw, hero_unit_contract_input('foreground-split', null));
 
-    assert_true(!str_contains($first->markup, 'Tbilisi Old Town'));
-    assert_true(!str_contains($first->markup, 'wp:separator'));
-    assert_true(!str_contains($first->markup, 'has-accent-background-color'), 'the emptied shell is removed');
-    assert_contains($headline . $support, $first->markup, 'the sole support block moves intact behind the H1');
-    assert_eq(['hero-support-moved-after-headline'], array_column($first->repairs, 'code'));
-    assert_eq(2, count($first->warnings));
-    $warnings = implode("\n", $first->warnings);
-    foreach ([
-        "file='theme/parts/page-home--hero.html'",
-        'Tbilisi Old Town',
-        'is-style-wide',
-        'delivered=removed',
-        'disposition=',
-    ] as $context) {
-        assert_contains($context, $warnings);
-    }
+    assert_contains($eyebrowShell . $support . $headline, $first->markup);
+    assert_eq([], $first->repairs);
+    assert_eq([], $first->warnings);
 
     $second = $unit->finish($first->markup, hero_unit_contract_input('foreground-split', null));
     assert_eq($first->markup, $second->markup);
@@ -710,3 +697,48 @@ test('primary-action presence uses the same wp:button boundary as reconciliation
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore the work</a></div><!-- /wp:button -->';
     assert_true(GeneratedMarkup::containsPrimaryAction($button, $action));
 });
+
+test('a hero label that only repeats the wordmark is removed (frm PR-9e)', function () {
+    // The header renders the wordmark a couple of hundred pixels above, so
+    // this makes the visitor read the same words twice before a headline. It
+    // arrives on an authored hero as an ad-hoc design-* paragraph, which no
+    // token governs and dedupeHeadlineEcho does not compare.
+    $hero = static fn (string $label): string => '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"className":"design-hero-studioname"} -->'
+        . '<p class="design-hero-studioname">' . $label . '</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1>Small-batch wood-fired stoneware</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+
+    $repairs = [];
+    $out = GeneratedMarkup::dropWordmarkEcho($hero('Barro Nuevo'), 'Barro Nuevo', 'hero', $repairs);
+    assert_true(!str_contains($out, 'design-hero-studioname'), 'the echo goes');
+    assert_contains('Small-batch wood-fired stoneware', $out, 'the headline stays');
+    assert_eq(1, count($repairs));
+    assert_eq('removed', $repairs[0]['delivered']);
+
+    // Case, punctuation and entities do not make it a different wordmark.
+    foreach (['BARRO NUEVO', 'Barro&nbsp;Nuevo', 'Barro Nuevo.'] as $spelling) {
+        $none = [];
+        assert_true(
+            !str_contains(GeneratedMarkup::dropWordmarkEcho($hero($spelling), 'Barro Nuevo', 'hero', $none), '<p'),
+            "removed: {$spelling}",
+        );
+    }
+
+    // A label that says something else is the author's to keep, and so is one
+    // that is not immediately above the headline.
+    $kept = [];
+    assert_eq($hero('Open studio days'), GeneratedMarkup::dropWordmarkEcho($hero('Open studio days'), 'Barro Nuevo', 'hero', $kept));
+    assert_eq([], $kept);
+
+    $noName = [];
+    assert_eq($hero('Barro Nuevo'), GeneratedMarkup::dropWordmarkEcho($hero('Barro Nuevo'), '', 'hero', $noName));
+    assert_eq([], $noName, 'no site name, nothing to compare');
+
+    // A hero with no H1 is left alone rather than guessed at.
+    $headless = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>Barro Nuevo</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $untouched = [];
+    assert_eq($headless, GeneratedMarkup::dropWordmarkEcho($headless, 'Barro Nuevo', 'hero', $untouched));
+});
+

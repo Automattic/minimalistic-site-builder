@@ -308,7 +308,7 @@ final class AboveFoldContract
                     'desktop' => [1, 3],
                     'mobile' => [2, 5],
                 ],
-                'stacked_cover_max_vh' => $mode === self::MODE_STACKED ? 80 : null,
+                'stacked_cover_max_vh' => $mode === self::MODE_STACKED && !HeroComposition::isAuthored($recipe) ? 80 : null,
             ],
             'regions' => [
                 'text_safe' => $textSafe,
@@ -495,6 +495,11 @@ final class AboveFoldContract
         self::assertContract($contract);
         $copy = $contract;
         unset($copy['theme_tokens'], $copy['stacked_pair'], $copy['degradations'], $copy['delivered']);
+        if (HeroComposition::isAuthored((string) $copy['recipe'])) {
+            // Both authors still share the header's mode, protection and safe
+            // top. Inactive recipe geometry must not prescribe a composition.
+            unset($copy['viewport'], $copy['regions'], $copy['media_aspect'], $copy['mobile_transformation']);
+        }
         return "ABOVE-FOLD CONTRACT (authoritative; front page only):\n"
             . self::encode($copy);
     }
@@ -979,7 +984,7 @@ final class AboveFoldContract
             'protect_top_edge' => false,
             'safe_top_px' => 0,
         ] + self::headerTextFacts($archetype, '');
-        $contract['viewport']['stacked_cover_max_vh'] = 80;
+        $contract['viewport']['stacked_cover_max_vh'] = HeroComposition::isAuthored((string) $contract['recipe']) ? null : 80;
         $contract['degradations'][] = self::degradation(
             $code,
             'aboveFold.json',
@@ -1037,7 +1042,7 @@ final class AboveFoldContract
                 throw new \RuntimeException("aboveFold.json has an invalid or missing '{$field}'");
             }
         }
-        if (!in_array($contract['recipe'], HeroComposition::RECIPES, true)) {
+        if (!HeroComposition::isKnown($contract['recipe'])) {
             throw new \RuntimeException("aboveFold.json has unknown recipe '{$contract['recipe']}'");
         }
         if (!in_array($contract['writing_direction'], ['ltr', 'rtl'], true)) {
@@ -1171,8 +1176,9 @@ final class AboveFoldContract
             }
         }
         $stackedMax = $contract['viewport']['stacked_cover_max_vh'] ?? null;
-        if (($header['mode'] === self::MODE_STACKED
+        if (($header['mode'] === self::MODE_STACKED && !HeroComposition::isAuthored($contract['recipe'])
                 && (!is_int($stackedMax) || $stackedMax < 1 || $stackedMax > 100))
+            || (HeroComposition::isAuthored($contract['recipe']) && $stackedMax !== null)
             || ($header['mode'] === self::MODE_OVERLAY && $stackedMax !== null)
         ) {
             throw new \RuntimeException('aboveFold.json has an invalid stacked cover viewport budget');

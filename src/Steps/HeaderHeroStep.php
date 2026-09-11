@@ -426,7 +426,9 @@ final class HeaderHeroStep implements Step
                     $heroRepairs,
                 );
                 $beforeLayout = $heroMarkup;
-                $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
+                if (!\Automattic\SiteBuild\HeroComposition::isAuthored((string) $delivery['recipe'])) {
+                    $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
+                }
                 if ($heroMarkup !== $beforeLayout) {
                     $heroRepairs[] = [
                         'code' => 'root-layout-constrained',
@@ -466,10 +468,12 @@ final class HeaderHeroStep implements Step
             // word fits the measure its layout chain implies — the CSS
             // mid-word break guard must stay dormant (BIGR-798).
             $lineTarget = $delivery['viewport']['headline_line_target']['desktop'] ?? null;
+            $authoredHero = \Automattic\SiteBuild\HeroComposition::isAuthored((string) $delivery['recipe']);
             $fit = HeroHeadlineFit::apply(
                 $writes[$heroRel],
                 $theme,
-                is_array($lineTarget) ? array_values($lineTarget) : null,
+                !$authoredHero && is_array($lineTarget) ? array_values($lineTarget) : null,
+                authored: $authoredHero,
             );
             $writes[$heroRel] = $fit['markup'];
             foreach ($fit['notes'] as $note) {
@@ -3025,7 +3029,9 @@ final class HeaderHeroStep implements Step
             $pages,
             $writes,
             $report,
-            static fn (string $markup): array => self::capCovers($markup),
+            static fn (string $markup): array => \Automattic\SiteBuild\HeroComposition::isAuthoredMarkup($markup)
+                ? ['markup' => $markup, 'notes' => []]
+                : self::capCovers($markup),
         );
     }
 

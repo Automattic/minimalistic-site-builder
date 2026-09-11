@@ -2256,6 +2256,86 @@ final class GeneratedMarkup
      *
      * @param list<array<string,mixed>> $repairs
      */
+    /**
+     * Remove a label above the hero H1 that only repeats the site's wordmark.
+     *
+     * The site header renders the wordmark a couple of hundred pixels above,
+     * so the visitor reads the same words twice before reaching a headline.
+     * An authored hero is where this appears: `dedupeHeadlineEcho()` compares
+     * the H1 with its own supporting copy and runs only for a catalog recipe,
+     * and `section_label` does not own the block either — it arrives as an
+     * ad-hoc `design-*` paragraph, which no token governs.
+     *
+     * Only the block immediately above the H1, only when its whole reading
+     * text is the site name, and only within the hero. A label that says
+     * something else is the author's to keep.
+     */
+    public static function dropWordmarkEcho(
+        string $markup,
+        string $siteName,
+        string $part,
+        array &$repairs = []
+    ): string {
+        $wanted = self::wordmarkKey($siteName);
+        if ($wanted === '') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $h1 = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1 = $index;
+                break;
+            }
+        }
+        if ($h1 === null) {
+            return $markup;
+        }
+        $parent = $document->parent($h1);
+        $siblings = $parent === null ? $document->children($document->topLevel() ?? 0) : $document->children($parent);
+        $position = array_search($h1, $siblings, true);
+        if ($position === false || $position === 0) {
+            return $markup;
+        }
+        $echo = $siblings[$position - 1];
+        if (!in_array($document->name($echo), ['paragraph', 'heading'], true)
+            || !$document->isStructurallySafe($echo)
+        ) {
+            return $markup;
+        }
+        $text = trim(html_entity_decode(strip_tags($document->innerHtml($echo)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (self::wordmarkKey($text) !== $wanted) {
+            return $markup;
+        }
+        $offset = $document->openingOffset($echo);
+        $end = $document->endOffset($echo);
+        if ($end === null) {
+            return $markup;
+        }
+        $repairs[] = [
+            'part' => $part,
+            'block' => $document->name($echo),
+            'authored' => $text,
+            'delivered' => 'removed',
+            'note' => 'a label above the hero headline repeated the site wordmark the header already shows',
+        ];
+
+        return substr_replace($markup, '', $offset, $end - $offset);
+    }
+
+    /** Comparable form of a wordmark: letters and digits, case-folded. */
+    private static function wordmarkKey(string $text): string
+    {
+        $key = mb_strtolower(trim($text), 'UTF-8');
+
+        return (string) preg_replace('/[^\p{L}\p{N}]+/u', '', $key);
+    }
+
     public static function dedupeHeadlineEcho(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);
@@ -2310,581 +2390,6 @@ final class GeneratedMarkup
             'disposition' => 'repaired',
         ];
         return $markup;
-    }
-
-    /**
-     * Strip chip/badge chrome from eyebrow-position copy.
-     *
-     * Models render direction devices ("translucent veils", "layered panels")
-     * as filled/bordered groups wrapped around the eyebrow line above the H1 —
-     * a boxed caption chip that reads as UI, not typography (audited:
-     * pulso22's double-bordered eyebrow). The eyebrow is plain tracked text by
-     * contract, so any background, gradient, or border on a short text-only
-     * block that starts and ends before the H1 is removed. Copy containers
-     * holding the headline, media, or actions are never candidates, and the
-     * text itself is untouched — this is a repair, not a warning.
-     *
-     * Attribute-only edit, per the shared convention: stale inline
-     * border/background styles survive in the saved HTML until fix-blocks
-     * re-serializes it from these attributes; the class hooks that make the
-     * chrome visible are removed here.
-     *
-     * @param list<array<string,mixed>> $repairs
-     */
-    public static function stripEyebrowChipChrome(string $markup, string $part, array &$repairs = []): string
-    {
-        $document = BlockMarkup::parse($markup);
-        $h1Offset = null;
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) === 'heading'
-                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
-            ) {
-                $h1Offset = $document->openingOffset($index);
-                break;
-            }
-        }
-        if ($h1Offset === null) {
-            return $markup;
-        }
-
-        $stripped = 0;
-        foreach ($document->indices() as $index) {
-            $name = $document->name($index);
-            if (!in_array($name, ['group', 'paragraph'], true)) {
-                continue;
-            }
-            // endOffset is exclusive: a chip closing exactly where the H1
-            // opens has end == h1Offset and still sits entirely before it.
-            $end = $document->endOffset($index);
-            if ($end === null || $end > $h1Offset) {
-                continue;
-            }
-            if ($name === 'group' && !self::wrapsOnlyText($document, $index)) {
-                continue;
-            }
-            $text = self::readingText($document->innerHtml($index));
-            if ($text === '' || mb_strlen($text, 'UTF-8') > 80) {
-                continue;
-            }
-            $attrs = $document->attrs($index) ?? [];
-            $hadChrome = false;
-            $background = trim((string) ($attrs['backgroundColor'] ?? ''));
-            if ($background !== '') {
-                unset($attrs['backgroundColor']);
-                $document->removeClassTokenInOwnHtml($index, "has-{$background}-background-color");
-                $hadChrome = true;
-            }
-            $gradient = trim((string) ($attrs['gradient'] ?? ''));
-            if ($gradient !== '') {
-                unset($attrs['gradient']);
-                $document->removeClassTokenInOwnHtml($index, "has-{$gradient}-gradient-background");
-                $document->removeClassTokenInOwnHtml($index, 'has-background-gradient');
-                $hadChrome = true;
-            }
-            $borderColor = trim((string) ($attrs['borderColor'] ?? ''));
-            if ($borderColor !== '') {
-                unset($attrs['borderColor']);
-                $document->removeClassTokenInOwnHtml($index, "has-{$borderColor}-border-color");
-                $hadChrome = true;
-            }
-            if (isset($attrs['style']['color']['background'])) {
-                unset($attrs['style']['color']['background']);
-                if (($attrs['style']['color'] ?? []) === []) {
-                    unset($attrs['style']['color']);
-                }
-                $hadChrome = true;
-            }
-            if (isset($attrs['style']['border'])) {
-                unset($attrs['style']['border']);
-                $hadChrome = true;
-            }
-            if (!$hadChrome) {
-                continue;
-            }
-            if (($attrs['style'] ?? []) === []) {
-                unset($attrs['style']);
-            }
-            $document->removeClassTokenInOwnHtml($index, 'has-background');
-            $document->removeClassTokenInOwnHtml($index, 'has-border-color');
-            $document->setAttrs($index, $attrs);
-            $stripped++;
-        }
-        if ($stripped === 0) {
-            return $markup;
-        }
-        $repairs[] = [
-            'code' => 'eyebrow-chip-chrome-stripped',
-            'part' => $part,
-            'authored' => "{$stripped} filled/bordered block(s) boxing the eyebrow-position text",
-            'delivered' => 'the same text as plain typography',
-            'disposition' => 'repaired',
-        ];
-        return $document->render();
-    }
-
-    /**
-     * Remove hairline separators from the hero.
-     *
-     * Reviewed direction (BIGR-775): a wp:separator inside the opening hero
-     * reads as a stray rule slicing the copy stack, not structure (audited:
-     * portfolio7, atlas7, hearth7). The hero prompt no longer offers the
-     * block; this pass keeps the ban structural when a model authors one
-     * anyway. The whole block is removed — a separator carries no copy, but
-     * its authored visual treatment is still durable loss and is warned.
-     *
-     * @param list<array<string,mixed>> $repairs
-     * @param list<string>              $warnings
-     */
-    public static function stripHeroSeparators(
-        string $markup,
-        string $part,
-        array &$repairs = [],
-        array &$warnings = [],
-    ): string {
-        return self::stripSeparatorBlocks(
-            $markup,
-            $part,
-            'the generated hero separator was removed at its complete block boundary so the reviewed '
-            . 'separator-free copy stack could be delivered',
-            $warnings,
-        );
-    }
-
-    /**
-     * Remove separators from a body section that owns no ruled recipe.
-     *
-     * prompts/section.md rations lines: a `wp:separator` is justified only
-     * inside the rule-row / spec-table item recipes, which draw their own
-     * rules. Nothing enforced that, and the
-     * audited pages arrived with a hairline under headings and between
-     * paragraphs (BIGR-978). Removal-only, like the hero pass: a separator
-     * carries no copy, but its authored treatment is durable loss and is
-     * warned. Callers skip this pass for sections that carry a ruled recipe.
-     *
-     * @param list<array<string,mixed>> $repairs
-     * @param list<string>              $warnings
-     */
-    public static function stripSectionSeparators(
-        string $markup,
-        string $part,
-        array &$repairs = [],
-        array &$warnings = [],
-    ): string {
-        return self::stripSeparatorBlocks(
-            $markup,
-            $part,
-            'the generated section separator was removed at its complete block boundary; prompts/section.md '
-            . 'rations lines to the rule-row and spec-table recipes and this section '
-            . 'carries neither of them',
-            $warnings,
-        );
-    }
-
-    /**
-     * Remove model-invented "rule" class tokens from a section that owns no
-     * ruled recipe.
-     *
-     * The page plan can release a section from the ruled ledger, but the
-     * section author still reads the site-wide "Item pattern: rule-row" fact
-     * and its own theme.json custom CSS, which defines classes such as
-     * `is-style-rule-row` with a border. The atlas rebuild for BIGR-978
-     * shipped exactly that on a section planned as `card`. Tokens naming a
-     * rule or hairline are removed from every block's className; build-owned
-     * marker families (`item-pattern--*`, `device--*`) are never touched.
-     * The token is also dropped from the saved HTML so the pass is complete
-     * before fix-blocks re-serializes.
-     *
-     * @param list<array<string,mixed>> $repairs
-     */
-    public static function stripRuleClassTokens(string $markup, string $part, array &$repairs = []): string
-    {
-        $document = BlockMarkup::parse($markup);
-        $removed = [];
-        foreach ($document->indices() as $index) {
-            $attrs = $document->attrs($index);
-            if (!is_array($attrs) || !is_string($attrs['className'] ?? null)) {
-                continue;
-            }
-            $tokens = self::classTokens($attrs['className']);
-            $kept = array_values(array_filter($tokens, static fn (string $token): bool => !self::isRuleClassToken($token)));
-            if ($kept === $tokens) {
-                continue;
-            }
-            $dropped = array_values(array_diff($tokens, $kept));
-            array_push($removed, ...$dropped);
-            if ($kept === []) {
-                unset($attrs['className']);
-            } else {
-                $attrs['className'] = implode(' ', $kept);
-            }
-            $document->setAttrs($index, $attrs);
-            $repairs[] = [
-                'code' => 'rule-class-removed',
-                'part' => $part,
-                'block' => $document->name($index) . "[{$index}]",
-                'authored' => implode(' ', $dropped),
-                'delivered' => 'removed',
-                'disposition' => 'repaired',
-            ];
-        }
-        if ($removed === []) {
-            return $markup;
-        }
-        $markup = $document->render();
-        $removed = array_values(array_unique($removed));
-        return (string) preg_replace_callback(
-            '/\s*\bclass="([^"]*)"/',
-            static function (array $match) use ($removed): string {
-                $kept = array_values(array_filter(
-                    self::classTokens($match[1]),
-                    static fn (string $token): bool => !in_array($token, $removed, true),
-                ));
-                return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
-            },
-            $markup,
-        );
-    }
-
-    /** Whether one class token names a rule or hairline the section may not draw. */
-    public static function isRuleClassToken(string $token): bool
-    {
-        if (str_starts_with($token, 'item-pattern--')
-            || str_starts_with($token, 'device--')
-            || str_starts_with($token, 'section-composition--')) {
-            return false;
-        }
-        return preg_match('/(^|-)(rules?|ruled|hairlines?)(-|$)/i', $token) === 1;
-    }
-
-    /**
-     * Shared removal transaction for `wp:separator` blocks.
-     *
-     * @param list<string> $warnings
-     */
-    private static function stripSeparatorBlocks(
-        string $markup,
-        string $part,
-        string $safeDisposition,
-        array &$warnings,
-    ): string {
-        return self::stripBlocksNamed($markup, $part, ['separator'], 'separator', $safeDisposition, $warnings);
-    }
-
-    /**
-     * Remove eyebrow/kicker lines above the hero headline.
-     *
-     * Reviewed direction (BIGR-775): the hero opens on its level-1 headline —
-     * orientation micro-copy (place, category, audience) belongs to the
-     * header tagline or the standfirst, never to a tracked caption line above
-     * the H1 (audited: tbilisi7, naturaleza7, lumen7, hearth7). A candidate
-     * is a short pre-H1 paragraph or minor heading carrying eyebrow signals:
-     * caption-scale preset, uppercase transform, wide tracking, or a level-4+
-     * heading. Plain standfirst copy authored above the H1 carries none of
-     * those signals and is left alone.
-     *
-     * A group shell dedicated entirely to removed eyebrow blocks is removed
-     * with them rather than delivered as an empty padded/painted box. A group
-     * with any surviving child or raw content is never widened into the
-     * removal transaction.
-     *
-     * @param list<array<string,mixed>> $repairs
-     * @param list<string>              $warnings
-     */
-    public static function stripHeroEyebrow(
-        string $markup,
-        string $part,
-        array &$repairs = [],
-        array &$warnings = [],
-    ): string {
-        $document = BlockMarkup::parse($markup);
-        $h1Offset = null;
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) === 'heading'
-                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
-            ) {
-                $h1Offset = $document->openingOffset($index);
-                break;
-            }
-        }
-        if ($h1Offset === null) {
-            return $markup;
-        }
-
-        $spans = [];
-        foreach ($document->indices() as $index) {
-            $name = $document->name($index);
-            if (!in_array($name, ['heading', 'paragraph'], true)) {
-                continue;
-            }
-            $attrs = $document->attrs($index) ?? [];
-            if ($name === 'heading') {
-                $level = self::heroHeadingLevel($attrs['level'] ?? 2);
-                if ($level === null || $level < 4) {
-                    // A malformed generated level is not evidence that this
-                    // heading is disposable eyebrow copy. Retain the whole
-                    // block instead of coercing arrays/objects to an integer.
-                    continue;
-                }
-            }
-            // endOffset is exclusive: an eyebrow closing exactly where the H1
-            // opens has end == h1Offset and still sits entirely before it.
-            $end = $document->endOffset($index);
-            if ($end === null || $end > $h1Offset) {
-                continue;
-            }
-            $text = self::readingText($document->innerHtml($index));
-            if ($text === '' || mb_strlen($text, 'UTF-8') > 90) {
-                continue;
-            }
-            $style = $attrs['style'] ?? [];
-            $typography = is_array($style) && is_array($style['typography'] ?? null)
-                ? $style['typography']
-                : [];
-            $fontSize = $attrs['fontSize'] ?? '';
-            $textTransform = $typography['textTransform'] ?? '';
-            $letterSpacing = $typography['letterSpacing'] ?? '';
-            if (!is_string($fontSize)
-                || !is_string($textTransform)
-                || !is_string($letterSpacing)
-            ) {
-                // Generated array/object leaves are not eyebrow evidence. In
-                // particular, never coerce them through `(string)`: embedding
-                // error handlers may promote PHP's conversion warning into an
-                // exception and abort the paid-for build.
-                continue;
-            }
-            $signals = $name === 'heading'
-                || in_array($fontSize, ['caption', 'small', 'x-small', 'tiny'], true)
-                || strtolower($textTransform) === 'uppercase'
-                || trim($letterSpacing) !== '';
-            if (!$signals) {
-                continue;
-            }
-            $offset = $document->openingOffset($index);
-            $spans[] = [
-                'index' => $index,
-                'start' => $offset,
-                'end' => $end,
-                'text' => self::visibleText($document->innerHtml($index)),
-                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
-            ];
-        }
-        if ($spans === []) {
-            return $markup;
-        }
-
-        $safe = self::heroNestedRemovalSafety($document, $spans);
-        $safeSpans = array_values(array_filter(
-            $spans,
-            static fn (array $span): bool => $safe[$span['index']],
-        ));
-        $unsafeSpans = self::outermostRemovalSpans(array_values(array_filter(
-            $spans,
-            static fn (array $span): bool => !$safe[$span['index']],
-        )));
-        // Nested safe candidates are one loss boundary. Removing the inner
-        // block first would invalidate the enclosing source length and can eat
-        // the H1 or root closer that follows it.
-        $outermostSafe = self::outermostRemovalSpans($safeSpans);
-        $candidateSet = array_fill_keys(array_column($safeSpans, 'index'), true);
-        $wrapperMemo = [];
-        $removals = [];
-        $warningRows = [];
-        foreach ($outermostSafe as $span) {
-            $index = $span['index'];
-            $wrapper = self::outermostDedicatedRemovalWrapper(
-                $document,
-                $index,
-                $candidateSet,
-                $wrapperMemo,
-            );
-            $removalIndex = $wrapper ?? $index;
-            $removalEnd = $document->endOffset($removalIndex);
-            if ($removalEnd === null) {
-                // Candidate endpoints were already checked. This guard keeps
-                // an unexpectedly unsafe wrapper from widening the deletion.
-                $removalIndex = $index;
-                $removalEnd = $span['end'];
-            }
-            $removals[] = [
-                'index' => $removalIndex,
-                'start' => $document->openingOffset($removalIndex),
-                'end' => $removalEnd,
-            ];
-
-            $disposition = 'the generated eyebrow copy was removed at its complete block boundary so the hero '
-                . 'opens on its level-1 headline';
-            if ($wrapper !== null) {
-                $disposition .= '; its now-empty dedicated wrapper '
-                    . self::blockPath($document, $wrapper)
-                    . ' was removed in the same transaction without touching sibling blocks';
-            }
-            $warningRows[] = [
-                'start' => $span['start'],
-                'warning' => "file='theme/parts/{$part}.html'; block='"
-                    . self::blockPath($document, $index)
-                    . "'; authored=" . Warnings::value($span['text'])
-                    . "; delivered=removed; disposition={$disposition}",
-            ];
-        }
-        $removals = self::outermostRemovalSpans($removals);
-        $out = self::removeSpans($markup, $removals);
-        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
-        foreach ($unsafeSpans as $span) {
-            $index = $span['index'];
-            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
-            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
-            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
-            $warningRows[] = [
-                'start' => $span['start'],
-                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
-                    . self::heroRemovalWarningValue($authored)
-                    . '; delivered=' . self::heroRemovalWarningValue($authored)
-                    . '; disposition=the eyebrow candidate boundary owns raw/non-block payload or a non-target '
-                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
-                    . 'and the residual pre-headline copy was queued for later repair',
-            ];
-        }
-        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
-        array_push($warnings, ...array_column($warningRows, 'warning'));
-        return $out;
-    }
-
-    /**
-     * Move one unambiguous support paragraph behind the hero H1.
-     *
-     * The reviewed hero opens on its headline, but models sometimes place the
-     * sole plain standfirst immediately before it. When that paragraph and H1
-     * are adjacent siblings, no other rendered copy precedes the H1, and no
-     * second paragraph competes for the support role, moving the complete
-     * paragraph block immediately after the H1 preserves every authored byte
-     * and meaning while restoring the required reading order. Ambiguous
-     * pre-headline paragraphs stay byte-for-byte intact and are warned for a
-     * later repair pass.
-     *
-     * @param list<array<string,mixed>> $repairs
-     * @param list<string>              $warnings
-     */
-    public static function headlineFirstHeroCopy(
-        string $markup,
-        string $part,
-        array &$repairs = [],
-        array &$warnings = [],
-    ): string {
-        $document = BlockMarkup::parse($markup);
-        $h1 = null;
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) === 'heading'
-                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
-            ) {
-                $h1 = $index;
-                break;
-            }
-        }
-        if ($h1 === null || $document->endOffset($h1) === null) {
-            return $markup;
-        }
-
-        $h1Offset = $document->openingOffset($h1);
-        $paragraphs = [];
-        $preHeadlineCopy = [];
-        foreach ($document->indices() as $index) {
-            $name = $document->name($index);
-            if (!in_array($name, ['heading', 'paragraph'], true)) {
-                continue;
-            }
-            $end = $document->endOffset($index);
-            if ($end === null || $end > $h1Offset || self::visibleText($document->innerHtml($index)) === '') {
-                continue;
-            }
-            $preHeadlineCopy[] = $index;
-            if ($name === 'paragraph') {
-                $paragraphs[] = $index;
-            }
-        }
-        if ($paragraphs === []) {
-            return $markup;
-        }
-
-        $candidate = count($paragraphs) === 1 ? $paragraphs[0] : null;
-        $parent = $candidate === null ? null : $document->parent($candidate);
-        $h1Parent = $document->parent($h1);
-        $siblings = $parent === null
-            ? array_values(array_filter(
-                $document->indices(),
-                static fn (int $index): bool => $document->parent($index) === null,
-            ))
-            : $document->children($parent);
-        $candidatePosition = $candidate === null ? false : array_search($candidate, $siblings, true);
-        $h1Position = array_search($h1, $siblings, true);
-        $paragraphSiblingCount = count(array_filter(
-            $siblings,
-            static fn (int $index): bool => $document->name($index) === 'paragraph',
-        ));
-        $candidateOffset = $candidate === null ? null : $document->openingOffset($candidate);
-        $candidateEnd = $candidate === null ? null : $document->endOffset($candidate);
-        $betweenIsWhitespace = is_int($candidateEnd)
-            && trim(substr($markup, $candidateEnd, $h1Offset - $candidateEnd)) === '';
-        $parentPrefixStart = $h1Parent === null
-            ? 0
-            : $document->openingOffset($h1Parent) + $document->openingLength($h1Parent);
-        $parentPrefix = substr($markup, $parentPrefixStart, $h1Offset - $parentPrefixStart);
-        if (is_int($candidateOffset)
-            && is_int($candidateEnd)
-            && $candidateOffset >= $parentPrefixStart
-            && $candidateEnd <= $h1Offset
-        ) {
-            $parentPrefix = substr_replace(
-                $parentPrefix,
-                '',
-                $candidateOffset - $parentPrefixStart,
-                $candidateEnd - $candidateOffset,
-            );
-        }
-        $parentPrefixHasNoOtherCopy = self::visibleText($parentPrefix) === '';
-        $safeMove = $candidate !== null
-            && $parent === $h1Parent
-            && count($preHeadlineCopy) === 1
-            && $paragraphSiblingCount === 1
-            && is_int($candidatePosition)
-            && is_int($h1Position)
-            && $candidatePosition + 1 === $h1Position
-            && $betweenIsWhitespace
-            && $parentPrefixHasNoOtherCopy;
-
-        if (!$safeMove) {
-            foreach ($paragraphs as $paragraph) {
-                $warnings[] = "file='theme/parts/{$part}.html'; block='"
-                    . self::blockPath($document, $paragraph)
-                    . "'; authored=" . Warnings::value(self::visibleText($document->innerHtml($paragraph)))
-                    . '; delivered="original pre-headline position"; disposition=the paragraph could not be '
-                    . 'identified as the sole adjacent support line without risking authored reading order, so its '
-                    . 'block bytes were retained and the headline-first defect was queued for later repair';
-            }
-            return $markup;
-        }
-
-        $candidateEnd = (int) $candidateEnd;
-        $h1End = (int) $document->endOffset($h1);
-        $candidateOffset = (int) $candidateOffset;
-        $candidateLength = $candidateEnd - $candidateOffset;
-        $paragraphMarkup = substr($markup, $candidateOffset, $candidateLength);
-        $withoutParagraph = substr_replace($markup, '', $candidateOffset, $candidateLength);
-        $out = substr_replace(
-            $withoutParagraph,
-            $paragraphMarkup,
-            $h1End - $candidateLength,
-            0,
-        );
-        $repairs[] = [
-            'code' => 'hero-support-moved-after-headline',
-            'part' => $part,
-            'block' => self::blockPath($document, $candidate),
-            'authored' => self::visibleText($document->innerHtml($candidate)) . ' before the H1',
-            'delivered' => 'the identical paragraph block immediately after the H1',
-            'disposition' => 'repaired',
-        ];
-        return $out;
     }
 
     /** Return a valid generated hero heading level without scalar coercion. */
@@ -3574,7 +3079,6 @@ final class GeneratedMarkup
             $shell,
         ) === 1;
     }
-
     private static function blockPath(BlockMarkup $document, int $index): string
     {
         $segments = [];
@@ -3602,20 +3106,6 @@ final class GeneratedMarkup
             }
         }
         return implode(' > ', $segments);
-    }
-
-    /** Whether a group's descendants are text wrappers only (groups/paragraphs). */
-    private static function wrapsOnlyText(BlockMarkup $document, int $group): bool
-    {
-        $pending = $document->children($group);
-        while ($pending !== []) {
-            $child = array_pop($pending);
-            if (!in_array($document->name($child), ['group', 'paragraph'], true)) {
-                return false;
-            }
-            array_push($pending, ...$document->children($child));
-        }
-        return true;
     }
 
     /**

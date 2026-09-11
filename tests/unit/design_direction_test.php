@@ -104,6 +104,17 @@ test('design direction preserves familiar fonts and a complementary cross-regist
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('formatted direction treats item patterns as preferences and expansive spacing without quotas', function () {
+    $text = DesignDirectionStep::format(array_replace(designdir_direction(), [
+        'item_pattern' => 'rule-row', 'density' => 'expansive', 'rhythm' => 'stacked',
+    ]));
+    assert_contains('preferred idiom', $text);
+    assert_contains('Each section may choose another supported idiom', $text);
+    assert_contains('spacious sequences', $text);
+    assert_true(!str_contains($text, 'keep the rest standard'));
+    assert_true(!str_contains($text, 'every allowed spacious pause'));
+});
+
 /** @param list<string> $rows @return list<string> */
 function designdir_card_rows(array $rows): array
 {
@@ -119,6 +130,7 @@ test('design-direction retains illustrated art direction without declaring it un
     $llm->queueJson(designdir_judge());
     $authored = designdir_direction();
     $authored['description'] = 'Figurative botanical illustrations include delicate filigree within the generated imagery.';
+    $authored['hero_blueprint'] = HeroBlueprint::defaultFor('authored');
     $authored['device'] = 'none';
     $llm->queueJson(['direction' => $authored]);
 
@@ -166,7 +178,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq(TypeTreatment::DEFAULT, $written['type_treatment']);
     assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
-    assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
+    assert_eq(HeroComposition::AUTHORED, $written['hero_blueprint']['recipe']);
     assert_contains('Seed ', $written['concept_seed']);
     assert_true(!array_key_exists('hero_composition', $written), 'old prose field is gone');
 
@@ -195,9 +207,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $assigned = $written['hero_blueprint']['recipe'];
     assert_contains($assigned, $llm->calls[2]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
-        if ($other !== $assigned) {
-            assert_true(!str_contains($llm->calls[2]['prompt'], $other), "{$other} recipe does not leak");
-        }
+        assert_true(!str_contains($llm->calls[2]['prompt'], $other), "{$other} does not anchor the default author");
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -677,7 +687,7 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
 
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'hero_composition' => '', 'hero_blueprint_shape' => '{}', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',
     ]);
@@ -2805,7 +2815,7 @@ test('the expansion prompt asks for a tension and a subject anchor and states th
     $renderer = new PromptRenderer(repo_path('prompts'));
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'hero_composition' => '', 'hero_blueprint_shape' => '{}', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
         'color_economy' => 'monochrome',
     ]);

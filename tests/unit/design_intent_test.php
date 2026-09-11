@@ -147,6 +147,23 @@ test('all conflicting seeds fall back to the requested style without another mod
     assert_contains('requested style', implode("\n", $project->readJson('warnings.json')['design-direction']));
 });
 
+test('default design model authors hero composition without a fixed recipe', function () {
+    [$project, $llm] = make_designdir_fixture();
+    $project->writeJson('siteSpec.json', ['name' => 'Coaching', 'visual_vibe' => '']);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $direction = designdir_direction();
+    $direction['hero_blueprint'] = array_replace(HeroBlueprint::defaultFor('authored'), [
+        'composition' => 'A large statement above two square images in unequal columns.',
+    ]);
+    $llm->queueJson(['direction' => $direction]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq($direction['hero_blueprint'], $project->readJson('designDirection.json')['hero_blueprint']);
+    assert_contains('Choose the hero composition', $llm->calls[2]['prompt']);
+    assert_true(!str_contains($llm->calls[2]['prompt'], 'layered-poster'));
+    assert_true(!str_contains($llm->calls[2]['prompt'], 'cinematic-safe-zone'));
+});
+
 test('seed judge only sees compatible styles and keeps distinct interpretations of one style', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     try {
@@ -173,6 +190,15 @@ test('seed judge only sees compatible styles and keeps distinct interpretations 
     } finally {
         remove_tree($tmp);
     }
+});
+
+test('homepage creative emphasis has no section or image quota', function () {
+    $reflection = new ReflectionClass(Automattic\SiteBuild\Steps\PagePlanStep::class);
+    $emphasis = $reflection->getConstant('FRONT_EMPHASIS');
+    assert_true(!str_contains($emphasis, 'at least 3'));
+    assert_true(!str_contains($emphasis, '5 to 8'));
+    assert_true(!str_contains($emphasis, 'image-rich'));
+    assert_contains('content', $emphasis);
 });
 
 test('an explicit style survives the business that follows it, and a refusal does not', function () {

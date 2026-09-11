@@ -16,6 +16,7 @@ use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\PageScope;
+use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\ShapeMarkup;
@@ -72,6 +73,8 @@ use Automattic\SiteBuild\Warnings;
  *           paints below a marked section; `none` removes the stylesheet.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
+ *         - ships the trusted heading-fit script, which fits overflowing
+ *           authored-hero words to their real column without changing breaks.
  */
 final class FinalizeThemeStep implements Step
 {
@@ -103,6 +106,7 @@ final class FinalizeThemeStep implements Step
             ],
             writes: [
                 'theme/functions.php',
+                'theme/assets/heading-fit.js',
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
@@ -124,6 +128,10 @@ final class FinalizeThemeStep implements Step
         // theme.json is fatal (AGENTS.md "fix, degrade, warn" puts a corrupt required artifact in
         // the fatal list), and discovering that halfway through would leave the
         // theme half-written — a pruned kit with no functions.php naming it.
+        $headingFit = @file_get_contents(Package::root() . '/assets/heading-fit.js');
+        if ($headingFit === false) {
+            throw new \RuntimeException('Missing or unreadable trusted heading-fit asset');
+        }
         $shape = DesignDirectionStep::shapeFor($project);
         $imageTreatment = DesignDirectionStep::imageTreatmentFor($project);
         $imageCrop = DesignDirectionStep::imageCropFor($project);
@@ -224,6 +232,7 @@ final class FinalizeThemeStep implements Step
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
+        $project->writeText('theme/assets/heading-fit.js', $headingFit);
         $project->writeText(
             'theme/functions.php',
             self::functionsPhp(
@@ -759,6 +768,8 @@ final class FinalizeThemeStep implements Step
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
                 wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}{$logoMarkStyle}
+                // Preserve whole words using actual rendered hero-column measurements.
+                wp_enqueue_script('{$slug}-heading-fit', get_theme_file_uri('assets/heading-fit.js'), array(), \$ver, true);
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.

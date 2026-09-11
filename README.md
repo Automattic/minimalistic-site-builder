@@ -62,7 +62,7 @@ php bin/build.php "A cozy neighborhood bakery" --html-first     # author an HTML
 php bin/build.php "A cozy neighborhood bakery" --blocks-first   # author block markup directly (the default)
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
-php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
+php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=foreground-image --max-hero-images=1
 ```
 
 `--with-images` generates every homepage image (including shared header/footer
@@ -78,15 +78,21 @@ fully imaged build. An image whose source parts the plan does not name is genera
 rather than deferred, and recorded in `warnings.json`. This limits which images
 generate, rather than imposing a numeric ceiling on homepage imagery.
 
-Hero composition is selected from a reviewed code-owned catalog after filtering
-the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
-`--max-hero-images`, and `--hero-copy-capacity`.
+The default blocks graph uses concept-authored hero compositions on both the
+home page and inner pages. Authors choose framing, hierarchy, image placement
+and responsive arrangement, with at least one image requested per opening.
+Shared `design-*` class hooks receive scoped CSS based on all delivered pages
+and chrome; no alternate graph or experiment flag is needed.
+
+Explicit hero recipe assignments, or media/copy limits that require a reviewed
+recipe, still use the catalog. Optional caller constraints are `--hero-canvas`,
+`--hero-media-modes`, `--max-hero-images`, and `--hero-copy-capacity`.
 `--use-jetpack-placeholders` is for hosts that own a form backend: a section
 that needs a form reserves its place with a `JP_FORM` placeholder block the
 host substitutes after the build, instead of the default of emitting no form
 markup at all. `--writing-direction=ltr|rtl`
 is an explicit caller override; otherwise the site language determines logical
-direction. The selected recipe and normalized blueprint are persisted in
+direction. The authoring mode or selected recipe and normalized blueprint are persisted in
 `designDirection.json`, while `aboveFold.json` records the two-phase shared
 header/hero/page-opening contract.
 
