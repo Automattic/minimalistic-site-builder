@@ -146,11 +146,14 @@ final class GeminiImage
         if ($size === '1K') {
             return $size;
         }
+        if (isset($spec['image_slot'])) {
+            return $spec['image_slot'] === 'card' ? '1K' : $size;
+        }
         $context = (string) ($spec['pageContext'] ?? '');
         $filename = basename((string) ($spec['filename'] ?? ''));
         $hero = preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1
             || preg_match('/\bhero\b/iu', $context) === 1;
-        $wide = preg_match('/\b(?:full[- ](?:bleed|frame|width)|viewport|backdrop|background)\b/iu', $context) === 1;
+        $wide = ImageCrop::fullFrameSlot($ratio, $context);
         if ($hero || $wide) {
             return $size;
         }

@@ -220,7 +220,7 @@ final class GenerateImagesStep implements Step
             return; // collect-images never ran or wrote nothing
         }
 
-        $specs = $project->readJson('images.json');
+        $specs = \Automattic\SiteBuild\ImageSlot::annotate($project, $project->readJson('images.json'));
         // Keep the image kind on each row for generation, repair, and request logs.
         $imageKind = DesignDirectionStep::imageKindFor($project);
         // A ui-mockup interface follows the page ground and accent.
@@ -679,6 +679,7 @@ final class GenerateImagesStep implements Step
             $imageCrop,
             (string) ($spec['aspectRatio'] ?? 'landscape'),
             (string) ($spec['pageContext'] ?? ''),
+            $spec['image_slot'] ?? null,
         );
         // A .png placeholder is a transparent-background asset: request PNG
         // bytes, prompt for a flat white background (the image model cannot render
