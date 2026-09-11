@@ -79,3 +79,40 @@ test('the default early stage permits fast QA and its failed replacement before 
         remove_tree($storage);
     }
 });
+
+test('serial apply failure retains paid raw results and publishes their attempts in finally', function () {
+    [$project, $tmp] = queue_image_fixture(2);
+    $storage = early_image_storage();
+    try {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'path' => '/', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero']]]]]);
+        $project->writeJson('plugin/pages.json', ['pages' => [['slug' => 'home']]]);
+        $project->writeText('plugin/pages/home.html', '<img src="theme:./assets/img-0.jpg"><img src="theme:./assets/img-1.jpg">');
+        seed_test_design_direction($project);
+        $client = new LedgerOverlapImageClient();
+        $client->inner->delays = ['img-0.jpg' => 0.003, 'img-1.jpg' => 0.03];
+        $build = new EarlyImageBuild($project, $client, ['assemble-pages'], false, $storage);
+        $build->afterStep('assemble-pages');
+        $project->writeText('theme/assets', 'This file prevents the asset directory.');
+        $error = assert_throws(function () use ($build, $project): void {
+            try {
+                (new GenerateImagesStep($build->applicationClient()))->run($project);
+            } finally {
+                $build->finishRaw(publish: true);
+            }
+        });
+        assert_contains('assets directory', $error->getMessage());
+        assert_eq(2, $client->imageUsageTotals()['attempts']);
+        assert_eq(['img-0.jpg' => 1, 'img-1.jpg' => 1], $client->inner->attempts);
+        assert_eq(2, count(array_filter(explode("\n", $project->readText('logs/images/attempts.jsonl')))));
+        assert_eq(2, count(json_decode(file_get_contents($build->directory() . '/results.json'), true)['results']));
+        assert_true(!$project->exists('images.generated.json'));
+        assert_eq(null, ImageTransportScheduler::current());
+    } finally {
+        ImageTransportScheduler::current()?->cancel();
+        ImageLogger::setDir(null);
+        remove_tree($tmp);
+        remove_tree($storage);
+    }
+});

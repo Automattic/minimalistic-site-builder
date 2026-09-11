@@ -225,6 +225,7 @@ final class WpcomImageClient implements ImageClient, ImageUsageReporting, Cooper
             $classify,
             self::MAX_CONCURRENCY,
             lane: 'images',
+            onCancel: $this->cancellationRecorder($bodies, $specs, $logDirectory),
         );
     }
 
@@ -287,6 +288,16 @@ final class WpcomImageClient implements ImageClient, ImageUsageReporting, Cooper
             $this->recordAttempt($ch, $body, (string) $raw, $failure, null, $completed, $logDirectory);
             curl_close($ch);
         }
+    }
+
+    /** Record an interrupted provider attempt without asset delivery. */
+    private function cancellationRecorder(array $bodies, array $specs, ?string $directory): \Closure
+    {
+        return function (string|int $index, \CurlHandle $handle) use ($bodies, $specs, $directory): void {
+            $this->recordAttempt($handle, $bodies[$index], (string) curl_multi_getcontent($handle),
+                'Raw image transfer stopped before completion', (string) ($specs[$index]['asset'] ?? $index),
+                microtime(true), $directory);
+        };
     }
 
     /** Record transfer time and provider usage before the handle closes. */

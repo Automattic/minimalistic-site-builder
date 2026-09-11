@@ -266,3 +266,42 @@ test('unchanged manifest polls retain verified metadata and apply still checks f
         }
     });
 });
+
+test('a cancelled provider transfer retains one attempt in its captured ledger without delivery', function () {
+    $directory = early_image_storage();
+    $other = early_image_storage();
+    $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+    assert_true(is_resource($server));
+    try {
+        $client = new Automattic\SiteBuild\WpcomImageClient('unused-test-token');
+        $factory = new ReflectionMethod($client, 'cancellationRecorder');
+        $cancel = $factory->invoke($client, [0 => []], [0 => ['asset' => 'hero.jpg']], $directory);
+        $url = 'http://' . stream_socket_get_name($server, false);
+        $scheduler = new ImageTransportScheduler();
+        $delivered = false;
+        $scheduler->start(function () use ($url, $cancel, &$delivered): void {
+            (new Automattic\SiteBuild\CurlMultiPool())->run([0 => []], function () use ($url): CurlHandle {
+                $handle = curl_init($url);
+                curl_setopt($handle, CURLOPT_RETURNTRANSFER, true);
+                return $handle;
+            }, function () use (&$delivered): array { $delivered = true; return ['ok' => true]; }, 1,
+                lane: 'images', onCancel: $cancel);
+        });
+        ImageLogger::setDir($other);
+        $scheduler->cancel();
+        $scheduler->cancel();
+        assert_eq(false, $delivered);
+        assert_eq(1, $client->imageUsageTotals()['attempts']);
+        assert_eq(1, $client->imageUsageTotals()['failed_attempts']);
+        assert_true(!is_file($other . '/attempts.jsonl'));
+        $record = json_decode(trim(file_get_contents($directory . '/attempts.jsonl')), true);
+        assert_eq('hero.jpg', $record['asset']);
+        assert_contains('stopped before completion', $record['error']);
+    } finally {
+        ImageTransportScheduler::current()?->cancel();
+        ImageLogger::setDir(null);
+        fclose($server);
+        remove_tree($directory);
+        remove_tree($other);
+    }
+});
