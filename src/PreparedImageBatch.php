@@ -72,6 +72,13 @@ final class PreparedImageBatch
     public static function finalMarkup(Project $project): array
     {
         $queue = [];
+        $patterns = [];
+        foreach (glob($project->themePath('patterns/*.php')) ?: [] as $file) {
+            $relative = 'theme/patterns/' . basename($file);
+            if (preg_match('/\bSlug:\s*([^\s*]+)/', $project->readText($relative), $match) === 1) {
+                $patterns[$match[1]] = $relative;
+            }
+        }
         foreach (glob($project->themePath('templates/*.html')) ?: [] as $file) {
             $queue[] = 'theme/templates/' . basename($file);
         }
@@ -89,8 +96,21 @@ final class PreparedImageBatch
                 continue;
             }
             $markup[$file] = $project->readText($file);
+            if (str_starts_with($file, 'theme/patterns/')) {
+                $markup[$file] = preg_replace(
+                    '~<\?php\s+echo\s+esc_url\(\s*get_theme_file_uri\(\s*[\'"]assets/([a-zA-Z0-9._-]+)[\'"]\s*\)\s*\);\s*\?>~',
+                    'theme:./assets/$1', $markup[$file],
+                ) ?? $markup[$file];
+            }
             $document = BlockMarkup::parse($markup[$file]);
             foreach ($document->indices() as $block) {
+                if ($document->name($block) === 'pattern') {
+                    $slug = (string) (($document->attrs($block) ?? [])['slug'] ?? '');
+                    if (isset($patterns[$slug]) && !isset($markup[$patterns[$slug]])) {
+                        $queue[] = $patterns[$slug];
+                    }
+                    continue;
+                }
                 if ($document->name($block) !== 'template-part') {
                     continue;
                 }
