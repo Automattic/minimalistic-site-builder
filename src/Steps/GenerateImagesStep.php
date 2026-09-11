@@ -13,6 +13,7 @@ use Automattic\SiteBuild\InitialImagePolicy;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
+use Automattic\SiteBuild\ImageRequestReuse;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
@@ -325,12 +326,17 @@ final class GenerateImagesStep implements Step
                 $project->addWarnings($this->id(), $gradeNotes);
             }
 
-            // Map original images.json indices to generation specs (order kept).
-            $indices = array_keys($pending);
-            $batchSpecs = array_map(
-                fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop),
-                array_values($pending)
-            );
+            $requests = [];
+            foreach ($pending as $i => $spec) {
+                $requests[$i] = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
+            }
+            $aliases = ImageRequestReuse::aliases($pending, $requests);
+            $representatives = array_diff_key($pending, $aliases);
+            $indices = array_keys($representatives);
+            foreach ($indices as $i) {
+                unset($specs[$i]['reused_from']);
+            }
+            $batchSpecs = array_values(array_intersect_key($requests, $representatives));
 
             $repairs = []; // original index => the filtered failure's error
 
@@ -388,13 +394,14 @@ final class GenerateImagesStep implements Step
                 $this->inspectDelivered(
                     $project,
                     $specs,
-                    array_keys($pending),
+                    $indices,
                     $siteContext,
                     $imageGrade,
                     $imageCrop,
                 );
                 $project->writeJsonAtomic('images.json', $specs);
             }
+            $this->deliverReused($project, $specs, $aliases, $resolved);
         }
 
         // A failed asset reference is dead UI. Remove only the safe media block
@@ -410,6 +417,44 @@ final class GenerateImagesStep implements Step
 
         $this->shipPluginImages($project);
         $this->markComplete($project);
+    }
+
+    /** Copy final representative bytes after its repair and QA steps finish. */
+    private function deliverReused(Project $project, array &$specs, array $aliases, array &$resolved): void
+    {
+        $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json') : [];
+        foreach ($aliases as $i => $representative) {
+            $source = $specs[$representative];
+            $filename = (string) $specs[$i]['filename'];
+            $sourceFilename = (string) $source['filename'];
+            if (($source['status'] ?? '') !== 'completed') {
+                $error = (string) ($source['error'] ?? 'equivalent image request failed');
+                $specs[$i]['status'] = 'failed';
+                $specs[$i]['error'] = $error;
+                unset($specs[$i]['reused_from']);
+                $this->warnFailure($project, $specs[$i], $i, GeminiImage::mimeForFilename($filename), $error);
+                continue;
+            }
+            $project->writeText('theme/assets/' . $filename, $project->readText('theme/assets/' . $sourceFilename));
+            $specs[$i]['status'] = 'completed';
+            $specs[$i]['url'] = $this->servedUrl($project, $filename);
+            $specs[$i]['reused_from'] = $sourceFilename;
+            unset($specs[$i]['error'], $specs[$i]['qa']);
+            if (isset($source['qa'])) {
+                $specs[$i]['qa'] = $source['qa'];
+            }
+            if (isset($specs[$i]['role']) && !isset($source['role'])) {
+                unset($specs[$i]['role']);
+            }
+            $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+            foreach ($warnings[$this->id()] ?? [] as $warning) {
+                if (str_contains($warning, $sourceFilename)) {
+                    $project->addWarnings($this->id(), [str_replace($sourceFilename, $filename, $warning)]);
+                }
+            }
+            Narrator::write("    reused {$sourceFilename} as {$filename}\n");
+            $project->writeJsonAtomic('images.json', $specs);
+        }
     }
 
     /**

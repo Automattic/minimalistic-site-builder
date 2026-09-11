@@ -537,6 +537,8 @@ if ($withImages) {
         };
     }
     $report->setImages($generated, $failed, count($specs), $placeholders);
+    $report->setImageReuse(count(array_filter($specs, static fn (array $spec): bool =>
+        ($spec['status'] ?? '') === 'completed' && isset($spec['reused_from']))));
 }
 
 if ($project->exists('patterns.json')) {
