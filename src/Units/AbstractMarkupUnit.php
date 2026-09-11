@@ -160,7 +160,9 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         return [
             'site_context' => rtrim($this->renderer->render(self::SITE_CONTEXT_TEMPLATE, [
                 'site_spec'        => $this->inputJson($input, 'site_spec'),
-                'theme_json'       => $this->inputJson($input, 'theme_json'),
+                'theme_json'       => \Automattic\SiteBuild\MarkupContext::theme(
+                    $this->inputArrayOrJson($input, 'theme_json'),
+                ),
                 'design_direction' => $this->inputString($input, 'design_direction'),
             ]), "\r\n"),
             'language' => $this->inputString($input, 'language'),
