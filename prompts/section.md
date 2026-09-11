@@ -68,7 +68,7 @@ Visual richness — build atmosphere with tokens, not photo clutter and not `<st
 
 For a prominent contained image or image-led feature band that is NOT an image card, add `"className":"feature-media"` to its `wp:image` and wrapper. The build maps that hook to the **Image crop** fact (including 21:9 for `panoramic`). Do not put it on a full-bleed hero/Cover background: viewport-spanning media keeps the hero blueprint's wide crop.
 
-Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:
+Design classes — the shared CSS step implements authored `design-*` hooks from this section alongside ALL other pages and shared chrome. Use semantic names to express the intended composition beyond block attributes; NEVER add `<style>` tags. These existing utilities are also available when their behavior fits, not a menu you must choose from:
 - `overlap-up` — ONLY on an INNER group/columns block: pulls it upward with a negative top margin so it overlaps the element above. NEVER put it on the section's top-level root; the builder's page-level rhythm pass owns that root's margin-top, which must retain its margin reset.
 - `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
 - `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.

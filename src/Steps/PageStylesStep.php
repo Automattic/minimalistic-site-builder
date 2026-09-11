@@ -24,8 +24,7 @@ use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TransformArtifacts;
 
 /**
- * Step: merge HTML-first design CSS, with the LLM utility generator as the
- * legacy path.
+ * Step: author scoped blocks-path design CSS or merge HTML-first design CSS.
  *
  * In explicit HTML-first composition mode, this step deterministically merges
  * optional scrubbed before-author transformer support CSS, scrubbed
@@ -40,19 +39,21 @@ use Automattic\SiteBuild\TransformArtifacts;
  * Existing scaffold CSS and all source artifacts stay untouched. This path
  * never asks the model.
  *
- * In legacy composition mode, the step reads designDirection.json +
+ * In blocks composition mode, the step reads designDirection.json +
  * theme/theme.json + the final section markup (theme/parts/*.html and
- * theme/templates/*.html, after fix-blocks), then appends a small plain-CSS
- * utility appendix to theme/style.css.
+ * theme/templates/*.html and plugin/pages/*.html, after fix-blocks), then
+ * appends a scoped plain-CSS design appendix to theme/style.css.
  *
- * prompts/section.md documents a fixed vocabulary of utility classes (CLASSES
- * below) that sections MAY reference via "className" — structural devices
- * like overlap, masonry, and sticky sidebars that block attributes alone
- * cannot express.
+ * Shared authoring context offers semantic design-* class hooks alongside
+ * three optional utility classes (CLASSES below). The model sees all delivered
+ * pages and shared parts, so responsive compositions form one visual family.
+ * Opening intent is passed separately: the front blueprint never becomes an
+ * inner-page template. Its optional source-order check is advisory and leaves
+ * delivered markup unchanged, even when it cannot verify the named targets.
  * Class names on group/columns blocks survive the block-fixer's re-serialization,
  * and style.css is never touched by the fixer, so this pairing is the one
  * `<style>`-free channel for real CSS. This step runs after fix-blocks, scans
- * the final markup for which documented classes actually appear, and asks the
+ * the final markup for which supported classes actually appear, and asks the
  * model to implement exactly those, tuned to the design direction.
  *
  * The model's CSS is validated (validate()) before writing: every selector must
@@ -191,10 +192,9 @@ CSS;
 }
 CSS;
 
-    /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
-    private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
     private const MARKER = '/* Layout utilities — generated per-design by the page-styles step. */';
+    private const END_MARKER = '/* End generated page-styles appendix. */';
     private const DETERMINISTIC_STYLE_MARKER =
         '/* Wrap at spaces only — never split a word mid-token. */';
     private const VERTICAL_RHYTHM_MARKER =
@@ -315,11 +315,11 @@ CSS;
             'designDirection.json',
             'theme/parts/*',
             'theme/templates/*',
+            'plugin/pages/*',
         ];
         if ($this->htmlFirst) {
             $reads[] = self::PAGE_ARTIFACT_MAP;
             $reads[] = 'design/*';
-            $reads[] = 'plugin/pages/*';
         }
 
         return new StepDeclaration(
@@ -345,10 +345,12 @@ CSS;
             return;
         }
 
+        $markup = self::deliveredMarkup($project);
         $rendered = $this->renderer->render('page-styles.md', [
             'design_direction' => DesignDirectionStep::readFor($project),
             'theme_json'       => $project->readText('theme/theme.json'),
             'used_classes'     => self::classList($used),
+            'delivered_markup' => $markup,
         ]);
         $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
@@ -357,12 +359,11 @@ CSS;
 
         $problems = self::validate($css);
         if ($problems !== []) {
-            // Braces and the size budget describe the document, not one rule.
+            // Unbalanced braces describe the document, not one rule.
             // They must reject before any local repair could disguise them.
             $documentProblems = array_values(array_filter(
                 $problems,
-                static fn (string $problem): bool => $problem === 'unbalanced braces'
-                    || $problem === 'more than ' . self::MAX_LINES . ' lines',
+                static fn (string $problem): bool => $problem === 'unbalanced braces',
             ));
             $salvaged = $css;
             $droppedRules = [];
@@ -409,10 +410,54 @@ CSS;
             self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
             $css = $salvaged;
         }
-        $style = rtrim(self::withoutDeterministicStyles($project->readText('theme/style.css')))
-            . "\n\n" . self::MARKER . "\n" . rtrim($css);
+        $floor = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
+        $css = self::checkBlocksContrast($project, $css, $markup, $floor);
+        // Replace only our delimited appendix on resume; preserve later static
+        // or motion CSS rather than truncating everything after the marker.
+        $base = (string) preg_replace('~' . preg_quote(self::MARKER, '~') . '.*?'
+            . preg_quote(self::END_MARKER, '~') . '\s*~s', '', $project->readText('theme/style.css'));
+        // Blocks mode owns only this exact wrap rule, not an HTML-first tail
+        // or later appendices. Removing the marker-to-EOF would lose siblings.
+        $base = str_replace(self::WORD_WRAP_CSS, '', $base);
+        $style = rtrim($base)
+            . "\n\n" . self::MARKER . "\n" . rtrim($css)
+            . "\n" . self::END_MARKER;
         $project->writeText('theme/style.css', self::withWordWrapPolicy($style));
         echo '  styled: ' . implode(', ', $used) . "\n";
+    }
+
+    /** Check authored color changes, not harmless layout-only selectors. */
+    private static function checkBlocksContrast(Project $project, string $css, string $markup, float $floor): string
+    {
+        $colorSelectors = [];
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            if (!in_array($declaration['property'], ['color', 'background', 'background-color'], true)) {
+                continue;
+            }
+            $error = null;
+            foreach (self::splitSelectorList($declaration['context'], $error) ?? [] as $selector) {
+                $colorSelectors[trim($selector)] = true;
+            }
+        }
+        if ($colorSelectors === []) {
+            return $css;
+        }
+        // Analysis-only definitions resolve WordPress palette variables. They
+        // never ship or compete with the theme's real global styles.
+        $variables = '';
+        foreach (ContrastFixStep::paletteMap($project->readJson('theme/theme.json')) as $slug => $hex) {
+            if (preg_match('/^[a-z0-9-]+$/D', $slug) === 1 && preg_match('/^#[0-9a-f]{6}$/iD', $hex) === 1) {
+                $variables .= '--wp--preset--color--' . $slug . ':' . $hex . ';';
+            }
+        }
+        $context = '.site-build-contrast-context{' . $variables . "}\n";
+        $analysis = $context . $css;
+        $findings = array_values(array_filter(
+            CssContrastCheck::check($analysis, $markup, $floor),
+            static fn (array $finding): bool => isset($colorSelectors[$finding['selector']]),
+        ));
+        $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $analysis, $markup, $findings, $floor);
+        return substr($adjusted, strlen($context));
     }
 
     private static function mergeDeterministicStyles(Project $project): void
@@ -514,7 +559,16 @@ CSS;
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
         $floor = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
-        $findings = CssContrastCheck::check($design, $markup, $floor);
+        // Shared chrome and section roots carry their surface as a WordPress
+        // preset class — `has-base-background-color` — whose value lives in
+        // theme.json, not in the design appendix. Handed only the appendix,
+        // the check could not resolve a background for those elements and
+        // every colour authored on a design hook came back
+        // `disposition=unverified`: the evidence build recorded four such
+        // rows, one of them the masthead's navigation link. The context below
+        // is analysis-only and is stripped before anything ships.
+        $context = self::contrastAnalysisContext($project);
+        $findings = CssContrastCheck::check($context . $design, $markup, $floor);
         // A resumed build hands this step the tail an earlier revision of the
         // code merged. Appending a second one leaves both in the cascade, and
         // a stale copy of a sibling page's rules is exactly the foreign CSS
@@ -527,13 +581,16 @@ CSS;
             self::withoutDeterministicStyles($currentStyle),
             $findings,
         );
-        $design = CssContrastAdjuster::apply(
-            $project,
-            'theme/style.css',
-            $design,
-            $markup,
-            $findings,
-            $floor,
+        $design = substr(
+            CssContrastAdjuster::apply(
+                $project,
+                'theme/style.css',
+                $context . $design,
+                $markup,
+                $findings,
+                $floor,
+            ),
+            strlen($context),
         );
         // Wrap policy first as the default. Generated text-wrap declarations
         // are stripped from every design selector, while heading wrap/hyphen
@@ -3849,6 +3906,41 @@ CSS;
     }
 
     /** Final theme and content-plugin markup in deterministic path order. */
+    /**
+     * Analysis-only CSS that gives the contrast check the palette context the
+     * delivered page has and the design appendix does not.
+     *
+     * Two halves. The custom properties resolve `var(--wp--preset--color--x)`
+     * in an authored declaration. The `has-…` rules resolve the preset class
+     * an element carries: WordPress paints those from theme.json at render
+     * time, so without them an element whose only background is
+     * `has-base-background-color` has no resolvable background at all, and
+     * every colour on it is reported unverified rather than checked.
+     *
+     * Never shipped: the caller strips exactly these bytes back off.
+     */
+    private static function contrastAnalysisContext(Project $project): string
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return '';
+        }
+        $variables = '';
+        $classes = '';
+        foreach (ContrastFixStep::paletteMap($project->readJson('theme/theme.json')) as $slug => $hex) {
+            if (preg_match('/^[a-z0-9-]+$/D', $slug) !== 1 || preg_match('/^#[0-9a-f]{6}$/iD', $hex) !== 1) {
+                continue;
+            }
+            $variables .= '--wp--preset--color--' . $slug . ':' . $hex . ';';
+            $classes .= '.has-' . $slug . '-background-color{background-color:' . $hex . ';}' . "\n"
+                . '.has-' . $slug . '-color{color:' . $hex . ';}' . "\n";
+        }
+        if ($variables === '') {
+            return '';
+        }
+
+        return ':root{' . $variables . "}\n" . $classes;
+    }
+
     private static function deliveredMarkup(Project $project): string
     {
         $files = $project->markupFiles();
@@ -4026,7 +4118,7 @@ CSS;
     }
 
     /**
-     * The documented classes present in a blob of markup, in vocabulary order.
+     * Utility classes followed by authored design hooks found in class attributes.
      * Pure — unit-testable.
      *
      * @return string[]
@@ -4039,13 +4131,22 @@ CSS;
                 $used[] = $class;
             }
         }
-        return $used;
+        preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $markup, $attributes);
+        foreach ($attributes[2] as $classes) {
+            foreach (preg_split('/\s+/', trim($classes)) ?: [] as $class) {
+                if (preg_match('/^design-[a-z0-9][a-z0-9_-]*$/D', $class) === 1
+                    && !in_array($class, ['design-frame', 'design-motif'], true)) {
+                    $used[] = $class;
+                }
+            }
+        }
+        return array_values(array_unique($used));
     }
 
     /**
      * Validate the model's CSS appendix against the constraints that keep it
-     * safe to append to style.css: bounded size, selectors scoped under the
-     * documented classes only, colors via theme preset custom properties, no
+     * safe to append to style.css: selectors scoped under supported classes,
+     * colors via theme preset custom properties, no
      * at-rules beyond @media, no url(). Returns problem strings; empty = valid.
      * Pure — unit-testable.
      *
@@ -4059,9 +4160,6 @@ CSS;
         }
 
         $problems = [];
-        if (substr_count($css, "\n") + 1 > self::MAX_LINES) {
-            $problems[] = 'more than ' . self::MAX_LINES . ' lines';
-        }
 
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
 
@@ -4094,7 +4192,17 @@ CSS;
         if (preg_match('/--wp--preset--shadow--depth\s*:/i', $stripped) === 1) {
             $problems[] = 'the depth shadow preset variable is build-owned and cannot be redeclared';
         }
+        [, $emphasisDrops] = CssChecks::dropEmphasisHookDeclarations($stripped);
+        if ($emphasisDrops !== []) {
+            $problems[] = 'heading emphasis declarations are build-owned';
+        }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (self::hasSizeContainment($declaration['property'], $declaration['value'])) {
+                $problems[] = 'size containment can collapse content-sized blocks';
+            }
+            if (str_starts_with(strtolower($declaration['property']), '--wp--preset--')) {
+                $problems[] = 'WordPress preset variables are build-owned and cannot be redeclared';
+            }
             if (self::declarationTargetsShape($declaration)
                 && CssChecks::isShapeAffectingDeclaration(
                     $declaration['property'],
@@ -4249,6 +4357,35 @@ CSS;
                             $unscoped[] = $selector;
                         }
                     }
+                    // Require flat style rules. Nested CSS can escape a root
+                    // through &, sibling combinators, or nested at-rules.
+                    // Drop only this rule; independent siblings still ship.
+                    $bodyState = CssSyntaxScanner::state();
+                    $declarationStart = 0;
+                    for ($cursor = 0; $cursor < strlen($body);) {
+                        if (CssSyntaxScanner::isTopLevel($bodyState) && $body[$cursor] === ';') {
+                            $declarationStart = $cursor + 1;
+                        }
+                        if (CssSyntaxScanner::isTopLevel($bodyState) && $body[$cursor] === '{') {
+                            $beforeBrace = trim((string) preg_replace('~/\*.*?\*/~s', '', substr($body, $declarationStart, $cursor - $declarationStart)));
+                            if (preg_match('/^--[\w-]+\s*:/', $beforeBrace) === 1) {
+                                $valueError = null;
+                                $valueEnd = self::matchingBrace($body, $cursor, $valueError);
+                                if ($valueEnd !== null) {
+                                    $cursor = $valueEnd + 1;
+                                    continue;
+                                }
+                            }
+                            $unscoped[] = trim($prelude) . ' (nested style rule; flatten selectors)';
+                            break;
+                        }
+                        $nextCursor = CssSyntaxScanner::consume($body, $cursor, $bodyState);
+                        if ($nextCursor === null) {
+                            $unscoped[] = trim($prelude) . ' (invalid declaration syntax)';
+                            break;
+                        }
+                        $cursor = $nextCursor;
+                    }
                     if ($unscoped === []) {
                         $out .= $prelude . '{' . $body . '}';
                     } else {
@@ -4287,7 +4424,78 @@ CSS;
             static fn (string $class): string => preg_quote($class, '/'),
             array_keys(self::CLASSES),
         ));
-        return preg_match('/^\.(?:' . $allowed . ')(?![\w-])/', $selector) === 1;
+        // Escapes can spell an anchor that is not the one we read.
+        if (str_contains($selector, '\\')
+            || preg_match('/^\.design-(?:frame|motif)(?![\w-])/', $selector) === 1) {
+            return false;
+        }
+        if (!self::siblingsStayInsideRoot($selector)) {
+            return false;
+        }
+        return preg_match('/^\.(?:' . $allowed . '|design-[a-z0-9][a-z0-9_-]*)(?![\w-])/', $selector) === 1;
+    }
+
+    /**
+     * Whether every sibling combinator in an anchored selector selects inside
+     * the authored root rather than beside it.
+     *
+     * `.design-x + .design-y` is a sibling OF the root: the subject is an
+     * element the root does not own, which is the escape the containment rule
+     * exists to stop. `.design-x p + p` is not: a sibling of a descendant
+     * shares a parent inside the root, so it is a descendant too.
+     *
+     * The distinction is one descendant or child combinator. Refusing `+` and
+     * `~` outright refused both, and `p + p`, `li + li` and `> * + *` are how
+     * CSS states spacing BETWEEN siblings — the main tool an author has for
+     * the rhythm this channel exists to hand over. One was dropped from a
+     * generated site during review, with the disposition "not scoped under a
+     * documented utility class", which it was.
+     */
+    private static function siblingsStayInsideRoot(string $selector): bool
+    {
+        $descended = false;
+        $depth = 0;
+        $length = strlen($selector);
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $selector[$i];
+            if ($char === '[' || $char === '(') {
+                ++$depth;
+                continue;
+            }
+            if ($char === ']' || $char === ')') {
+                $depth = max(0, $depth - 1);
+                continue;
+            }
+            if ($depth > 0) {
+                continue;
+            }
+            if ($char === '+' || $char === '~') {
+                if (!$descended) {
+                    return false;
+                }
+                continue;
+            }
+            if ($char === '>') {
+                $descended = true;
+                continue;
+            }
+            if (!ctype_space($char)) {
+                continue;
+            }
+            // Whitespace is a descendant combinator only when it is not the
+            // padding around another one: the space in `.a + .b` belongs to
+            // the `+`, and reading it as a descendant would call a sibling of
+            // the root a descendant of it.
+            $next = $i + 1;
+            while ($next < $length && ctype_space($selector[$next])) {
+                ++$next;
+            }
+            if ($next < $length && !in_array($selector[$next], ['>', '+', '~'], true)) {
+                $descended = true;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -4332,6 +4540,7 @@ CSS;
      */
     public static function dropOffendingDeclarations(string $css): array
     {
+        [$css, $emphasisDrops] = CssChecks::dropEmphasisHookDeclarations($css);
         $problems = [];
         foreach (CssChecks::scanDeclarations($css) as $declaration) {
             $problem = self::declarationProblem(
@@ -4342,6 +4551,9 @@ CSS;
                 self::declarationTargetsHeading($declaration),
             );
             if ($problem !== null) {
+                if (self::hasSizeContainment($declaration['property'], $declaration['value'])) {
+                    $problem .= '; selector ' . $declaration['context'];
+                }
                 $problems[$declaration['start']] = $problem;
             }
         }
@@ -4357,7 +4569,10 @@ CSS;
             )) . ' (' . $problems[$declaration['start']] . ')',
             $droppedRows,
         );
-        return [$salvaged, array_values($dropped)];
+        return [$salvaged, [
+            ...array_map(static fn (string $raw): string => $raw . ' (heading emphasis is build-owned)', $emphasisDrops),
+            ...array_values($dropped),
+        ]];
     }
 
     /**
@@ -4379,11 +4594,17 @@ CSS;
         }
         $property = strtolower($m[1]);
         $value = $m[2];
+        if (self::hasSizeContainment($property, $value)) {
+            return 'size containment can collapse content-sized blocks';
+        }
         if (str_starts_with($property, '--motion-')) {
             return 'motion custom properties are profile-owned';
         }
         if ($property === '--wp--preset--shadow--depth') {
             return 'the depth shadow preset variable is build-owned';
+        }
+        if (str_starts_with($property, '--wp--preset--')) {
+            return 'WordPress preset variables are build-owned';
         }
         if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
             return 'contained-image/button corner is shape-owned by the design direction';
@@ -4427,6 +4648,36 @@ CSS;
             return 'hides content';
         }
         return null;
+    }
+
+    /**
+     * The generated blocks appendix cannot establish size containment: unlike
+     * a reviewed scaffold component, its flex/grid items may be intrinsically
+     * sized. Containment then measures them as empty and can collapse headings.
+     * Only this appendix is filtered, never scaffold or HTML-first design CSS.
+     * Keep non-size containment and container names. The shorthand's name may
+     * itself be "size"; only its type after the slash establishes containment.
+     */
+    private static function hasSizeContainment(string $property, string $value): bool
+    {
+        $property = strtolower($property);
+        if (!in_array($property, ['container-type', 'container', 'contain'], true)) {
+            return false;
+        }
+        $value = strtolower(trim((string) preg_replace('~/\*.*?\*/~s', '', $value)));
+        // An unresolved substitution or inherited type could introduce size
+        // containment just as a literal can. Initial/normal resets remain safe.
+        if (preg_match('/\b(?:var|env)\s*\(|\binherit\b/', $value) === 1) {
+            return true;
+        }
+        if ($property === 'container') {
+            $slash = strpos($value, '/');
+            if ($slash === false) {
+                return false;
+            }
+            $value = substr($value, $slash + 1);
+        }
+        return preg_match('/(?<![\w-])(?:size|inline-size|strict)(?![\w-])/', $value) === 1;
     }
 
     /**
@@ -4515,7 +4766,8 @@ CSS;
     private static function classList(array $used): string
     {
         return implode("\n", array_map(
-            static fn (string $c): string => "- .{$c} — " . self::CLASSES[$c],
+            static fn (string $c): string => "- .{$c} — " . (self::CLASSES[$c]
+                ?? 'authored design hook; infer its role from the delivered markup and committed concept'),
             $used
         ));
     }

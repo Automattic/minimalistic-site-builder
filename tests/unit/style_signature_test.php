@@ -52,3 +52,58 @@ test('illustration subject and shared art direction survive the image prompt com
     assert_contains('Style: illustration', $prompt);
     assert_contains('Art direction for all site imagery: Ink and brass illustration', $prompt);
 });
+
+test('retired decorative classes cannot trigger the CSS generator', function () {
+    assert_eq([], PageStylesStep::classesIn('<div class="wp-block-group design-frame design-motif"><p>Original copy</p></div>'));
+    $tmp = sys_get_temp_dir() . '/builder_style_signature_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('theme/theme.json', ['version' => 3]);
+        $project->writeText('theme/style.css', '/* Theme Name: Demo */');
+        $project->writeJson('designDirection.json', [
+            'style_signature' => 'Directional portraits and balanced composition.',
+            'style_hooks' => ['design-motif'],
+        ]);
+        $markup = '<div class="wp-block-group design-motif"><p>Original copy</p><a href="/about/">About</a></div>';
+        $project->writeText('theme/parts/demo.html', $markup);
+        $llm = new FakeLlm();
+        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        assert_eq(0, $llm->completeCalls);
+        assert_eq($markup, $project->readText('theme/parts/demo.html'));
+        assert_true(!str_contains($project->readText('theme/style.css'), '::before'));
+        assert_true(!$project->exists('warnings.json'), 'no warnings demanding retired ornament');
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('page styles discards retired decorative rules while preserving layout CSS and content', function () {
+    $tmp = sys_get_temp_dir() . '/builder_style_layout_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('theme/theme.json', ['version' => 3]);
+        $project->writeText('theme/style.css', '/* Theme Name: Demo */');
+        $markup = '<div class="wp-block-group sticky-side"><p>Original copy</p><a href="/about/">About</a></div>';
+        $project->writeText('theme/parts/demo.html', $markup);
+        $llm = new FakeLlm();
+        $css = '.sticky-side {position:sticky;top:2rem}';
+        $llm->queueText($css . '.design-motif::before {background:linear-gradient(currentColor, transparent)}');
+        $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+        $step->run($project);
+        $first = $project->readText('theme/style.css');
+        assert_contains($css, $first);
+        assert_true(!str_contains($first, 'design-motif'));
+        assert_eq($markup, $project->readText('theme/parts/demo.html'));
+        assert_contains('delivered removed', json_encode($project->readJson('warnings.json')));
+        $llm->queueText($css);
+        $step->run($project);
+        assert_eq($first, $project->readText('theme/style.css'), 'resuming does not duplicate the utility appendix');
+        $sibling = '/* static sibling */ .some-kit {color:inherit}';
+        $project->writeText('theme/style.css', $first . "\n" . $sibling);
+        $llm->queueText($css);
+        $step->run($project);
+        assert_contains($sibling, $project->readText('theme/style.css'));
+    } finally {
+        remove_tree($tmp);
+    }
+});

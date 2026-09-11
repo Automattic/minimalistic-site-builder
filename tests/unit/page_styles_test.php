@@ -423,10 +423,10 @@ test('validate rejects CSS that hides generated content', function () {
     }
 });
 
-test('validate rejects empty, oversized, and unbalanced CSS', function () {
+test('validate rejects empty and unbalanced CSS without a design line ceiling', function () {
     assert_eq(['empty CSS'], PageStylesStep::validate("  \n "));
     $long = str_repeat(".overlap-up {\n    opacity: 1;\n}\n", 40); // 120 lines
-    assert_true([] !== PageStylesStep::validate($long), 'over the line ceiling');
+    assert_eq([], PageStylesStep::validate($long), 'responsive design is not bounded by a line count');
     assert_true([] !== PageStylesStep::validate(".overlap-up {\n    opacity: 1;\n"), 'unbalanced braces');
     assert_true(
         in_array('unbalanced braces', PageStylesStep::validate("}\n.overlap-up {\n    opacity: 1;\n}\n@media (min-width: 600px) {"), true),
@@ -665,11 +665,9 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(1, $llm->completeCalls, 'legacy path makes one serial text call');
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
-    assert_eq(
-        '17b4f5fe4f1b7f8fea47c62b43baeb9023d0ec8fd1f567886d11c54ee1f71b5f',
-        hash('sha256', $llm->calls[0]['prompt']),
-        'legacy prompt bytes'
-    );
+    assert_contains('DELIVERED MARKUP', $llm->calls[0]['prompt']);
+    assert_contains('class="wp-block-group overlap-up"', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'STALE-HTML-FIRST-CSS'));
     assert_eq(
         [
             'log_label'   => 'page-styles',
@@ -686,7 +684,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
         . "    margin-top: -4rem;\n"
         . "    position: relative;\n"
         . "    z-index: 2;\n"
-        . "}\n\n"
+        . "}\n/* End generated page-styles appendix. */\n\n"
         . ps_wrap(),
         $project->readText('theme/style.css'),
         'legacy style.css bytes'
@@ -694,7 +692,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-styles declares HTML-first design and delivered markup reads only when enabled', function () {
+test('page-styles declares all delivered markup in both modes and source CSS only in HTML-first', function () {
     $llm = new FakeLlm();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $legacyReads = [
@@ -704,15 +702,16 @@ test('page-styles declares HTML-first design and delivered markup reads only whe
         'designDirection.json',
         'theme/parts/*',
         'theme/templates/*',
+        'plugin/pages/*',
     ];
 
     assert_eq(
         $legacyReads,
         (new PageStylesStep($llm, $renderer))->declaration()->reads,
-        'legacy declaration stays unchanged',
+        'blocks declaration covers every delivered page and its collected image briefs',
     );
     assert_eq(
-        [...$legacyReads, 'design/page-artifact-map.json', 'design/*', 'plugin/pages/*'],
+        [...$legacyReads, 'design/page-artifact-map.json', 'design/*'],
         (new PageStylesStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
         'HTML-first declaration covers every deterministic CSS and delivered-markup input',
     );
@@ -3080,3 +3079,64 @@ test('a fully-clipping clip-path is salvaged as ONE declaration, not the whole a
     assert_eq($partial, $kept, 'byte-for-byte');
     assert_eq([], $none);
 });
+
+test('a sibling combinator inside an authored root is kept, beside it is not (frm PR-7c)', function () {
+    $scoped = new ReflectionMethod(PageStylesStep::class, 'selectorIsScoped');
+    $scoped->setAccessible(true);
+
+    // `p + p`, `li + li` and `> * + *` are how CSS states spacing BETWEEN
+    // siblings — the main tool for the rhythm this channel hands over. A
+    // sibling of a DESCENDANT shares a parent inside the root, so it is a
+    // descendant too and cannot escape.
+    foreach ([
+        '.design-studio-opening p + p',
+        '.design-x > * + *',
+        '.design-x li + li',
+        '.design-x > p ~ span',
+        '.design-x[data-a="b+c"] p',
+    ] as $selector) {
+        assert_true($scoped->invoke(null, $selector), "kept: {$selector}");
+    }
+
+    // A sibling OF the root selects an element the root does not own. That is
+    // the escape the containment rule exists to stop, spaced or not.
+    foreach ([
+        '.design-x + .design-y',
+        '.design-x+.design-y',
+        '.design-x ~ .other',
+        'p + p',
+        '.design-frame p',
+    ] as $selector) {
+        assert_true(!$scoped->invoke(null, $selector), "refused: {$selector}");
+    }
+});
+
+test('the contrast check resolves a preset background class (frm PR-7c)', function () {
+    // Shared chrome carries its surface as `has-base-background-color`, whose
+    // value lives in theme.json. Handed only the design appendix, the check
+    // could resolve no background for those elements and reported every
+    // colour on them unverified instead of checking it.
+    $tmp = sys_get_temp_dir() . '/builder_contrast_context_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF'],
+            ['slug' => 'contrast', 'color' => '#111111'],
+        ]]],
+    ]);
+    $context = new ReflectionMethod(PageStylesStep::class, 'contrastAnalysisContext');
+    $context->setAccessible(true);
+    $css = (string) $context->invoke(null, $project);
+
+    assert_contains('--wp--preset--color--base:#FFFFFF', $css, 'a var() in an authored rule resolves');
+    assert_contains('.has-base-background-color{background-color:#FFFFFF;}', $css, 'and so does the preset class');
+    assert_contains('.has-contrast-color{color:#111111;}', $css);
+
+    // A project with no theme.json yields no context rather than throwing.
+    $bare = sys_get_temp_dir() . '/builder_contrast_context_bare_' . uniqid();
+    assert_eq('', $context->invoke(null, (new ProjectStore($bare))->create('demo')));
+
+    exec('rm -rf ' . escapeshellarg($tmp) . ' ' . escapeshellarg($bare));
+});
+
