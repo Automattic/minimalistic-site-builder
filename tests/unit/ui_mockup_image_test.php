@@ -33,7 +33,7 @@ test('native UI SVG contains fixed shapes with no text or external references', 
 });
 
 test('native UI produces a complete raster at the requested ratio', function () {
-    if (!class_exists(Imagick::class)) { return; }
+    if (!class_exists(Imagick::class)) { skip_test('Imagick is unavailable.'); }
     foreach (['schedule' => 'week grid', 'roster' => 'crew roster', 'report' => 'daily report', 'summary' => 'client update'] as $subject) {
         $bytes = UiMockupImage::render(['image_kind' => 'ui-mockup', 'subject' => $subject], '4:3');
         assert_true(is_string($bytes));
@@ -45,7 +45,7 @@ test('native UI produces a complete raster at the requested ratio', function () 
 });
 
 test('generate images uses local UI by default and preserves provider siblings and completed assets', function () {
-    if (!class_exists(Imagick::class)) { return; }
+    if (!class_exists(Imagick::class)) { skip_test('Imagick is unavailable.'); }
     $tmp = sys_get_temp_dir() . '/native-ui-' . uniqid();
     $project = (new ProjectStore($tmp))->create('native-ui');
     $specs = [];
