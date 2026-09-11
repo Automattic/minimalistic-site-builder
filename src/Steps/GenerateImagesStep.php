@@ -419,8 +419,24 @@ final class GenerateImagesStep implements Step
             // pass below instead of marking it failed outright. Everything
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
+            $overlap = $this->inspectImages && $this->llm instanceof VisionBatchLlm
+                && $this->llm instanceof \Automattic\SiteBuild\CooperativeTransport
+                && $this->images instanceof \Automattic\SiteBuild\CooperativeTransport
+                && $this->images->supportsCooperativeRequests()
+                && $this->llm->supportsCooperativeRequests($this->repairModel === null ? [] : ['model' => $this->repairModel]);
+            $ready = [];
+            $queued = [];
+            $done = false;
+            $enqueue = function (int $i) use ($overlap, &$ready, &$queued, &$specs): void {
+                if ($overlap && !isset($queued[$i]) && ($specs[$i]['status'] ?? '') === 'completed' && ImageQa::applies($specs[$i])) {
+                    $ready[] = $i;
+                    $queued[$i] = true;
+                }
+            };
+            $produce = function () use ($project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop,
+                &$resolved, &$repairs, $siteContext, $enqueue, &$done): void {
             $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs, $enqueue
             ): void {
                 $i = $indices[$pos];
                 $filename = (string) $specs[$i]['filename'];
@@ -449,6 +465,7 @@ final class GenerateImagesStep implements Step
                     $imageCrop,
                 );
                 $project->writeJsonAtomic('images.json', $specs);
+                $enqueue($i);
             });
 
             if ($repairs !== []) {
@@ -463,16 +480,36 @@ final class GenerateImagesStep implements Step
                 );
             }
 
-            if ($this->inspectImages && $this->llm instanceof VisionLlm) {
-                $this->inspectDelivered(
-                    $project,
-                    $specs,
-                    $indices,
-                    $siteContext,
-                    $imageGrade,
-                    $imageCrop,
-                );
-                $project->writeJsonAtomic('images.json', $specs);
+                foreach ($indices as $i) {
+                    $enqueue($i);
+                }
+                $done = true;
+            };
+            if ($overlap) {
+                $scheduler = new \Automattic\SiteBuild\ImageTransportScheduler();
+                $scheduler->run(function () use ($scheduler, $produce, &$ready, &$done, $project, &$specs,
+                    $siteContext, $imageGrade, $imageCrop): void {
+                    $scheduler->spawn($produce);
+                    for ($worker = 0; $worker < self::MAX_QA_IMAGES; $worker++) {
+                        $scheduler->spawn(function () use (&$ready, &$done, $project, &$specs, $siteContext, $imageGrade, $imageCrop): void {
+                            while (!$done || $ready !== []) {
+                                if ($ready === []) {
+                                    \Automattic\SiteBuild\ImageTransportScheduler::pause();
+                                    continue;
+                                }
+                                $i = array_shift($ready);
+                                $this->inspectDelivered($project, $specs, [$i], $siteContext, $imageGrade, $imageCrop);
+                                $project->writeJsonAtomic('images.json', $specs);
+                            }
+                        });
+                    }
+                });
+            } else {
+                $produce();
+                if ($this->inspectImages && $this->llm instanceof VisionLlm) {
+                    $this->inspectDelivered($project, $specs, $indices, $siteContext, $imageGrade, $imageCrop);
+                    $project->writeJsonAtomic('images.json', $specs);
+                }
             }
             $this->deliverReused($project, $specs, $aliases, $resolved);
         }
@@ -1129,6 +1166,13 @@ final class GenerateImagesStep implements Step
             $chunks[] = $chunk;
         }
         foreach ($chunks as $chunk) {
+            $scheduler = \Automattic\SiteBuild\ImageTransportScheduler::current();
+            $reserved = 0;
+            foreach ($chunk as $spec) {
+                $reserved += (int) filesize($project->path('theme/assets/' . $spec['filename']));
+            }
+            $scheduler?->reserveImageBytes($reserved);
+            try {
             $requests = [];
             foreach ($chunk as $i => $spec) {
                 $filename = (string) $spec['filename'];
@@ -1169,6 +1213,10 @@ final class GenerateImagesStep implements Step
             }
             foreach ($requests as $i => $_) {
                 $verdicts[$i] = isset($answers[$i]) ? ImageQa::verdict($answers[$i]) : null;
+            }
+            } finally {
+                unset($requests);
+                $scheduler?->releaseImageBytes($reserved);
             }
         }
         return $verdicts;

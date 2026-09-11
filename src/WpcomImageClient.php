@@ -17,8 +17,10 @@ namespace Automattic\SiteBuild;
  * is scoped to Google Vertex, and telex uses the same endpoint for theme images.
  * See PROGRESS.md (Phase 0) for why Claude cannot go through the proxy.
  */
-final class WpcomImageClient implements ImageClient, ImageUsageReporting
+final class WpcomImageClient implements ImageClient, ImageUsageReporting, CooperativeTransport
 {
+    public function supportsCooperativeRequests(array $opts = []): bool { return true; }
+
     private const ENDPOINT_TPL =
         'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:generateContent';
 
@@ -221,6 +223,7 @@ final class WpcomImageClient implements ImageClient, ImageUsageReporting
             fn (string|int $i, array $body): \CurlHandle => $this->buildHandle($body),
             $classify,
             self::MAX_CONCURRENCY,
+            lane: 'images',
         );
     }
 

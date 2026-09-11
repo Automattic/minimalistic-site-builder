@@ -45,10 +45,13 @@ class CurlMultiPool
      * @return array<array-key,array<string,mixed>> outcomes keyed and ordered
      *         as $items
      */
-    public function run(array $items, callable $buildHandle, callable $classify, int $cap, ?callable $canStart = null, ?callable $onComplete = null): array
+    public function run(array $items, callable $buildHandle, callable $classify, int $cap, ?callable $canStart = null, ?callable $onComplete = null, ?string $lane = null): array
     {
         if ($items === []) {
             return [];
+        }
+        if ($lane !== null && ImageTransportScheduler::current() !== null) {
+            return ImageTransportScheduler::current()->batch($items, $buildHandle, $classify, $cap, $canStart, $onComplete, $lane);
         }
         $multi = $this->multiInit();
         /** @var array<int,array{0:string|int,1:\CurlHandle}> $inFlight key + handle by spl_object_id(handle) */

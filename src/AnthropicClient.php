@@ -10,8 +10,10 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm, CooperativeTransport
 {
+    public function supportsCooperativeRequests(array $opts = []): bool { return true; }
+
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
 
@@ -598,7 +600,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     ): array
     {
         $sleeper ??= static function (int $seconds): void {
-            sleep($seconds);
+            ImageTransportScheduler::pause($seconds);
         };
         $results = [];
         $pending = array_keys($bodies);
@@ -751,6 +753,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             $bodies, $buildHandle, $classify, self::MAX_CONCURRENCY,
             $schedule === null ? null : fn (string|int $key): bool => $schedule->canStart($key),
             $schedule === null ? null : fn (string|int $key) => $schedule->release($key),
+            lane: 'anthropic',
         );
     }
 
