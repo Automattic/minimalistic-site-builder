@@ -95,10 +95,55 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'bento-grid',
     ];
 
+    /**
+     * Page section budgets, including the hero and closing and excluding shared
+     * chrome. BIGR-1001. Every brief the model reads is built from these, so the
+     * number the prompt states and the number capPageSections() enforces cannot
+     * drift apart.
+     */
+    public const MAX_FRONT_SECTIONS = 5;
+    public const MAX_INTERIOR_SECTIONS = 4;
+    public const MAX_CONTACT_SECTIONS = 3;
+    private const MIN_FRONT_SECTIONS = 3;
+    private const MIN_INTERIOR_SECTIONS = 3;
+    private const MIN_CONTACT_SECTIONS = 2;
+
+    /**
+     * The budgets as prose, for the markdown prompts. They are rendered rather
+     * than typed so a change to the constants above reaches every brief the
+     * model reads, instead of leaving a prompt quoting a number the code no
+     * longer enforces.
+     */
+    public static function planBudgets(): string
+    {
+        return 'homepages have ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+            . ' sections, interior pages ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ', and contact pages ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS . '.';
+    }
+
+    /** The homepage budget for the design prompt, which authors below an existing hero. */
+    public static function homeBodyBudget(): string
+    {
+        return 'Write ' . (self::MIN_FRONT_SECTIONS - 1) . ' to ' . (self::MAX_FRONT_SECTIONS - 1)
+            . ' top-level content sections inside `<main>`, never more: with the existing preview hero, the'
+            . ' finished homepage has ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS . ' sections total.';
+    }
+
+    /** The interior and contact budgets for the design prompt, which authors the hero too. */
+    public static function innerPageBudget(): string
+    {
+        return 'Write ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ' top-level sections including the compact opening hero, never more. Contact or enquiry pages'
+            . ' instead have ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+            . ' sections total including the hero.';
+    }
+
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "Design this front page as a complete composition serving the brief's content and requested style."
         . ' Start with the committed hero, then choose the section count, order and density the content actually needs.'
         . ' A concise page can be complete; a longer page must earn its length. Do not add sections to fill a quota.'
+        . ' The page has ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+        . ' sections total including the hero, never more — that is a ceiling, not a target.'
         . ' Below the hero, use images where they communicate something; type-led sections and sequences without photographs are welcome.'
         . ' Cover the requested information without automatically turning it into services, benefits, process, testimonials and a closing CTA.'
         . ' Give visitors an appropriate next step where it belongs, not necessarily in a separate final band.';
@@ -107,8 +152,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * Interior default. Contact-like pages use a tighter brief via emphasisFor()
      * so a "reach us" purpose is not padded to homepage length (BIGR-858).
      */
-    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections'
-        . ' — fewer when THIS PAGE\'s purpose is narrow.'
+    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for ' . self::MIN_INTERIOR_SECTIONS . ' to '
+        . self::MAX_INTERIOR_SECTIONS . ' sections total including the hero, never more.'
+        . ' The shared header and footer do not count.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
         . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
         . ' compact archetype instead),'
@@ -121,8 +167,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
 
-    /** Contact/enquiry pages stay brief. Ticket BIGR-858. */
-    public const MAX_CONTACT_SECTIONS = 4;
 
     /**
      * Slug/title identities that belong to some other page even when the
@@ -337,6 +381,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         $page,
                         (bool) ($meta['form_placeholders'] ?? false),
                     ),
+                    'plan_budgets'           => self::planBudgets(),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -612,7 +657,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // Empty/unusable plans already receive the scoped fallback above.
         foreach ($out as $i => $page) {
             if (is_array($page)) {
-                $out[$i] = self::capContactPage($page, $warnings);
+                $out[$i] = self::capPageSections($page, $warnings);
             }
         }
 
@@ -767,7 +812,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
             }
             $page['sections'] = $sections;
-            $out[] = $page;
+            $out[] = self::capPageSections($page, $warnings);
         }
         $project->addWarnings($this->id(), $warnings);
         return $out;
@@ -1763,7 +1808,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Per-page planning brief. The spec purpose is the contract; contact pages
-     * are 2–4 sections, not the 3–6 interior pad.
+     * are 2–3 sections, rather than the 3–4 interior range.
      *
      * @param array<string,mixed> $page
      */
@@ -1782,9 +1827,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : ' There is no form backend: present only contact facts present in SITE SPEC;'
                     . ' omit mailto/tel when none exist, never a fake form.';
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
-                . '. Honor it. A contact page is brief — 2 to 4 sections total, never more. '
+                . '. Honor it. A contact page is brief — ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+                . ' sections total including the hero, never more. The shared header and footer do not count. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
-                . 'optional hours/address, a short close. Do NOT add story, programs, galleries, '
+                . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
                 . $formLine;
         }
@@ -1793,25 +1839,27 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Drop extra bands from a contact page so it stays at most 4 sections.
-     * Keeps the opener, the closer, and the highest-scoring contact/form
-     * middles, in document order. Idempotent. BIGR-858.
+     * Enforce the page budget after every generation, repair, and fallback path.
+     * Keep the opener and closer. Contact pages prioritize form/contact facts;
+     * other pages keep the earliest content in the authored order. Repair the
+     * new seams and record the removed sections. Idempotent. BIGR-1001.
      *
      * @param array<string,mixed> $page
      * @param list<string> $warnings
      * @return array<string,mixed>
      */
-    public static function capContactPage(array $page, array &$warnings = []): array
+    public static function capPageSections(array $page, array &$warnings = []): array
     {
-        if (!self::isContactLikePage($page)) {
-            return $page;
-        }
+        $front = !empty($page['front']);
+        $contact = self::isContactLikePage($page);
+        $max = self::maxSectionsFor($page);
+        $kind = $front ? 'front' : ($contact ? 'contact' : 'interior');
         $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
         $authored = count($sections);
-        if ($authored <= self::MAX_CONTACT_SECTIONS) {
+        if ($authored <= $max) {
             return $page;
         }
-        $kept = self::selectContactSections($sections, self::MAX_CONTACT_SECTIONS);
+        $kept = self::selectPageSections($page, $sections);
         $keptSlugs = array_map(
             static fn (array $section): string => (string) ($section['slug'] ?? ''),
             $kept,
@@ -1843,11 +1891,37 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             "pages[slug={$pageSlug}].sections",
             $authored . ' sections (' . implode(', ', array_column($sections, 'slug')) . ')',
             $count . ' sections (' . implode(', ', $keptSlugs) . ')',
-            'trimmed contact page to ' . self::MAX_CONTACT_SECTIONS
+            'trimmed ' . $kind . ' page to ' . $max
                 . ' sections; dropped ' . implode(', ', $dropped),
             true,
         );
         return $page;
+    }
+
+    /** @param array<string,mixed> $page */
+    public static function maxSectionsFor(array $page): int
+    {
+        return !empty($page['front']) ? self::MAX_FRONT_SECTIONS
+            : (self::isContactLikePage($page) ? self::MAX_CONTACT_SECTIONS : self::MAX_INTERIOR_SECTIONS);
+    }
+
+    /**
+     * Select whole sections without rewriting their content or representation.
+     * Shared by the blocks planner and the HTML fragment transformer.
+     *
+     * @param array<string,mixed> $page
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    public static function selectPageSections(array $page, array $sections): array
+    {
+        $max = self::maxSectionsFor($page);
+        if (count($sections) <= $max) {
+            return $sections;
+        }
+        return self::isContactLikePage($page)
+            ? self::selectContactSections($sections, $max)
+            : array_merge(array_slice($sections, 0, $max - 1), [$sections[count($sections) - 1]]);
     }
 
     /**
@@ -1930,7 +2004,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $path,
                 $authoredArchetypes[$i] ?? $archetype,
                 $replacement,
-                'reassigned to clear an adjacent duplicate after the contact trim,'
+                'reassigned to clear an adjacent duplicate after the section trim,'
                     . ' avoiding an image-led band on a brief page',
             );
         }
@@ -1981,6 +2055,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             (string) ($section['type'] ?? ''),
             (string) ($section['purpose'] ?? ''),
             (string) ($section['content_notes'] ?? ''),
+            strip_tags((string) ($section['html'] ?? '')),
         ]));
         $score = 0;
         if (preg_match('/\b(?:form|jp_form|enquiry|inquiry)\b/u', $blob) === 1) {
