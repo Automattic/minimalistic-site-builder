@@ -1526,6 +1526,53 @@ test('generate-images ships an opaque site icon beside the transparent logo', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images discards an earlier icon when a keyed render yields none', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        png_fixture('white', 'red', 60, 60)
+    );
+    // No header part, so there is no ground to flatten the icon over and this
+    // render yields none. Shipping keys off the file alone, so an icon an
+    // earlier attempt left behind would go out against a mark it is not from.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText('theme/assets/site-icon.png', 'stale bytes from an earlier run');
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    (new GenerateImagesStep(new FakeImageClient($mark)))->run($project);
+
+    assert_true(!$project->exists('theme/assets/site-icon.png'), 'the stale icon is gone');
+    $rows = [];
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        $rows[$row['filename']] = $row['role'] ?? null;
+    }
+    assert_true(!isset($rows['site-icon.png']), 'and no icon row is shipped');
+    assert_eq('site-logo', $rows['site-logo.png'] ?? null, 'the logo is unaffected');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images ships no site icon when the mark was dropped', function () {
     if (!\Automattic\SiteBuild\ImageTransparency::available()) {
         skip_test('imagick not loaded');
@@ -1589,6 +1636,56 @@ test('generate-images drops the site-logo role when Imagick is unavailable', fun
     assert_eq(['images' => []], $project->readJson('plugin/images.json'));
     $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
     assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships a site icon from a mark it could not key', function () {
+    if (\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick is loaded; this pin is the no-extension path');
+    }
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    // The Dotcom case: no imagick module, so the key never runs and the render
+    // arrives opaque. It is still a mark on a white ground, which is exactly
+    // what a browser tab wants.
+    (new GenerateImagesStep(new FakeImageClient(gd_mark_png(1264, 848))))->run($project);
+
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']), 'no logo: an opaque mark would paint a box over the header bar');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'the unkeyed mark is not shipped as a logo');
+
+    assert_true($project->exists('theme/assets/site-icon.png'), 'the icon is cut from the render');
+    assert_true($project->exists('plugin/images/site-icon.png'), 'and shipped to the seeder');
+    $rows = $project->readJson('plugin/images.json')['images'];
+    $roles = array_map(static fn (array $row): string => (string) ($row['role'] ?? ''), $rows);
+    assert_true(in_array('site-icon', $roles, true), 'the seeder gets a site-icon row without a logo row beside it');
+    assert_true(!in_array('site-logo', $roles, true), 'and no logo row');
+
+    [$width, $height] = array_slice(
+        (array) getimagesizefromstring($project->readText('theme/assets/site-icon.png')),
+        0,
+        2
+    );
+    assert_eq(512, $width, 'square, at the size WordPress resizes from');
+    assert_eq(512, $height);
+
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('site icon cut from the render', $warnings, 'the warning says what was salvaged');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

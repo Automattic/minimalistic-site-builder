@@ -128,6 +128,40 @@ function png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
     return $im->getImageBlob();
 }
 
+/**
+ * A mark on a white ground, drawn with GD.
+ *
+ * png_fixture() above needs Imagick, which the Dotcom build host does not
+ * have — and the no-Imagick path is exactly what the site-icon tests exercise,
+ * so their fixtures cannot depend on it.
+ */
+/** A palette-mode PNG of a mark, the 8-bit form a render can come back in. */
+function gd_palette_mark_png(int $w = 120, int $h = 80): string
+{
+    $im = imagecreatefromstring(gd_mark_png($w, $h));
+    imagetruecolortopalette($im, false, 8);
+    ob_start();
+    imagepng($im);
+    return (string) ob_get_clean();
+}
+
+function gd_mark_png(int $w = 120, int $h = 80): string
+{
+    $im = imagecreatetruecolor($w, $h);
+    imagefill($im, 0, 0, (int) imagecolorallocate($im, 255, 255, 255));
+    imagefilledrectangle(
+        $im,
+        (int) ($w / 3),
+        (int) ($h / 3),
+        (int) (2 * $w / 3),
+        (int) (2 * $h / 3),
+        (int) imagecolorallocate($im, 14, 102, 114)
+    );
+    ob_start();
+    imagepng($im);
+    return (string) ob_get_clean();
+}
+
 /** [width, height] of PNG bytes. */
 function png_size(string $pngBytes): array
 {
