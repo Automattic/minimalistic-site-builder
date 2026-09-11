@@ -82,18 +82,18 @@ final class ImageTransportScheduler
         }
         $this->inPoll = true;
         try {
-        foreach ($this->tasks as $index => &$state) {
-            if ($state['wake'] > microtime(true)) {
-                continue;
+            foreach ($this->tasks as $index => &$state) {
+                if ($state['wake'] > microtime(true)) {
+                    continue;
+                }
+                $fiber = $state['fiber'];
+                $state['wake'] = (float) ($fiber->isStarted() ? $fiber->resume() : $fiber->start());
+                if ($fiber->isTerminated()) {
+                    unset($this->tasks[$index], $this->ownedFibers[spl_object_id($fiber)]);
+                }
             }
-            $fiber = $state['fiber'];
-            $state['wake'] = (float) ($fiber->isStarted() ? $fiber->resume() : $fiber->start());
-            if ($fiber->isTerminated()) {
-                unset($this->tasks[$index], $this->ownedFibers[spl_object_id($fiber)]);
-            }
-        }
-        unset($state);
-        $this->pump();
+            unset($state);
+            $this->pump();
         } finally {
             $this->inPoll = false;
         }
@@ -113,7 +113,11 @@ final class ImageTransportScheduler
 
     public function run(callable $task): void
     {
-        $this->start($task);
+        if (self::$active === $this) {
+            $this->spawn($task);
+        } else {
+            $this->start($task);
+        }
         $this->join();
     }
 

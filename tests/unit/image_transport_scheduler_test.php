@@ -238,3 +238,20 @@ test('an HTTP 429 holds image siblings without stopping the vision lane', functi
         remove_tree($directory);
     }
 });
+
+test('run adds work to the active stage scheduler and joins both tasks', function () {
+    $scheduler = new ImageTransportScheduler();
+    $events = [];
+    $scheduler->start(function () use (&$events): void {
+        ImageTransportScheduler::pause(0.03);
+        $events[] = 'stage complete';
+    });
+    $scheduler->run(function () use (&$events): void {
+        $events[] = 'apply started';
+        ImageTransportScheduler::pause(0.01);
+        $events[] = 'apply complete';
+    });
+    assert_eq(['apply started', 'apply complete', 'stage complete'], $events);
+    assert_eq(null, ImageTransportScheduler::current());
+    $scheduler->join();
+});
