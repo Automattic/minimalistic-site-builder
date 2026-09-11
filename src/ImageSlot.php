@@ -23,7 +23,7 @@ final class ImageSlot
         $documents = [];
         foreach (['theme/parts/*.html', 'theme/templates/*.html', 'plugin/pages/*.html'] as $pattern) {
             foreach (glob($project->root . '/' . $pattern) ?: [] as $file) {
-                $documents[] = BlockMarkup::parse((string) file_get_contents($file));
+                $documents[] = BlockMarkup::parse($project->readText(substr($file, strlen($project->root) + 1)));
             }
         }
         foreach ($specs as &$spec) {
