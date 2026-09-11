@@ -193,3 +193,24 @@ test('a failed shared request preserves the deferred image slot with a local pla
         remove_tree($tmp);
     }
 });
+
+
+test('free reuse selects an eligible source with the strongest QA contract', function () {
+    [$project, $tmp] = deferred_reuse_fixture();
+    try {
+        $rows = $project->readJson('images.json');
+        $weak = array_replace($rows[0], ['filename' => 'plain.jpg', 'src' => 'theme:./assets/plain.jpg', 'pageContext' => 'A room photograph']);
+        $strong = array_replace($weak, ['filename' => 'hero-strong.jpg', 'src' => 'theme:./assets/hero-strong.jpg']);
+        $deferred = array_replace($strong, ['filename' => 'hero-deferred.jpg', 'src' => 'theme:./assets/hero-deferred.jpg', 'sources' => $rows[1]['sources']]);
+        $project->writeJson('images.json', [$weak, $strong, $deferred]);
+        $client = new FakeImageClient();
+        $llm = new FakeLlm();
+        $llm->queueText(GI_QA_PASS);
+        (new GenerateImagesStep($client, $llm))->run($project);
+        assert_eq(1, count($client->calls));
+        assert_eq(1, count($llm->imageCalls));
+        assert_eq('hero-strong.jpg', $project->readJson('images.json')[2]['reused_from']);
+    } finally {
+        remove_tree($tmp);
+    }
+});
