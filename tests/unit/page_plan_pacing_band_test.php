@@ -12,13 +12,13 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
 function pacing_plan(int $sections, string $background = 'base'): array
 {
     $archetypes = [
-        'centered-stack',
+        'bento-grid',
         'asymmetric-split',
         'equal-card-grid',
-        'list-with-thumbnails',
+        'zigzag-steps',
         'equal-card-grid',
         'offset-grid',
-        'centered-stack',
+        'bento-grid',
         'asymmetric-split',
     ];
     $plan = [];
@@ -89,10 +89,11 @@ test('repairVariety demotes a long page down to two bands', function () {
 });
 
 test('the background floor leaves short pages alone', function () {
-    // Every contact page is 2 to 4 sections (BIGR-858). One uniform ground is a
+    // Every contact page is 2 to 3 sections (BIGR-1001). One uniform ground is a
     // fine answer for a page that short, and forcing a dark band onto a contact
-    // page would be a worse plan, not a better one.
-    foreach ([2, 3, 4] as $sections) {
+    // page would be a worse plan, not a better one. The floor tracks that range:
+    // it exists to exempt contact pages, so it moved when their cap did.
+    foreach ([2, 3] as $sections) {
         $warnings = [];
         $repairs = [];
         $out = PagePlanStep::normalize(
@@ -249,7 +250,7 @@ test('surface restraint preserves a locked hero and structural covers', function
 });
 
 test('surface restraint leaves short pages and already restrained pages byte-identical', function () {
-    foreach ([pacing_plan(4, 'contrast'), pacing_plan(6)] as $plan) {
+    foreach ([pacing_plan(3, 'contrast'), pacing_plan(6)] as $plan) {
         if (count($plan) === 6) {
             $plan[1]['background'] = 'tinted';
             $plan[4]['background'] = 'contrast';
@@ -258,5 +259,18 @@ test('surface restraint leaves short pages and already restrained pages byte-ide
         $out = PagePlanStep::withSurfaceRestraint($plan, 'page', $warnings);
         assert_eq($plan, $out);
         assert_eq([], $warnings);
+    }
+});
+
+test('the banding floor sits directly above the contact cap, so only contact pages are exempt', function () {
+    // BIGR-1001 cut the contact cap to 3, and the floor has to follow it: left
+    // at 5 it would have sat above every interior page (4) and above all but an
+    // exactly-5 front page, which is the all-base plan this rule exists to stop.
+    foreach ([PagePlanStep::MAX_CONTACT_SECTIONS => 0, PagePlanStep::MAX_INTERIOR_SECTIONS => 1] as $sections => $bands) {
+        $warnings = [];
+        $repairs = [];
+        $out = PagePlanStep::repairVariety(pacing_plan($sections), false, null, $warnings, 'about', $repairs, true);
+        $banded = array_filter(array_column($out, 'background'), static fn (string $b): bool => $b !== 'base');
+        assert_eq($bands, count($banded), "a {$sections}-section page");
     }
 });

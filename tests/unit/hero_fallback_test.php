@@ -206,3 +206,33 @@ test('the fallback hero carries the committed media aspect marker (BIGR-925)', f
     $contract['media_aspect'] = 'none';
     assert_throws(fn () => HeroFallback::render(hero_fallback_input(), $contract, 'transport failed'));
 });
+
+test('the header fallback row is the pill when the contract floats (frm W1a)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'floating-pill');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--floating-pill', $markup);
+    assert_contains('"className":"header-pill"', $markup);
+    assert_contains('class="wp-block-group alignwide header-pill"', $markup);
+    assert_eq('floating-pill', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+
+    $plain = HeaderFallback::render([], test_above_fold_contract('foreground-split', 'standard-row'), 'bad header')->markup;
+    assert_true(!str_contains($plain, 'header-pill'), 'a bar archetype gets no pill class');
+});
+
+test('the header fallback row is the centered bar when the contract commits bar-center-cta (frm W1b)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'bar-center-cta');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--bar-center-cta', $markup);
+    assert_contains('"className":"header-bar-center"', $markup);
+    assert_contains('class="wp-block-group alignwide header-bar-center"', $markup);
+    assert_true(!str_contains($markup, 'header-pill'), 'the bar gets no pill class');
+    assert_eq('bar-center-cta', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+});
+
+test('the header fallback row is the spread bar when the contract commits spread-nav (frm W1d)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'spread-nav');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--spread-nav', $markup);
+    assert_contains('"className":"header-spread"', $markup);
+    assert_eq('spread-nav', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+});

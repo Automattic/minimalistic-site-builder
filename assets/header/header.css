@@ -12,6 +12,9 @@
  * - sticky-soft remains useful with no JavaScript through native sticky.
  * - overlay-to-solid is absolute (and therefore scrolls away) by default. It
  *   becomes fixed only beneath the driver-owned html.header-state-js scope.
+ * - overlay-transient shares every overlay paint rule through the one
+ *   .header-behavior-overlay class and never takes that fixed promotion: the
+ *   design direction asked for a header that leaves with the hero (BIGR-998).
  * - the sticky transparent/glass start and glass scrolled treatments exist
  *   only beneath that same scope; without it (or without color-mix and
  *   backdrop-filter support) the header keeps its opaque token surfaces.
@@ -26,6 +29,14 @@
     --header-state-duration: 240ms;
     --header-state-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --header-overlay-scrim: rgb(0 0 0 / 0.60);
+
+    /* The strip an overlay header paints over. Must match
+     * AboveFoldContract::OVERLAY_SAFE_TOP_PX, which states the same zone as a
+     * contract fact; the two are pinned to each other by test. A static floor
+     * rather than the measured header height: this has to hold on the first
+     * paint, before the driver has measured anything, and with no JavaScript
+     * at all. */
+    --header-safe-top: 80px;
 }
 
 /* WordPress's classic admin-bar stylesheet does not expose a stable variable. */
@@ -61,7 +72,7 @@ body.admin-bar {
     }
 }
 
-.site-header-shell--overlay-to-solid {
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient) {
     position: absolute;
     top: var(--site-admin-bar-offset, 0px);
     right: 0;
@@ -70,11 +81,60 @@ body.admin-bar {
 
 /* Absolute overlay chrome and the first content band must share y=0. Core's
  * top-level block-gap rule would otherwise reveal a strip of page background. */
-.site-header-shell--overlay-to-solid + .wp-block-post-content {
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content {
     margin-block-start: 0;
 }
 
-/* Fixed overlay behavior is JS-owned. Without this scope it scrolls away. */
+/*
+ * Sharing y=0 is also what puts the header over the opening band's own
+ * content. A band only as tall as its content starts its first line at its
+ * own top padding, which on the smaller spacing scales is inside the header;
+ * the build marks those bands (HeaderHeroStep::OVERLAY_CLEARANCE_CLASS) and
+ * the rules below reserve the zone, adding to the band's authored spacing
+ * rather than replacing it.
+ */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance {
+    /* What the header actually covers: its measured height plus the admin bar
+     * it is offset below — the same sum scroll-padding-top takes. The
+     * contract's static zone is the floor, so this holds on the first paint,
+     * before the driver has measured, and with no JavaScript at all. */
+    --header-clearance: max(
+        calc(var(--site-header-height, 0px) + var(--site-admin-bar-offset, 0px)),
+        var(--header-safe-top)
+    );
+}
+
+/* A cover centres its content, so its reservation is equal on both sides:
+ * that keeps the content on the band's own centre line instead of pushing it
+ * down, which makes this a no-op for a band that already had the room. It
+ * lands on the inner container so the image and dim still paint the full band. */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance
+    > .wp-block-cover__inner-container {
+    padding-block: var(--header-clearance);
+}
+
+/* A protection-token group has no inner container and lays its children out in
+ * flow, so the zone goes above the first of them — as a spacer box, not a
+ * margin. A margin on the first child collapses straight out of a band that
+ * has no top padding of its own, moving the whole band down and reopening a
+ * strip of page background at y=0 instead of clearing the content. */
+:is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+    + .wp-block-post-content
+    .header-overlay-clearance:not(.wp-block-cover)::before {
+    display: block;
+    block-size: var(--header-clearance);
+    content: "";
+}
+
+/* Fixed overlay behavior is JS-owned. Without this scope it scrolls away.
+ * overlay-transient is the same paint with the promotion withheld on
+ * purpose (BIGR-998): the direction asked for a header that leaves, so the
+ * shell stays absolute in every scope. */
 html.header-state-js .site-header-shell--overlay-to-solid {
     position: fixed;
 }
@@ -83,7 +143,7 @@ html.header-state-js .site-header-shell--overlay-to-solid {
  * The inner group owns the surface. Its padding, border width, and dimensions
  * are identical in both states; no state selector below changes layout.
  */
-.site-header-shell :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+.site-header-shell :is(.header-behavior-sticky-soft, .header-behavior-overlay) {
     /* Two tiers: the -solid tokens are the always-opaque vocabulary (no-JS
      * fallback, forced-solid pages, nav modal and submenu panels); the
      * surface pair is what the two states actually paint, and only the
@@ -108,7 +168,7 @@ html.header-state-js .site-header-shell--overlay-to-solid {
     transition-timing-function: var(--header-state-ease);
 }
 
-.site-header-shell .header-behavior-overlay-to-solid {
+.site-header-shell .header-behavior-overlay {
     /* A 60%-black translucent surface still reveals the hero while bounding
      * an arbitrary white image pixel to #666. HeaderBehavior selects the one
      * foreground against that exact worst case before enabling overlay. */
@@ -130,7 +190,7 @@ html.header-state-js .site-header-shell--overlay-to-solid {
  * surface still arrives via header-is-scrolled exactly as with the veil. */
 html.header-state-js
     .site-header-shell
-    .header-behavior-overlay-to-solid.header-top-transparent {
+    .header-behavior-overlay.header-top-transparent {
     --header-start-surface: transparent;
 
     /* The fixed header can move over a different section between frames.
@@ -159,7 +219,7 @@ html.header-state-js
 
 /* Keep the shared readable foreground on navigation chrome in both states. */
 .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay)
     :where(
         .wp-block-site-title,
         .wp-block-site-title a,
@@ -184,7 +244,7 @@ html.header-state-js
 /* Core gives unstyled desktop submenus a white panel. Give every nested menu
  * the same verified opaque pair as the mobile modal instead. */
 .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay)
     .wp-block-navigation__submenu-container {
     color: var(--header-foreground) !important;
     background-color: var(--header-scrolled-solid) !important;
@@ -194,13 +254,13 @@ html.header-state-js
  * forced pages take the opaque token directly — force-solid means solid. */
 html.header-is-scrolled
     .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay) {
     background-color: var(--header-scrolled-surface) !important;
     box-shadow: var(--header-scrolled-shadow);
 }
 
 .site-header-shell--force-solid
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay) {
     background-color: var(--header-scrolled-solid) !important;
     box-shadow: var(--header-scrolled-shadow);
 }
@@ -286,7 +346,7 @@ html.header-state-js
     /* The clear overlay start returns to the verified scrim veil. */
     html.header-state-js
         .site-header-shell
-        .header-behavior-overlay-to-solid.header-top-transparent {
+        .header-behavior-overlay.header-top-transparent {
         --header-start-surface: var(--header-overlay-scrim);
     }
 
@@ -305,15 +365,369 @@ html.header-state-js
     }
 }
 
+/*
+ * Floating pill (frm W1a). The archetype's root is a transparent rail: it
+ * keeps the shell's positioning, states and foreground, but paints nothing.
+ * The inner .header-pill row is what the eye reads as the header. It paints
+ * exactly the surface HeaderBehavior proved for each state (the treatment-
+ * aware start/scrolled variables, or the opaque token on a static root), so
+ * the contrast contract is unchanged; only the shape moved.
+ */
+.site-header-shell .header-archetype--floating-pill,
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill,
+.site-header-shell--force-solid .header-archetype--floating-pill {
+    background-color: transparent !important;
+    box-shadow: none;
+}
+
+/* In overlay mode (frm PR-1e) the rail's scrim moves onto the pill: the
+ * overlay contract proved the foreground against the scrim, and the text
+ * sits inside the pill, so the proof holds. An earned clear resting state
+ * still keeps the scrim on the pill: a clear pill is not a pill. The rail's
+ * own blur band is dropped; the pill blurs behind itself instead. */
+.site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill,
+html.header-state-js
+    .site-header-shell
+    .header-archetype--floating-pill.header-behavior-overlay.header-top-transparent
+    .header-pill {
+    --header-pill-surface: var(--header-start-surface, var(--header-overlay-scrim));
+}
+html.header-state-js
+    .site-header-shell
+    .header-archetype--floating-pill.header-behavior-overlay.header-top-transparent {
+    --header-start-surface: var(--header-overlay-scrim);
+}
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill {
+    --header-pill-surface: var(--header-scrolled-surface, var(--header-scrolled-solid));
+}
+
+html.header-state-js .site-header-shell
+    .header-archetype--floating-pill.header-behavior-sticky-soft.header-top-transparent {
+    --header-start-surface: var(--header-start-solid);
+}
+
+/* A static root has no behavior variables; read the token off its core class. */
+.site-header-shell .header-archetype--floating-pill.has-base-background-color { --header-pill-solid: var(--wp--preset--color--base, #ffffff); }
+.site-header-shell .header-archetype--floating-pill.has-contrast-background-color { --header-pill-solid: var(--wp--preset--color--contrast, #111111); }
+.site-header-shell .header-archetype--floating-pill.has-primary-background-color { --header-pill-solid: var(--wp--preset--color--primary, #333333); }
+.site-header-shell .header-archetype--floating-pill.has-secondary-background-color { --header-pill-solid: var(--wp--preset--color--secondary, #eeeeee); }
+.site-header-shell .header-archetype--floating-pill.has-accent-background-color { --header-pill-solid: var(--wp--preset--color--accent, #555555); }
+
+.site-header-shell .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-start-surface, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+    --header-pill-shadow: 0 6px 24px rgb(0 0 0 / 0.08);
+
+    position: relative;
+    box-sizing: border-box;
+    inline-size: fit-content;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    margin-inline: auto;
+    padding-block: 0.375rem;
+    padding-inline: 1.25rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--header-foreground, currentColor) 12%, transparent);
+    border-radius: 999px;
+    background-color: var(--header-pill-surface);
+    box-shadow: var(--header-pill-shadow);
+    transition-property: background-color, box-shadow;
+    transition-duration: var(--header-state-duration);
+    transition-timing-function: var(--header-state-ease);
+}
+
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-scrolled-surface, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+    --header-pill-shadow: 0 10px 30px rgb(0 0 0 / 0.12);
+}
+
+.site-header-shell--force-solid .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-scrolled-solid, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff))) !important;
+}
+
+/* The wordmark yields before the row wraps; the nav collapses on its own. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-site-title {
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Inside a pill every boxed control is a pill too. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-button__link,
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item__content {
+    border-radius: 999px;
+}
+
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item__content {
+    padding: 0.35em 0.75em;
+}
+
+/* Mark the current section with an outline. Keep the surface unchanged
+ * because a tint can reduce the verified text contrast. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content,
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    box-shadow: inset 0 0 0 1px currentColor;
+    border-radius: 999px;
+    transition: box-shadow var(--header-state-duration) var(--header-state-ease);
+}
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    padding: 0.35em 0.75em;
+    margin: -0.35em -0.75em;
+}
+
+/* Below the hamburger breakpoint the pill spans the rail so a long wordmark,
+ * the CTA and the menu button all fit. */
+@media (max-width: 600px) {
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        inline-size: 100%;
+        padding-inline: 1rem 0.5rem;
+        /* frm PR-1x: at 390px the authored md gap plus a body-size CTA left
+         * cohesion-like17 with "Alexia Stu..." and a two-line button. The
+         * row keeps its three controls on one line: a tight gap, a CTA that
+         * never wraps and drops to the caption size, and a title that
+         * shrinks first (the ellipsis rule above already owns its overflow). */
+        gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-site-title {
+        flex: 1 1 auto;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-navigation,
+    .site-header-shell .header-archetype--floating-pill .header-pill > .wp-block-buttons {
+        flex: 0 0 auto;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill .wp-block-button__link {
+        white-space: nowrap;
+        font-size: var(--wp--preset--font-size--caption, 0.875rem);
+        padding: 0.6em 1em;
+    }
+}
+
+/*
+ * Centered bar (frm W1b). The root keeps the shell's surface and states; the
+ * marked .header-bar-center row becomes a three-column grid so the
+ * navigation sits on the page's center line regardless of how wide the
+ * wordmark and the CTA are (a flex space-between row centers the nav only
+ * when both ends happen to match). The layout container class core writes
+ * for the authored flex row is overridden by the deeper selector.
+ */
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--wp--preset--spacing--md, 1.5rem);
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-site-title,
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-site-logo {
+    justify-self: start;
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
+    justify-self: center;
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-buttons {
+    justify-self: end;
+}
+
+/* The one CTA is a pill on both references; the direction's CTA style
+ * still owns its fill, text and border. */
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-button__link {
+    border-radius: 999px;
+}
+
+/* Below the hamburger breakpoint the centered column is the menu button;
+ * it moves next to the CTA so the wordmark keeps the start edge. */
+@media (max-width: 782px) {
+    .site-header-shell .header-archetype--bar-center-cta .header-bar-center {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        column-gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--bar-center-cta .header-bar-center > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
+        justify-self: end;
+    }
+}
+
+/*
+ * Spread bar (frm W1d). Wordmark at the start; the navigation takes the
+ * rest of the row and its items spread across it with space between, edge
+ * to edge, the way Spector's bar reads. No CTA. Under the hamburger
+ * breakpoint the row is the plain wordmark-and-menu-button pair.
+ */
+.site-header-shell .header-archetype--spread-nav .header-spread {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--wp--preset--spacing--lg, 3rem);
+}
+
+/* A row authored align:full escapes the root's gutter and the wordmark
+ * touches the viewport (spector-like7); edge to edge means the page's
+ * gutter, not the glass. */
+.site-header-shell .header-archetype--spread-nav .header-spread.alignfull {
+    padding-inline: var(--wp--style--root--padding-left, 1.25rem) var(--wp--style--root--padding-right, 1.25rem);
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-title,
+.site-header-shell .header-archetype--spread-nav .header-spread > .wp-block-site-logo {
+    justify-self: start;
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
+    justify-self: stretch;
+    min-inline-size: 0;
+}
+
+.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation .wp-block-navigation__container {
+    inline-size: 100%;
+    justify-content: space-between;
+}
+
+/* The spread bar uses the same outline as the pill. */
+.site-header-shell .header-archetype--spread-nav .header-spread .wp-block-navigation-item.is-current-section > .wp-block-navigation-item__content {
+    box-shadow: inset 0 0 0 1px currentColor;
+    border-radius: 999px;
+    padding: 0.35em 0.75em;
+    margin: -0.35em -0.75em;
+}
+
+@media (max-width: 782px) {
+    .site-header-shell .header-archetype--spread-nav .header-spread {
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--spread-nav .header-spread > :is(.wp-block-navigation, .wp-block-group:has(.wp-block-navigation)) {
+        justify-self: end;
+    }
+}
+
+/* Glass blurs behind the pill, not behind the transparent rail. The
+ * pseudo-element pattern is the same as the root's: never an ancestor of
+ * the navigation, so a fixed responsive menu keeps the viewport as its
+ * containing block. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px)))
+    and (background-color: color-mix(in srgb, red 80%, transparent)) {
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
+        .header-pill::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
+        .header-pill > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-state-js.header-is-scrolled
+        .site-header-shell
+        .header-archetype--floating-pill:not(.header-scrolled-glass)
+        .header-pill::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* Overlay pill (frm PR-1e): the rail never blurs; the pill does, and stops
+ * once the scrolled surface is opaque, like the overlay rail it replaces. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-is-scrolled
+        .site-header-shell
+        .header-archetype--floating-pill.header-behavior-overlay
+        .header-pill::before,
+    .site-header-shell--force-solid
+        .header-archetype--floating-pill.header-behavior-overlay
+        .header-pill::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
+        .header-pill::before,
+    .site-header-shell .header-archetype--floating-pill.header-behavior-overlay .header-pill::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* A forced solid surface needs no blur in either state. */
+.site-header-shell.site-header-shell--force-solid .header-archetype--floating-pill .header-pill::before {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        transition-duration: 0s !important;
+    }
+}
+
 /* Progressive glass enhancement for image-led opening compositions. The
  * pseudo-element is not an ancestor of the navigation, so its filter cannot
  * turn a fixed responsive menu into a header-relative containing block. */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    .site-header-shell .header-behavior-overlay-to-solid {
+    .site-header-shell .header-behavior-overlay {
         position: relative;
     }
 
-    .site-header-shell .header-behavior-overlay-to-solid::before {
+    .site-header-shell .header-behavior-overlay::before {
         position: absolute;
         z-index: 0;
         inset: 0;
@@ -323,15 +737,15 @@ html.header-state-js
         backdrop-filter: blur(14px) saturate(115%);
     }
 
-    .site-header-shell .header-behavior-overlay-to-solid > * {
+    .site-header-shell .header-behavior-overlay > * {
         position: relative;
         z-index: 1;
     }
 
     html.header-is-scrolled
         .site-header-shell
-        .header-behavior-overlay-to-solid::before,
-    .site-header-shell--force-solid .header-behavior-overlay-to-solid::before {
+        .header-behavior-overlay::before,
+    .site-header-shell--force-solid .header-behavior-overlay::before {
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
     }
@@ -340,7 +754,7 @@ html.header-state-js
      * over the hero while the surface is transparent. */
     html.header-state-js
         .site-header-shell
-        .header-behavior-overlay-to-solid.header-top-transparent::before {
+        .header-behavior-overlay.header-top-transparent::before {
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
     }
@@ -350,7 +764,7 @@ html.header-state-js
  * It also must not inherit the desktop row justification (nav-at-end headers
  * otherwise glue labels to the viewport edge and clip them). */
 .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay)
     .wp-block-navigation__responsive-container.is-menu-open {
     --navigation-layout-justification-setting: flex-start;
     --navigation-layout-justify: flex-start;
@@ -367,11 +781,11 @@ html.header-state-js
 }
 
 .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay)
     .wp-block-navigation__responsive-container.is-menu-open
     .wp-block-navigation__responsive-container-content,
 .site-header-shell
-    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay)
     .wp-block-navigation__responsive-container.is-menu-open
     :is(.wp-block-navigation__container, .wp-block-page-list) {
     align-items: stretch !important;
@@ -379,8 +793,10 @@ html.header-state-js
     text-align: start !important;
 }
 
-/* Measured by header.js, including restored-scroll and responsive layouts. */
-html.header-state-js {
+/* Measured by header.js, including restored-scroll and responsive layouts.
+ * Only chrome that survives the scroll can cover an anchor target, so the
+ * driver marks that case and a transient overlay keeps the native offset. */
+html.header-state-js.header-chrome-persistent {
     scroll-padding-top: calc(
         var(--site-header-height, 0px)
         + var(--site-admin-bar-offset, 0px)
@@ -393,15 +809,27 @@ html.header-state-js {
 
 @media (prefers-reduced-motion: reduce) {
     .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay),
     .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) * {
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay) * {
         transition-duration: 0s !important;
     }
 }
 
 @media print {
-    html.header-state-js {
+    /* A printed header takes its own space, so nothing overlaps the opening
+     * and the reserved zone would only be a blank strip on the page. Zeroing
+     * the whole clearance, not just its floor: the driver's measured height
+     * outlives the media switch and would otherwise still be reserved. Same
+     * selector as the rule it overrides, so cascade order decides. */
+    :is(.site-header-shell--overlay-to-solid, .site-header-shell--overlay-transient)
+        + .wp-block-post-content
+        .header-overlay-clearance {
+        --header-clearance: 0px;
+    }
+
+    html.header-state-js,
+    html.header-state-js.header-chrome-persistent {
         scroll-padding-top: 0;
     }
 
@@ -414,12 +842,12 @@ html.header-state-js {
     }
 
     .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay),
     html.header-is-scrolled
         .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay),
     .site-header-shell--force-solid
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay) {
         color: #000000 !important;
         background: #ffffff !important;
         box-shadow: none !important;
@@ -427,7 +855,7 @@ html.header-state-js {
     }
 
     .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay)
         :where(
             .wp-block-site-title,
             .wp-block-site-title a,
@@ -439,7 +867,7 @@ html.header-state-js {
     }
 
     .site-header-shell
-        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay)
         .wp-block-navigation__responsive-container.is-menu-open {
         position: static !important;
         inset: auto !important;
@@ -456,9 +884,35 @@ html.header-state-js {
     }
 
     .site-header-shell
-        :is(.header-behavior-overlay-to-solid, .header-behavior-sticky-soft)::before {
+        :is(.header-behavior-overlay, .header-behavior-sticky-soft)::before {
         content: none !important;
         -webkit-backdrop-filter: none !important;
         backdrop-filter: none !important;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        border: 0;
+        background: #ffffff !important;
+        box-shadow: none !important;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill::before {
+        content: none !important;
+    }
+}
+
+/* Keep the open navigation above other controls in the pill. */
+.site-header-shell .header-archetype--floating-pill .header-pill > :has(.wp-block-navigation__responsive-container.is-menu-open) {
+    z-index: 2;
+}
+
+@media (max-width: 782px) {
+    .site-header-shell :is(.header-archetype--bar-center-cta, .header-archetype--spread-nav)
+        .wp-block-navigation__responsive-container:not(.is-menu-open) {
+        display: none;
+    }
+    .site-header-shell :is(.header-archetype--bar-center-cta, .header-archetype--spread-nav)
+        .wp-block-navigation__responsive-container-open {
+        display: flex;
     }
 }

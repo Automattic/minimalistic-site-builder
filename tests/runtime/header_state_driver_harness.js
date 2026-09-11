@@ -49,6 +49,11 @@ function environment(options) {
         height: options.headerHeight || 72,
         offsetHeight: options.headerHeight || 72,
         throwOnMeasure: false,
+        matches(selector) {
+            return selector.split(',').map(value => value.trim()).includes(
+                '.site-header-shell--' + (options.behavior || 'sticky-soft')
+            );
+        },
         getBoundingClientRect() {
             if (this.throwOnMeasure) {
                 throw new Error('header measurement failed');
@@ -128,11 +133,11 @@ function environment(options) {
         // runs before <body> exists and the test attaches it later.
         body: options.noBody ? null : body,
         readyState: options.readyState || 'complete',
-        querySelector() {
+        querySelector(selector) {
             if (options.queryFailure) {
                 throw new Error('query failed');
             }
-            return header;
+            return header && header.matches(selector) ? header : null;
         },
         querySelectorAll(selector) {
             if (selector === '.wp-block-navigation') {
@@ -311,6 +316,24 @@ function testCurrentNavigationFallbackIsScopedPerBlock() {
     );
 }
 
+function testHeaderPersistence() {
+    for (const behavior of ['sticky-soft', 'overlay-to-solid', 'overlay-transient']) {
+        const env = environment({ behavior, pageYOffset: 80 });
+        check(env.root.classList.contains('header-state-js'), behavior + ': the driver did not start');
+        check(env.root.classList.contains('header-is-scrolled'), behavior + ': the scroll state is absent');
+        check(
+            env.root.classList.contains('header-chrome-persistent') === (behavior !== 'overlay-transient'),
+            behavior + ': the anchor offset has the wrong persistence'
+        );
+        env.header.throwOnMeasure = true;
+        env.dispatch('resize');
+        env.flushFrames();
+        check(!env.root.classList.contains('header-chrome-persistent'), behavior + ': failure kept the anchor offset');
+    }
+    const staticHeader = environment({ behavior: 'static' });
+    check(!staticHeader.root.classList.contains('header-state-js'), 'the driver selected a static header');
+}
+
 function testInitialAndScrollState() {
     const env = environment({ pageYOffset: 80, headerHeight: 74 });
     check(env.root.classList.contains('header-state-js'), 'enhancement scope was not enabled');
@@ -481,6 +504,7 @@ function testFailOpen() {
     check(asyncFailure.resizeObservers[0].disconnected, 'async failure left ResizeObserver connected');
 }
 
+testHeaderPersistence();
 testInitialAndScrollState();
 testMeasurementAndAdminBar();
 testLoadingAndRestoredState();

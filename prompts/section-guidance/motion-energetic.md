@@ -1,0 +1,1 @@
+- `energetic`: favor `stagger-children`, `reveal-up`, and hover responses; the kit renders entrances as quick vertical arrivals with a crisp, smooth settle — speed carries the energy. For a focal ambient effect consider `ambient-drift` or `gradient-shift` instead of defaulting to an image zoom.

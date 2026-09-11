@@ -212,14 +212,14 @@ function dp3_contract_with_mode(?string $mode, callable $callback): void
     }
 }
 
-test('TG3 page mode default matches the immutable Slice-2 request and artifact golden', function () {
+test('TG3 page mode matches the golden with BIGR-1001 section budgets', function () {
     dp3_contract_with_mode(null, function (): void {
         [$project, $llm, $tmp, $golden] = dp3_contract_fixture();
         try {
             foreach (['snapshot_commit', 'snapshot_tree'] as $provenanceKey) {
                 assert_true(
                     preg_match('/\A[0-9a-f]{40}\z/D', (string) ($golden[$provenanceKey] ?? '')) === 1,
-                    "golden records immutable Slice-2 {$provenanceKey} provenance",
+                    "golden records the base Slice-2 {$provenanceKey} provenance",
                 );
             }
             dp3_contract_queue_page($llm, $golden);
@@ -236,11 +236,11 @@ test('TG4 section mode fans one request per inner section from fold CSS preview 
         [$project, $llm, $tmp, $golden] = dp3_contract_fixture();
         try {
             $aboutSections = [
-                dp3_contract_section('about-intro', 'About intro', 'centered-stack'),
+                dp3_contract_section('about-intro', 'About intro', 'feature-row-hairlines'),
                 dp3_contract_section('about-values', 'About values', 'asymmetric-split', 'tinted'),
             ];
             $contactSections = [
-                dp3_contract_section('contact-visit', 'Contact visit', 'centered-stack'),
+                dp3_contract_section('contact-visit', 'Contact visit', 'feature-row-hairlines'),
             ];
             $llm->queueJson(['sections' => $aboutSections]);
             $llm->queueJson(['sections' => $contactSections]);
@@ -336,7 +336,7 @@ test('TG6 unset empty and explicit page stay silent while invalid non-empty fall
         [$project, $llm, $tmp, $golden] = dp3_contract_fixture($pages);
         try {
             $llm->queueJson(['sections' => [
-                dp3_contract_section('about-intro', 'About intro', 'centered-stack'),
+                dp3_contract_section('about-intro', 'About intro', 'bento-grid'),
             ]]);
             $llm->queueText($golden['input']['responses']['design/home-body.html']);
             $llm->queueText('<section id="about-intro"><h1>ABOUT</h1></section>');
@@ -371,7 +371,7 @@ test('TG7 section failures drop only failed sections and collapse total loss to 
         ['slug' => 'about', 'title' => 'About', 'purpose' => 'Explain studio'],
     ];
     $plan = ['sections' => [
-        dp3_contract_section('about-intro', 'About intro', 'centered-stack'),
+        dp3_contract_section('about-intro', 'About intro', 'bento-grid'),
         dp3_contract_section('about-values', 'About values', 'asymmetric-split', 'tinted'),
     ]];
 
@@ -428,7 +428,7 @@ test('TG7 section failures drop only failed sections and collapse total loss to 
                     . '<footer><p>FRONT-FOOTER</p></footer></body></html>',
             );
             $llm->queueJson(['sections' => [
-                dp3_contract_section('legacy-about', 'Legacy about', 'centered-stack'),
+                dp3_contract_section('legacy-about', 'Legacy about', 'bento-grid'),
             ]]);
             $llm->queueText('OK');
             $llm->queueText(
@@ -489,7 +489,7 @@ test('TG9 section mode keeps home body one unit and splice preserves fold hero p
         [$project, $llm, $tmp, $golden] = dp3_contract_fixture($pages);
         try {
             $llm->queueJson(['sections' => [
-                dp3_contract_section('about-intro', 'About intro', 'centered-stack'),
+                dp3_contract_section('about-intro', 'About intro', 'bento-grid'),
             ]]);
             $llm->queueText($golden['input']['responses']['design/home-body.html']);
             $llm->queueText('<section id="about-intro"><h1>ABOUT</h1></section>');

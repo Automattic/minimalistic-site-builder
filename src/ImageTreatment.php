@@ -91,11 +91,11 @@ final class ImageTreatment
         return <<<CSS
             /* Committed palette tint. The overlay sits above image pixels and
                below captions/cover copy, so text and controls stay untreated. */
-            :where(figure.card-media, figure.card-media-tall, figure.card-media-thumb) {
+            :where(figure.card-media, figure.card-media-tall) {
                 position: relative;
                 isolation: isolate;
             }
-            :where(figure.card-media, figure.card-media-tall, figure.card-media-thumb)::after,
+            :where(figure.card-media, figure.card-media-tall)::after,
             .wp-block-cover > .wp-block-cover__background::after {
                 content: "";
                 position: absolute;
@@ -106,7 +106,7 @@ final class ImageTreatment
                 opacity: 0.14;
                 mix-blend-mode: color;
             }
-            :where(figure.card-media, figure.card-media-tall, figure.card-media-thumb) > figcaption {
+            :where(figure.card-media, figure.card-media-tall) > figcaption {
                 position: relative;
                 z-index: 2;
             }

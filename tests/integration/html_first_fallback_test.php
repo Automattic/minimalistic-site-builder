@@ -46,7 +46,7 @@ test('one failed inner design uses blocks-path sections while sibling pages stay
         $llm->queueText(blocks_fallback_block('Visit', 'BLOCKS-CONTACT'));
         $llm->queueJson(['sections' => [[
             'slug' => 'visit', 'title' => 'Visit', 'role' => 'hero', 'type' => 'contact-details',
-            'layout_archetype' => 'centered-stack', 'background' => 'base',
+            'layout_archetype' => 'bento-grid', 'background' => 'base',
             'vertical_density' => 'standard', 'handoff' => 'Before the footer.',
         ]]]);
 

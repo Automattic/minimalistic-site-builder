@@ -37,7 +37,7 @@ final class ImageLogger
      * so a partial build is still inspectable.
      *
      * @param string $label the asset filename the request produced, e.g. "hero.jpg"
-     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
+     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string,image_kind?:string} $request
      *        the composed prompt and every parameter that shaped the request
      * @param array{path?:string,bytes?:int,border_trimmed?:int} $result output asset path, size and painted-border trim
      *        (ignored for a failed request)
@@ -59,7 +59,7 @@ final class ImageLogger
      * the full prompt text exactly as sent to the API, and —
      * for a failed request — the error last. Pure — unit-testable.
      *
-     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
+     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string,image_kind?:string} $request
      * @param array{path?:string,bytes?:int,border_trimmed?:int} $result
      * @param ?string $error failure message, or null for a successful request
      */
@@ -115,6 +115,7 @@ final class ImageLogger
             'page_context'      => 'PAGE CONTEXT',
             'style'             => 'STYLE',
             'image_grade'       => 'IMAGE GRADE',
+            'image_kind'        => 'IMAGE KIND',
         ] as $key => $heading) {
             $value = trim((string) ($request[$key] ?? ''));
             if ($value !== '') {

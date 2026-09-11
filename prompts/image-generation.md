@@ -41,11 +41,12 @@ A full-bleed hero/cover BACKGROUND image MUST be `landscape` or `ultrawide` — 
 **Grid and row consistency:**
 When creating multiple images that will be displayed together in a row or grid (e.g. team members, product cards, blog post thumbnails, gallery items), ALL images in that group MUST use the same aspect ratio and orientation. This ensures visual alignment and a cohesive layout. For example, if you have three cards in a row, all three images should be `card-landscape`, `card-portrait`, or `square` — never a mix.
 
-**Style options:**
+**Style options:** Use the **Image kind** keyword for content. Use `photorealistic` for portraits and `flat-design` for logos. The build adds render instructions; describe only the subject and composition.
 - `photorealistic` — Photographic, realistic images
 - `digital-art` — Modern digital artwork
 - `illustration` — Hand-drawn style illustrations
 - `minimalist` — Clean, simple, minimal design
+- `ui-screenshot` — Application screen only; no frame, title bar, browser, device, or desk
 - `flat-design` — Flat, modern UI design style
 - `3d-render` — 3D rendered appearance
 - `abstract` — Abstract artistic style

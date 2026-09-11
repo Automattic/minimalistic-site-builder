@@ -111,7 +111,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Every OTHER archetype is capped by archetypeCap(), which works out to a
      * flat "at most twice" for every page length the planner actually produces
-     * (front pages aim 5-8 sections, interior 3-6) and only loosens beyond
+     * (front pages aim 3-5 sections, interior 3-4) and only loosens beyond
      * eight — this divisor is what makes it loosen.
      *
      * The adjacency rule cannot do this job: "no two ADJACENT sections share an
@@ -129,6 +129,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const ARCHETYPE_SHARE_DIVISOR = 3;
 
+    private const LIST_SPLIT_TYPES = [
+        'accolades', 'awards', 'capabilities', 'disciplines', 'expertise', 'honours', 'honors', 'practices', 'recognition',
+    ];
+
+    private const CARDLESS_ARCHETYPES = [
+        'feature-row-hairlines', 'stat-ledger', 'logo-strip', 'project-grid-2x2', 'faq-split', 'cta-panel',
+    ];
+
     /**
      * Level replacements for an ineligible offset-grid. Matches the page-plan
      * prompt: never a cover, prefer a card row, honor the grid cap.
@@ -136,7 +144,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private const LEVEL_ROW_ARCHETYPES = [
         'equal-card-grid',
         'asymmetric-split',
-        'list-with-thumbnails',
+        'bento-grid',
     ];
 
     /** Whitespace-led pauses are accents, not a page's default cadence. */
@@ -153,10 +161,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * rate rose WITH length rather than falling: 59% of 5-section pages, 81% of
      * 6-section, and 42 of 42 seven-section pages. Long pages are exactly where
      * pacing bands earn their keep, so a minimum is the only thing that catches
-     * it. Short pages — every contact page is 2 to 4 sections (BIGR-858) — are
-     * left alone, where one uniform ground is a fine answer.
+     * it. Short pages are left alone, where one uniform ground is a fine answer.
+     *
+     * The number tracks the page budgets, it is not independent of them. It was
+     * 5 when front pages ran 5-8 and the only short page was a 2-4 section
+     * contact page. BIGR-1001 cut those to 5 / 4 / 3, which would have left this
+     * floor above every interior page and above all but an exactly-5 front page,
+     * so the 73% finding would simply have come back everywhere. 4 keeps the
+     * same intent against the new budgets: contact pages stay exempt, every
+     * other page is held to at least one band.
      */
-    private const MIN_BANDED_SECTIONS = 5;
+    private const MIN_BANDED_SECTIONS = 4;
 
     /** Long pages may spend at most two deliberate beats off the base surface. */
     private const MAX_NON_BASE_SECTIONS = 2;
@@ -169,19 +184,64 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
+    /**
+     * Page section budgets, including the hero and closing and excluding shared
+     * chrome. BIGR-1001. Every brief the model reads is built from these, so the
+     * number the prompt states and the number capPageSections() enforces cannot
+     * drift apart.
+     */
+    public const MAX_FRONT_SECTIONS = 5;
+    public const MAX_INTERIOR_SECTIONS = 4;
+    public const MAX_CONTACT_SECTIONS = 3;
+    private const MIN_FRONT_SECTIONS = 3;
+    private const MIN_INTERIOR_SECTIONS = 3;
+    private const MIN_CONTACT_SECTIONS = 2;
+
+    /**
+     * The budgets as prose, for the markdown prompts. They are rendered rather
+     * than typed so a change to the constants above reaches every brief the
+     * model reads, instead of leaving a prompt quoting a number the code no
+     * longer enforces.
+     */
+    public static function planBudgets(): string
+    {
+        return 'homepages have ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+            . ' sections, interior pages ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ', and contact pages ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS . '.';
+    }
+
+    /** The homepage budget for the design prompt, which authors below an existing hero. */
+    public static function homeBodyBudget(): string
+    {
+        return 'Write ' . (self::MIN_FRONT_SECTIONS - 1) . ' to ' . (self::MAX_FRONT_SECTIONS - 1)
+            . ' top-level content sections inside `<main>`, never more: with the existing preview hero, the'
+            . ' finished homepage has ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS . ' sections total.';
+    }
+
+    /** The interior and contact budgets for the design prompt, which authors the hero too. */
+    public static function innerPageBudget(): string
+    {
+        return 'Write ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ' top-level sections including the compact opening hero, never more. Contact or enquiry pages'
+            . ' instead have ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+            . ' sections total including the hero.';
+    }
+
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
-        . ' energy: an opening hero, at least 3 distinct, image-rich content sections, and a closing next step that follows from this page\'s purpose.'
-        . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . " sections so the page is richer and flows well. Let the design direction's mood"
-        . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
+        . ' energy: an opening hero, 1 to ' . (self::MAX_FRONT_SECTIONS - 2) . ' focused content sections, and a closing next step that follows from this page\'s purpose.'
+        . " Use the spec's \"sections\" list as a starting point, but prioritize it: combine, reorder, or rename"
+        . " sections so the page stays concise and flows well. Let the design direction's mood"
+        . " inform which sections you choose and how they're framed. Aim for " . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+        . ' sections total including the hero, never more. The shared header and footer do not count.';
 
     /**
      * Interior default. Contact-like pages use a tighter brief via emphasisFor()
      * so a "reach us" purpose is not padded to homepage length (BIGR-858).
      */
-    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections'
-        . ' — fewer when THIS PAGE\'s purpose is narrow.'
+    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for ' . self::MIN_INTERIOR_SECTIONS . ' to '
+        . self::MAX_INTERIOR_SECTIONS . ' sections total including the hero, never more.'
+        . ' The shared header and footer do not count.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
         . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
         . ' compact archetype instead),'
@@ -194,8 +254,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
 
-    /** Contact/enquiry pages stay brief. Ticket BIGR-858. */
-    public const MAX_CONTACT_SECTIONS = 4;
 
     /**
      * Slug/title identities that belong to some other page even when the
@@ -410,6 +468,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         $page,
                         (bool) ($meta['form_placeholders'] ?? false),
                     ),
+                    'plan_budgets'           => self::planBudgets(),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -681,7 +740,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out[] = $page;
         }
 
-        // The plan prompt demands a hero, at least 3 content sections, and a
+        // The plan prompt demands at least 3 sections including the hero and
         // closing — a 1-2 section front page is a degenerate plan (observed:
         // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
         // Pad below the delivered sections with reviewed generic briefs so
@@ -689,7 +748,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings, $allowOffsetGrid);
         foreach ($out as $i => $page) {
             if (is_array($page)) {
-                $out[$i] = self::capContactPage($page, $warnings);
+                $out[$i] = self::capPageSections($page, $warnings);
             }
         }
 
@@ -697,6 +756,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // decides only WHETHER a section is list-like; once it assigns a
         // pattern, the exact value cannot drift. Obvious list-like semantic
         // types that omitted the field are repaired onto the same commitment.
+        $out = self::withStatedHighlightCards(
+            $out,
+            SectionComposition::statedHighlightFor($project->readJson('meta.json')),
+            $successfulRepairs,
+        );
+        $out = self::withListsOffTheSplit($out, $successfulRepairs);
+
         $out = self::reconcileItemPatternAssignments(
             $out,
             DesignDirectionStep::itemPatternFor($project),
@@ -730,6 +796,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $project->readText('siteSpec.json'),
             DesignDirectionStep::readFor($project),
         );
+        $out = self::withBandOffClosingPanel($out, $warnings);
         $out = self::withClosingBandOffFooterSurface(
             $out,
             FooterComposition::surface($footerArchetype),
@@ -836,6 +903,46 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $explicit = ItemPattern::explicit($authored);
                 $type = strtolower(trim((string) ($section['type'] ?? '')));
                 $listLike = self::isListLikeType($type);
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (in_array($archetype, self::CARDLESS_ARCHETYPES, true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                null,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            null,
+                            "released the '{$archetype}' section from the item idiom: its recipe defines the content structure",
+                        );
+                    }
+                    continue;
+                }
+                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
+                    if ($explicit !== ItemPattern::DEFAULT) {
+                        if ($explicit !== null) {
+                            $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                                $section['content_notes'] ?? '',
+                                $explicit,
+                                ItemPattern::DEFAULT,
+                            );
+                        }
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            ItemPattern::DEFAULT,
+                            "the '{$archetype}' recipe requires cards",
+                        );
+                    }
+                    continue;
+                }
                 if (self::isQuoteLedType($type) && $committed !== 'card') {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
@@ -1070,7 +1177,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
             }
             $page['sections'] = $sections;
-            $out[] = $page;
+            $out[] = self::capPageSections($page, $warnings);
         }
         $out = self::reconcileItemPatternAssignments(
             $out,
@@ -1407,6 +1514,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!in_array($archetype, self::ARCHETYPES, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
                     . implode(', ', self::ARCHETYPES);
+            } elseif (
+                in_array(strtolower($type), self::ARCHETYPES, true)
+                && strtolower($type) !== $archetype
+                && !($front && count($out) === 0)
+            ) {
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
+                    $archetype,
+                    strtolower($type),
+                    'the section type names an archetype, so the layout follows it',
+                );
+                $archetype = strtolower($type);
             }
             $background = trim((string) ($section['background'] ?? ''));
             if (!in_array($background, self::BACKGROUNDS, true)) {
@@ -2067,7 +2186,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Per-page planning brief. The spec purpose is the contract; contact pages
-     * are 2–4 sections, not the 3–6 interior pad.
+     * are 2–3 sections, rather than the 3–4 interior range.
      *
      * @param array<string,mixed> $page
      */
@@ -2086,9 +2205,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : ' There is no form backend: present only contact facts present in SITE SPEC;'
                     . ' omit mailto/tel when none exist, never a fake form.';
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
-                . '. Honor it. A contact page is brief — 2 to 4 sections total, never more. '
+                . '. Honor it. A contact page is brief — ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+                . ' sections total including the hero, never more. The shared header and footer do not count. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
-                . 'optional hours/address, a short close. Do NOT add story, programs, galleries, '
+                . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
                 . $formLine;
         }
@@ -2097,25 +2217,27 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Drop extra bands from a contact page so it stays at most 4 sections.
-     * Keeps the opener, the closer, and the highest-scoring contact/form
-     * middles, in document order. Idempotent. BIGR-858.
+     * Enforce the page budget after every generation, repair, and fallback path.
+     * Keep the opener and closer. Contact pages prioritize form/contact facts;
+     * other pages keep the earliest content in the authored order. Repair the
+     * new seams and record the removed sections. Idempotent. BIGR-1001.
      *
      * @param array<string,mixed> $page
      * @param list<string> $warnings
      * @return array<string,mixed>
      */
-    public static function capContactPage(array $page, array &$warnings = []): array
+    public static function capPageSections(array $page, array &$warnings = []): array
     {
-        if (!self::isContactLikePage($page)) {
-            return $page;
-        }
+        $front = !empty($page['front']);
+        $contact = self::isContactLikePage($page);
+        $max = self::maxSectionsFor($page);
+        $kind = $front ? 'front' : ($contact ? 'contact' : 'interior');
         $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
         $authored = count($sections);
-        if ($authored <= self::MAX_CONTACT_SECTIONS) {
+        if ($authored <= $max) {
             return $page;
         }
-        $kept = self::selectContactSections($sections, self::MAX_CONTACT_SECTIONS);
+        $kept = self::selectPageSections($page, $sections);
         $keptSlugs = array_map(
             static fn (array $section): string => (string) ($section['slug'] ?? ''),
             $kept,
@@ -2133,7 +2255,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $kept,
         );
         $varietyWarnings = [];
-        $kept = self::repairVariety($kept, false, null, $varietyWarnings, $pageSlug);
+        $kept = self::repairVariety($kept, $front, null, $varietyWarnings, $pageSlug);
         $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $varietyWarnings, $pageSlug);
         array_push($warnings, ...$varietyWarnings);
         // Last, so the seam prose names the archetypes that actually ship.
@@ -2147,11 +2269,37 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             "pages[slug={$pageSlug}].sections",
             $authored . ' sections (' . implode(', ', array_column($sections, 'slug')) . ')',
             $count . ' sections (' . implode(', ', $keptSlugs) . ')',
-            'trimmed contact page to ' . self::MAX_CONTACT_SECTIONS
+            'trimmed ' . $kind . ' page to ' . $max
                 . ' sections; dropped ' . implode(', ', $dropped),
             true,
         );
         return $page;
+    }
+
+    /** @param array<string,mixed> $page */
+    public static function maxSectionsFor(array $page): int
+    {
+        return !empty($page['front']) ? self::MAX_FRONT_SECTIONS
+            : (self::isContactLikePage($page) ? self::MAX_CONTACT_SECTIONS : self::MAX_INTERIOR_SECTIONS);
+    }
+
+    /**
+     * Select whole sections without rewriting their content or representation.
+     * Shared by the blocks planner and the HTML fragment transformer.
+     *
+     * @param array<string,mixed> $page
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    public static function selectPageSections(array $page, array $sections): array
+    {
+        $max = self::maxSectionsFor($page);
+        if (count($sections) <= $max) {
+            return $sections;
+        }
+        return self::isContactLikePage($page)
+            ? self::selectContactSections($sections, $max)
+            : array_merge(array_slice($sections, 0, $max - 1), [$sections[count($sections) - 1]]);
     }
 
     /**
@@ -2236,7 +2384,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $path,
                 $authoredArchetypes[$i] ?? $archetype,
                 $replacement,
-                'reassigned to clear an adjacent duplicate after the contact trim,'
+                'reassigned to clear an adjacent duplicate after the section trim,'
                     . ' avoiding an image-led band on a brief page',
             );
         }
@@ -2287,6 +2435,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             (string) ($section['type'] ?? ''),
             (string) ($section['purpose'] ?? ''),
             (string) ($section['content_notes'] ?? ''),
+            strip_tags((string) ($section['html'] ?? '')),
         ]));
         $score = 0;
         if (preg_match('/\b(?:form|jp_form|enquiry|inquiry)\b/u', $blob) === 1) {
@@ -2333,9 +2482,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // hero-only plan appends, so the appended tail takes the role.
             // Each inserted archetype avoids both neighbors so the adjacency
             // variety rule holds by construction.
-            $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
-                ? ['centered-stack', 'asymmetric-split', 'offset-grid']
-                : ['centered-stack', 'asymmetric-split', 'equal-card-grid'];
             $briefs = [
                 [
                     'slug'          => 'overview',
@@ -2365,6 +2511,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : '';
             $inserted = [];
             foreach (array_slice($briefs, 0, $missing) as $brief) {
+                // Only the final invitation has a known short content budget.
+                $safeArchetypes = $brief['type'] === 'cta'
+                    ? ['cta-panel', 'asymmetric-split', 'equal-card-grid']
+                    : ['asymmetric-split', 'equal-card-grid', 'bento-grid'];
                 $archetype = $safeArchetypes[0];
                 foreach ($safeArchetypes as $candidate) {
                     if ($candidate !== $above && $candidate !== $below) {
@@ -2813,7 +2963,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ?array $frontProjection = null,
         array $actionContext = [],
     ): array {
-        $archetype = $front ? 'full-bleed-cover' : 'centered-stack';
+        $archetype = $front ? 'full-bleed-cover' : 'asymmetric-split';
         $background = 'base';
         if ($front && $frontProjection !== null) {
             [$archetype, $_allowedBackgrounds, $background] = self::projectionContract($frontProjection);
@@ -2825,7 +2975,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'title'            => 'Content',
                 'type'             => 'content',
                 'purpose'          => '',
-                'content_notes'    => '',
+                'content_notes'    => $front ? '' : 'A compact page introduction: one heading and one short paragraph grounded in the site spec. No repeated items or multi-paragraph story.',
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => 'standard',
@@ -2873,8 +3023,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
         $sections = array_values(array_filter($raw, 'is_array'));
 
-        // Neither of these is a safe landing spot for a value we are guessing:
-        // a cover has its own interior-page rule and a grid has a cap.
         $excluded = ['full-bleed-cover', 'equal-card-grid'];
         $candidates = array_values(array_filter(
             array_diff(self::ARCHETYPES, $excluded),
@@ -3431,7 +3579,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $banded = 0;
         foreach ($sections as $section) {
             $background = strtolower(trim((string) ($section['background'] ?? '')));
-            if ($background !== '' && $background !== 'base') {
+            $cover = trim((string) ($section['layout_archetype'] ?? '')) === 'full-bleed-cover';
+            if ($cover || ($background !== '' && $background !== 'base')) {
                 $banded++;
             }
         }
@@ -3602,7 +3751,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * The most times one archetype may appear on a page of `$sections`.
      *
-     * Never below 2, so short pages (a 2-to-4-section contact page) are governed
+     * Never below 2, so short pages (a 2-to-3-section contact page) are governed
      * by the adjacency rule alone and are not handed an unsatisfiable cap.
      */
     public static function archetypeCap(int $sections): int
@@ -3632,8 +3781,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $best = null;
         $bestCount = PHP_INT_MAX;
         foreach (self::ARCHETYPES as $candidate) {
-            // The card grid has its own tighter cap and its own pass; letting
-            // this one hand out grids would fight it.
+            // Card grids have a separate cap.
             if ($candidate === 'equal-card-grid') {
                 continue;
             }
@@ -3663,5 +3811,144 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
+    }
+
+    /** Give repeated items a row or grid, while preserving the front hero. */
+    public static function withListsOffTheSplit(array $pages, array &$repairs = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $front = !empty($page['front']);
+            $keys = array_keys($sections);
+            $archetypes = array_map(
+                static fn ($section): string => is_array($section) ? trim((string) ($section['layout_archetype'] ?? '')) : '',
+                array_values($sections),
+            );
+            foreach ($keys as $position => $key) {
+                $section = $sections[$key];
+                if (!is_array($section) || ($front && $position === 0)) {
+                    continue;
+                }
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                $authored = $archetypes[$position];
+                if ($authored !== 'asymmetric-split') {
+                    continue;
+                }
+
+                $repeats = ItemPattern::explicit($section['item_pattern'] ?? null) !== null && !self::isQuoteLedType($type);
+                if (!$repeats && !self::isListLikeType($type) && !self::matchesTypeCatalog($type, self::LIST_SPLIT_TYPES)) {
+                    continue;
+                }
+                // The card grid is the one level row this repair may reach for,
+                // and it carries a page cap and the adjacency rule. When the
+                // page has already spent that budget the split stands.
+                $grids = count(array_filter($archetypes, static fn (string $a): bool => $a === 'equal-card-grid'));
+                if ($grids >= self::MAX_EQUAL_CARD_GRIDS) {
+                    continue;
+                }
+                $replacement = 'equal-card-grid';
+                if (($archetypes[$position - 1] ?? null) === $replacement || ($archetypes[$position + 1] ?? null) === $replacement) {
+                    continue;
+                }
+                $archetypes[$position] = $replacement;
+                $sections[$key]['layout_archetype'] = $replacement;
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now an equal-card-grid,'
+                    . ' one card per item in a row; this supersedes any layout named earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    $authored,
+                    $replacement,
+                    "a repeated '{$type}' list under the split stacks every item's picture in one column",
+                );
+            }
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /** Select a card layout when the brief requests a card highlight. */
+    public static function withStatedHighlightCards(array $pages, ?string $clause, array &$repairs = []): array
+    {
+        if ($clause === null || trim($clause) === '') {
+            return $pages;
+        }
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            foreach ($sections as $key => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+                if (
+                    $archetype === 'logo-strip'
+                    || !in_array($archetype, ['feature-row-hairlines', 'stat-ledger'], true)
+                    || !SectionComposition::highlightAppliesTo($clause, $section)
+                ) {
+                    continue;
+                }
+                $sections[$key]['layout_archetype'] = 'equal-card-grid';
+                $handoff = trim((string) ($section['handoff'] ?? ''));
+                $sections[$key]['handoff'] = trim($handoff . ' Build correction: this section is now an equal-card-grid,'
+                    . ' one card per item with one card highlighted as the brief asks; this supersedes any layout named'
+                    . ' earlier in this line.');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $key) . '.layout_archetype',
+                    $archetype,
+                    'equal-card-grid',
+                    'the brief states one highlighted card for this section, and a ' . $archetype
+                        . ' draws no card to highlight',
+                );
+            }
+            $pages[$index]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /** Keep the contrast panel distinct from the preceding band. */
+    public static function withBandOffClosingPanel(array $pages, array &$warnings = []): array
+    {
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections) || count($sections) < 2) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            $lastKey = end($keys);
+            $aboveKey = $keys[count($keys) - 2];
+            $last = $sections[$lastKey];
+            $above = $sections[$aboveKey];
+            if (!is_array($last) || !is_array($above)) {
+                continue;
+            }
+            if (trim((string) ($last['layout_archetype'] ?? '')) !== 'cta-panel'
+                || ($above['background'] ?? null) !== 'contrast'
+            ) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$aboveKey]['background'] = 'tinted';
+            $handoff = trim((string) ($above['handoff'] ?? ''));
+            $sections[$aboveKey]['handoff'] = trim($handoff . ' Build correction: this section\'s background is now '
+                . '"tinted" because the closing panel below it carries the contrast surface; this supersedes any '
+                . 'background named earlier in this line.');
+            $pages[$index]['sections'] = $sections;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $aboveKey) . '.background',
+                'contrast',
+                'tinted',
+                'the closing cta-panel below it paints its card on the contrast surface, so a contrast band '
+                . 'directly above would fuse with the panel into one dark close',
+            );
+        }
+        return $pages;
     }
 }

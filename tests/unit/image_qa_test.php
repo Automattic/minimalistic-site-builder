@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageQa;
 
 /**
@@ -56,6 +57,36 @@ test('ImageQa corrects the subject positively for each finding', function () {
     }
 });
 
+test('a product screen takes an interface text correction, not the photographic one', function () {
+    $verdict = ImageQa::verdict('{"upright": true, "rendered_text": true, "matches_subject": true}');
+    $authored = 'A light-mode analytics screen with a load-curve chart panel and a settlement rate table.';
+
+    // The photographic correction says every surface is plain and unmarked. An
+    // interface is MADE of marked panels, so that sentence steers a screen
+    // nowhere: a generated page kept "Load-curve chart", "Settlement rate" and
+    // "6.3K" through the one regeneration and shipped with a warning.
+    $screen = ImageQa::correctedSubject($authored, $verdict, 'ui-mockup');
+    assert_true(str_starts_with($screen, $authored . ' '), 'authored subject leads');
+    assert_contains(ImageKind::SCREEN_NO_TEXT, $screen);
+    assert_contains('plain rounded placeholder bar with no glyphs', $screen);
+    assert_contains('identify the layout for you', $screen, 'the panel names are not label copy');
+    assert_true(!str_contains($screen, 'plain and unmarked'), 'the photographic wording is replaced, not appended');
+
+    // The first-pass prompt and the correction quote one constant, so a screen
+    // is told the same rule twice in the same words.
+    assert_contains(ImageKind::SCREEN_NO_TEXT, ImageKind::promptClause('ui-mockup'));
+
+    // Every other kind keeps the photographic correction and its taboo.
+    foreach (['photo', '3d-object', 'line-illustration', 'abstract-gradient', ''] as $kind) {
+        $other = ImageQa::correctedSubject('A misty valley at dawn.', $verdict, $kind);
+        assert_contains('plain and unmarked', $other, $kind);
+        foreach (['letter', 'sign', 'text', 'word', 'glyph'] as $bad) {
+            assert_true(!str_contains(strtolower($other), $bad), "{$kind} correction never names “{$bad}”");
+        }
+    }
+    assert_eq('', ImageKind::screenTextCorrection('photo'));
+});
+
 test('ImageQa resamples an off-subject picture with the subject unchanged', function () {
     $verdict = ImageQa::verdict('{"upright": true, "rendered_text": false, "matches_subject": false}');
     assert_eq('A misty valley at dawn.', ImageQa::correctedSubject('A misty valley at dawn.', $verdict), 'the authored subject is resampled verbatim');
@@ -67,4 +98,15 @@ test('ImageQa warning row carries file, subject, finding and disposition', funct
     assert_contains('"A dense crowd at dusk"', $row);
     assert_contains('camera not upright', $row);
     assert_contains('disposition: delivered, still failing after one regeneration', $row);
+});
+
+
+test('ImageQa retains rotation failures after the prompt permits the image kind tilt', function () {
+    $answer = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "the screen is upside down"}';
+    $verdict = ImageQa::verdict($answer);
+    assert_eq(false, $verdict['ok']);
+    assert_contains('camera not upright', $verdict['findings'][0]);
+    assert_contains('camera is upright and level', ImageQa::correctedSubject('A dashboard.', $verdict, 'ui-mockup'));
+    $tilt = ImageQa::verdict('{"upright": true, "rendered_text": false, "matches_subject": true, "note": "the screen has a gentle tilt"}');
+    assert_eq(true, $tilt['ok']);
 });

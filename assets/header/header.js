@@ -4,7 +4,12 @@
     var root = document.documentElement;
     var ENHANCEMENT_CLASS = 'header-state-js';
     var SCROLLED_CLASS = 'header-is-scrolled';
-    var HEADER_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid';
+    var HEADER_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid, '
+        + '.site-header-shell--overlay-transient';
+    // Chrome that survives the scroll owns the anchor offset. A transient
+    // overlay leaves with the hero, so it never claims that offset.
+    var PERSISTENT_SELECTOR = '.site-header-shell--sticky-soft, .site-header-shell--overlay-to-solid';
+    var PERSISTENT_CLASS = 'header-chrome-persistent';
     // Hysteresis: the scrolled state engages at the enter threshold but only
     // releases at the lower exit threshold, so jitter around a single boundary
     // cannot restart the surface transition on every frame.
@@ -16,6 +21,9 @@
     var resizeObserver = null;
     var listening = false;
     var adminBarEl = null;
+    var CURRENT_SECTION_CLASS = 'is-current-section';
+    var sectionObserver = null;
+    var updateSectionNavigation = null;
     var adminBarQueried = false;
     var appliedAdminBarOffset = null;
     var adminBarBodySynced = false;
@@ -110,6 +118,70 @@
         }
     }
 
+    // Mark the current section on the pill, centered bar, and spread bar.
+    // Keep the WordPress current-page state on links that already declare it.
+    function watchSectionNavigation() {
+        if (typeof document.querySelectorAll !== 'function') {
+            return;
+        }
+        var scope = document.querySelector('.header-archetype--floating-pill, .header-archetype--bar-center-cta, .header-archetype--spread-nav');
+        if (!scope) {
+            return;
+        }
+        var links = scope.querySelectorAll('.wp-block-navigation a[href^="#"]');
+        var entries = [];
+        var index;
+        for (index = 0; index < links.length; index += 1) {
+            if (links[index].getAttribute('aria-current') === 'page') {
+                continue;
+            }
+            var id;
+            try {
+                id = decodeURIComponent(links[index].getAttribute('href').slice(1));
+            } catch (error) {
+                continue;
+            }
+            var section = id ? document.getElementById(id) : null;
+            var item = navigationItemForLink(links[index]);
+            if (section && item) {
+                entries.push({ link: links[index], item: item, section: section });
+            }
+        }
+        if (entries.length === 0) {
+            return;
+        }
+        updateSectionNavigation = function () {
+            var band = (window.innerHeight || root.clientHeight) * 0.35;
+            var current = null;
+            var currentTop = -Infinity;
+            // Select by page position, independent of menu order. Read each
+            // scroll frame so short sections and scroll jumps update the mark.
+            for (var i = 0; i < entries.length; i += 1) {
+                var top = entries[i].section.getBoundingClientRect().top;
+                if (top <= band && top > currentTop) {
+                    current = entries[i].section;
+                    currentTop = top;
+                }
+            }
+            for (var j = 0; j < entries.length; j += 1) {
+                var on = entries[j].section === current;
+                entries[j].item.classList.toggle(CURRENT_SECTION_CLASS, on);
+                if (on) {
+                    entries[j].link.setAttribute('aria-current', 'location');
+                } else if (entries[j].link.getAttribute('aria-current') === 'location') {
+                    entries[j].link.removeAttribute('aria-current');
+                }
+            }
+        };
+        updateSectionNavigation();
+        if (typeof window.IntersectionObserver === 'function') {
+            sectionObserver = new window.IntersectionObserver(updateSectionNavigation, { threshold: 0 });
+            for (index = 0; index < entries.length; index += 1) {
+                sectionObserver.observe(entries[index].section);
+            }
+        }
+    }
+
     function applyScrollState() {
         scrollFrame = 0;
         var top = currentScrollTop();
@@ -119,6 +191,9 @@
             root.classList.remove(SCROLLED_CLASS);
         }
         applyAdminBarOffset();
+        if (updateSectionNavigation) {
+            updateSectionNavigation();
+        }
     }
 
     function clearMeasuredHeight() {
@@ -200,6 +275,15 @@
     }
 
     function stop() {
+        updateSectionNavigation = null;
+        if (sectionObserver) {
+            try {
+                sectionObserver.disconnect();
+            } catch (error) {
+                // Nothing to release.
+            }
+            sectionObserver = null;
+        }
         if (scrollFrame) {
             window.cancelAnimationFrame(scrollFrame);
             scrollFrame = 0;
@@ -229,6 +313,7 @@
         stop();
         root.classList.remove(ENHANCEMENT_CLASS);
         root.classList.remove(SCROLLED_CLASS);
+        root.classList.remove(PERSISTENT_CLASS);
         clearMeasuredHeight();
     }
 
@@ -257,6 +342,9 @@
         var height = Math.max(0, Math.ceil(rect.height || header.offsetHeight || 0));
         root.style.setProperty('--site-header-height', height + 'px');
         applyAdminBarOffset();
+        if (updateSectionNavigation) {
+            updateSectionNavigation();
+        }
     }
 
     function scheduleMeasurement() {
@@ -291,6 +379,9 @@
                 failOpen();
                 return;
             }
+            if (typeof header.matches === 'function' && header.matches(PERSISTENT_SELECTOR)) {
+                root.classList.add(PERSISTENT_CLASS);
+            }
 
             // Synchronous setup handles a restored scroll position before the
             // first scheduled event and supplies an anchor offset immediately.
@@ -309,6 +400,7 @@
                 resizeObserver = new window.ResizeObserver(scheduleMeasurement);
                 resizeObserver.observe(header);
             }
+            watchSectionNavigation();
         } catch (error) {
             failOpen();
         }

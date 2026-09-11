@@ -33,7 +33,7 @@ Use the full outline to understand this section's position, neighboring sections
 
 {{section_slug}}
 
-Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
+Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state.
 
 LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
 
@@ -50,6 +50,8 @@ Return exactly one closed root `<section id="{{section_slug}}">...</section>` an
 ## Supported HTML slice
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `section`, `nav`, `article`, `aside`, `div`, and `span`.
+
+- Surface: the DESIGN DIRECTION's `surface--<name>` class is an optional exception to the existing-class rule. Use it only when this section's content directly supports the stated texture reason. Read the full page outline. Only the first suitable section after the hero may use it; every later section remains plain. Use no texture when no section benefits. Put the class on the root section only. Keep tables, forms, navigation, image backgrounds, and sections with a decorative device plain. The build supplies the CSS and removes extra texture classes.
 
 - Device: when the DESIGN DIRECTION carries a **Device** fact naming a class, put that class on the root element of exactly ONE band, and never the hero — the build ships the CSS for it and strips the class from any extra band or from the hero. When there is no Device fact, never invent one.
 
