@@ -16,6 +16,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
+use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\HeaderChrome;
 use Automattic\SiteBuild\Surface;
@@ -389,8 +390,52 @@ final class DesignDirectionStep implements Step
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
 
-        $project->addWarnings($this->id(), $warnings);
+        $project->addWarnings($this->id(), array_merge(
+            $warnings,
+            self::monocultureFontWarnings($direction, $prompt),
+        ));
         $project->writeJson(self::FILE, $direction);
+    }
+
+    /**
+     * Record an unprompted reach for a face that reads as a default.
+     *
+     * The deterministic substitution is gone on purpose: the model now
+     * reaches the whole catalog instead of a hand-picked shelf, which is a
+     * wider design space than the substitution could offer. What must not go
+     * with it is the measurement that justified it — across 128 audited
+     * builds, 128 sites drew on 13 heading families and five of them set more
+     * than half of everything, and naming those five in the prompt moved the
+     * reflex to `Space Grotesk` twice in five builds.
+     *
+     * So this changes nothing the visitor sees. It is rung 4: the choice
+     * ships, and warnings.json carries the row a cohort audit can count, so a
+     * returning monoculture is visible without anything being overruled.
+     *
+     * A face the brief itself names is a genuine request and is not recorded.
+     *
+     * @param array<string,mixed> $direction
+     * @return list<string>
+     */
+    public static function monocultureFontWarnings(array $direction, string $prompt): array
+    {
+        $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
+        $rows = [];
+        foreach (['heading', 'body', 'accent'] as $slot) {
+            $family = $type[$slot]['family'] ?? null;
+            if (!is_string($family) || trim($family) === '' || !FontMonoculture::isOverused($family)) {
+                continue;
+            }
+            if (mb_stripos($prompt, trim($family)) !== false) {
+                continue;
+            }
+            $rows[] = "file='designDirection.json'; path=\"type.{$slot}.family\"; authored="
+                . Warnings::value(trim($family)) . '; delivered=' . Warnings::value(trim($family))
+                . '; disposition=delivered as authored; the brief did not name this face and it is one the'
+                . ' catalog-wide audit measures as a default rather than a choice';
+        }
+
+        return $rows;
     }
 
     /**
