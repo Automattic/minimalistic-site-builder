@@ -91,7 +91,7 @@ test('core blocks written without a namespace are not mistaken for foreign ones'
         ],
     ]);
 
-    assert_eq([], ContentOnlyGuard::nonCoreBlocks($bundle));
+    assert_eq([], ContentOnlyGuard::check($bundle, ['theme/hero']));
 });
 
 test('a pattern outside the approved inventory is rejected', function () {
@@ -122,7 +122,10 @@ test('a section with no recorded pattern counts as unapproved', function () {
         ],
     ]);
 
-    assert_eq(['(unrecorded)'], ContentOnlyGuard::unapprovedSections($bundle, ['theme/hero']));
+    $violations = ContentOnlyGuard::check($bundle, ['theme/hero']);
+
+    assert_eq(1, count($violations));
+    assert_contains('(unrecorded)', $violations[0]);
 });
 
 test('shared parts are checked alongside page bodies', function () {

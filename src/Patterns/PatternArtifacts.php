@@ -61,12 +61,15 @@ final class PatternArtifacts
     /** Per-page block trees after content has been written into the patterns. */
     public const PAGES = 'patterns/pages/*';
 
+    /** Shared parts — header, footer — that every page renders inside. */
+    public const PARTS = 'patterns/parts';
+
     /** Images to import and the navigation targets to resolve, by reference. */
     public const MEDIA = 'patterns/media.json';
 
     /** What the host applies: pages, shared parts, Brand, and media references. */
     public const BUNDLE = 'bundle/content.json';
 
-    /** Stage timings, model usage, and every check the export ran. */
+    /** What the export found: counts, and every check that did not pass. */
     public const REPORT = 'patterns/report.json';
 }

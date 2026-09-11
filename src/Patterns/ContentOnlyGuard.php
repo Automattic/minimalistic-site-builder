@@ -89,7 +89,7 @@ final class ContentOnlyGuard
      * @param array<string, mixed> $bundle
      * @return list<string>
      */
-    public static function nonCoreBlocks(array $bundle): array
+    private static function nonCoreBlocks(array $bundle): array
     {
         $found = [];
         foreach (self::contents($bundle) as $html) {
@@ -115,7 +115,7 @@ final class ContentOnlyGuard
      * @param list<string>         $inventoryIds
      * @return list<string>
      */
-    public static function unapprovedSections(array $bundle, array $inventoryIds): array
+    private static function unapprovedSections(array $bundle, array $inventoryIds): array
     {
         $approved = array_fill_keys($inventoryIds, true);
         $found = [];
