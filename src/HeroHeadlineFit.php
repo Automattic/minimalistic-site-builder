@@ -52,9 +52,11 @@ namespace Automattic\SiteBuild;
  * to two lines past their 3- and 4-line blueprints (BIGR-951). So the
  * masthead H1 is bounded by the blueprint's desktop line target even when
  * it already authors `display`, with the same `min(display, <cap>px)` pin
- * the promotion writes. A target no size above the pin threshold can hold
- * stays unpinned: that target is already lost, and a sub-threshold masthead
- * is worse than an extra wrapped line.
+ * the promotion writes. A target no size above the pin floor can hold stays
+ * unpinned: that target is already lost, and a sub-floor masthead is worse
+ * than an extra wrapped line. That floor is the theme's own `section-title`
+ * maximum (BIGR-1015) — see lineTargetFloorPx() — so the line target can
+ * never demote the masthead under the section headings it stands above.
  *
  * Two deliberate limits:
  *
@@ -91,6 +93,11 @@ final class HeroHeadlineFit
 
     /** Below this a pin is worse than the CSS guard; leave the guard to it. */
     private const MINIMUM_CAP_PX = 32;
+
+    /**
+     * The section-heading preset. The line-target floor reads from it.
+     */
+    private const SECTION_TITLE_SLUG = 'section-title';
 
     /**
      * Per-character advance for the LINE-COUNT estimate, in em.
@@ -183,9 +190,7 @@ final class HeroHeadlineFit
             $lineCap = $i === $masthead
                 ? self::lineTargetCapPx($doc, $i, $theme, $attrs, $desktopLineTarget, $displayMax)
                 : null;
-            if ($lineCap !== null && ($lineCap < self::MINIMUM_CAP_PX || $lineCap >= $displayMax)) {
-                $lineCap = null;
-            }
+            $lineCap = self::usableLineCap($lineCap, $theme, $displayMax);
             $caps = array_values(array_filter(
                 [$wordCap, $lineCap],
                 static fn (?int $value): bool => $value !== null,
@@ -392,9 +397,26 @@ final class HeroHeadlineFit
             $delivered = $cap === null ? $displayMax : min((float) $cap, $displayMax);
 
             // Never promote into a smaller rendered size than the model chose.
+            // This comparison reads the UNFLOORED caps on purpose: a line
+            // target the display preset cannot hold is exactly the signal
+            // that the model's smaller preset was the better answer, and
+            // declining here keeps it.
             if ($currentMax !== null && $delivered <= $currentMax) {
                 return;
             }
+
+            // Promotion goes ahead, so the floor now applies to what gets
+            // WRITTEN. A line-target pin below the section-heading preset
+            // would deliver a masthead smaller than every H2 under it, and
+            // past this point there is no smaller preset left to fall back
+            // to — so drop that bound and let the headline wrap one line
+            // past its blueprint instead (BIGR-1015).
+            $lineCap = self::usableLineCap($lineCap, $theme, $displayMax);
+            $caps = array_values(array_filter(
+                [$lineCap, $wordCap],
+                static fn (?int $value): bool => $value !== null,
+            ));
+            $cap = $caps === [] ? null : min($caps);
 
             // Every preset class must go with the preset attr — WordPress
             // renders `.has-<slug>-font-size` with !important, which beats an
@@ -587,6 +609,52 @@ final class HeroHeadlineFit
             }
         }
         return $slugs;
+    }
+
+    /**
+     * The lowest size the LINE TARGET may pin the masthead to.
+     *
+     * The absolute 32px floor answers "is a pin worth writing at all". It
+     * cannot answer "is this still a masthead", because that question is
+     * about the site's own scale, not about pixels: 37px is a masthead on a
+     * theme whose H2 is 28px and a caption on one whose H2 is 58px. The
+     * cohort shipped the second case — tbilisi23 pinned its H1 to 37px
+     * against a 57.6px `section-title`, and 24 of 91 built home heroes were
+     * pinned below their own section-heading preset (BIGR-1015). A hero that
+     * reads smaller than every H2 under it is the exact defect the promotion
+     * pass at the top of this file exists to prevent, arriving through the
+     * bound instead of through the model.
+     *
+     * So the line target may not spend scale it does not own: the pin stops
+     * at the section-heading preset's own maximum, and a target that cannot
+     * hold above it is dropped rather than honored. The headline then wraps
+     * one line past its blueprint, which is a compromised composition and
+     * not a broken hierarchy.
+     *
+     * The WORD fit keeps the absolute floor instead. Its cap answers a
+     * different question — a word wider than the column overflows or snaps
+     * mid-word, which is a rendering defect, not a matter of taste — and an
+     * extra wrapped line does not fix it.
+     */
+    private static function lineTargetFloorPx(array $theme): float
+    {
+        return max(
+            (float) self::MINIMUM_CAP_PX,
+            self::presetMaxPx($theme, self::SECTION_TITLE_SLUG) ?? 0.0,
+        );
+    }
+
+    /**
+     * Drop a line-target cap that is not worth pinning: one at or above the
+     * display maximum bounds nothing, and one below the floor above would
+     * demote the masthead under the section headings.
+     */
+    private static function usableLineCap(?int $lineCap, array $theme, float $displayMax): ?int
+    {
+        if ($lineCap === null || $lineCap >= $displayMax) {
+            return null;
+        }
+        return $lineCap < self::lineTargetFloorPx($theme) ? null : $lineCap;
     }
 
     /** One named preset's largest resolvable size in px, or null. */

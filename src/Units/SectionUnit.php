@@ -206,6 +206,14 @@ final class SectionUnit extends AbstractPageSectionUnit
         );
         $markup = $label['markup'];
         array_push($warnings, ...$label['warnings']);
+        // This unit never authors the front hero, so no H1 it delivers may
+        // hold the masthead preset (BIGR-1015).
+        $markup = OpeningHeadlineScale::enforce(
+            $markup,
+            $this->key($input),
+            $input['theme_json'] ?? null,
+            $repairs,
+        );
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markFigures(
