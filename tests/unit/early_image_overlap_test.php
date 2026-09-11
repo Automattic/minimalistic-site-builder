@@ -47,7 +47,7 @@ test('the default early stage permits fast QA before the slow raw result: ' . $c
         $project->writeText('plugin/pages/home.html', '<img src="theme:./assets/img-0.jpg"><img src="theme:./assets/img-1.jpg">');
         seed_test_design_direction($project);
         $client = new LedgerOverlapImageClient();
-        $client->inner->delays = ['img-0.jpg' => 0.003, 'img-1.jpg' => 0.1];
+        $client->inner->waitForEvent['img-1.jpg'] = $failReplacement ? 'done-img-0.jpg-2' : 'qa-img-0.jpg-2';
         $client->inner->failReplacement = $failReplacement;
         $llm = new OverlapVisionLlm($client->inner);
         $llm->fail = ['img-0.jpg'];
