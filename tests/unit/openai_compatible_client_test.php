@@ -596,6 +596,69 @@ test('bodyFor uses max_completion_tokens and drops temperature for GPT-5 reasoni
     assert_true(!array_key_exists('temperature', $body), 'temperature dropped for gpt-5');
 });
 
+test('bodyFor gives Astra low effort and preserves its token limit and JSON schema', function () {
+    $schema = ['name' => 'answer', 'schema' => ['type' => 'object', 'properties' => new stdClass()]];
+    $body = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9, 'max_tokens' => 16000, 'json_schema' => $schema],
+        'gpt-6-astra',
+        8192,
+        'openai',
+        true,
+    );
+    assert_eq('gpt-6-astra', $body['model']);
+    assert_eq('low', $body['reasoning_effort']);
+    assert_eq(16000, $body['max_completion_tokens']);
+    assert_eq('json_schema', $body['response_format']['type']);
+    assert_eq($schema['name'], $body['response_format']['json_schema']['name']);
+    assert_eq($schema['schema'], $body['response_format']['json_schema']['schema']);
+    assert_true($body['response_format']['json_schema']['strict']);
+    foreach (['temperature', 'top_p', 'top_logprobs', 'logprobs', 'max_tokens', 'service_tier'] as $key) {
+        assert_true(!array_key_exists($key, $body), "Astra omits {$key}");
+    }
+});
+
+test('bodyFor applies Astra effort only to the resolved OpenAI model', function () {
+    $astra = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'model' => 'gpt-6-astra'], 'gpt-5.4-mini', 8192,
+    );
+    assert_eq('low', $astra['reasoning_effort']);
+    assert_eq(8192, $astra['max_completion_tokens']);
+
+    $small = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'model' => 'gpt-5.4-mini'], 'gpt-6-astra', 8192,
+    );
+    assert_true(!array_key_exists('reasoning_effort', $small));
+
+    $other = OpenAiCompatibleClient::bodyFor(['prompt' => 'Hi'], 'gpt-6-astra', 8192, 'openrouter');
+    assert_true(!array_key_exists('reasoning_effort', $other));
+});
+
+test('bodyFor disables Terra reasoning for default and overridden models', function () {
+    foreach ([
+        ['gpt-5.6-terra', []],
+        ['gpt-6-astra', ['model' => 'gpt-5.6-terra']],
+    ] as [$defaultModel, $options]) {
+        $body = OpenAiCompatibleClient::bodyFor(
+            $options + ['prompt' => 'Hi', 'max_tokens' => 2048, 'temperature' => 0.9],
+            $defaultModel,
+            8192,
+        );
+        assert_eq('gpt-5.6-terra', $body['model']);
+        assert_eq('none', $body['reasoning_effort']);
+        assert_eq(2048, $body['max_completion_tokens']);
+        assert_true(!array_key_exists('temperature', $body));
+        assert_true(!array_key_exists('service_tier', $body));
+    }
+
+    $astra = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'model' => 'gpt-6-astra'], 'gpt-5.6-terra', 8192,
+    );
+    assert_eq('low', $astra['reasoning_effort']);
+
+    $other = OpenAiCompatibleClient::bodyFor(['prompt' => 'Hi'], 'gpt-5.6-terra', 8192, 'openrouter');
+    assert_true(!array_key_exists('reasoning_effort', $other));
+});
+
 test('bodyFor keeps a custom temperature for xAI Grok (uses max_completion_tokens)', function () {
     $body = OpenAiCompatibleClient::bodyFor(
         ['prompt' => 'Hi', 'temperature' => 0.9],
@@ -759,7 +822,7 @@ test('Baseten quiets Kimi K3 too, unlike the OpenRouter K3 profile', function ()
     assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('baseten', 'zai-org/GLM-5.2-Fast', 100));
 });
 
-test('reasoning_effort is Baseten-only and never reaches another provider', function () {
+test('Baseten reasoning defaults do not reach other providers', function () {
     foreach ([
         ['openai', 'gpt-5.5'],
         ['openai', 'gpt-4o'],

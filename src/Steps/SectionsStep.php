@@ -1041,6 +1041,7 @@ final class SectionsStep implements Step
         }
 
         $common = [
+            'section_label' => DesignDirectionStep::sectionLabelFor($project),
             'site_spec'         => $siteSpec,
             'language'          => SiteSpecStep::languageOf($project),
             'theme_json'        => $themeJsonText,
@@ -1146,6 +1147,7 @@ final class SectionsStep implements Step
                     'section'   => $section,
                     'motion_profile' => DesignDirectionStep::motionProfileFor($project),
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
+                    'is_opening' => $opening,
                     'header_contract' => $opening
                         ? ($frontHero
                             ? $frontContract

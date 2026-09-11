@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
+use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\Device;
@@ -178,6 +179,8 @@ final class FinalizeThemeStep implements Step
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
+        $labelShipped = self::writeOverlayKit($project, self::labelKit(), SectionLabel::kitCss($sectionLabel, $shape), $headerWarnings);
         $headingEmphasis = DesignDirectionStep::headingEmphasisFor($project);
         $emphasisShipped = self::writeOverlayKit($project, self::emphasisKit(), HeadingEmphasis::kitCss($headingEmphasis), $headerWarnings);
         $typeTreatmentShipped = self::writeOverlayKit(
@@ -189,6 +192,9 @@ final class FinalizeThemeStep implements Step
         $overlays = [];
         if ($emphasisShipped) {
             $overlays[] = self::emphasisKit();
+        }
+        if ($labelShipped) {
+            $overlays[] = self::labelKit();
         }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
@@ -316,6 +322,7 @@ final class FinalizeThemeStep implements Step
     public static function overlayKits(): array
     {
         return [
+            self::labelKit(),
             self::emphasisKit(),
             self::shapeKit(),
             self::imageTreatmentKit(),
@@ -331,6 +338,11 @@ final class FinalizeThemeStep implements Step
     public static function emphasisKit(): OverlayKit
     {
         return new OverlayKit('emphasis', '// Apply the heading_emphasis token after style.css.');
+    }
+
+    public static function labelKit(): OverlayKit
+    {
+        return new OverlayKit('label', '// Apply the section_label token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit
