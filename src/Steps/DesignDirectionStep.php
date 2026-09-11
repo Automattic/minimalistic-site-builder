@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AccentHue;
+use Automattic\SiteBuild\AffirmativeBrief;
 use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\SectionLabel;
@@ -2472,6 +2473,7 @@ final class DesignDirectionStep implements Step
     /** Whether a brief asks for colour photography in so many words. */
     public static function statedColourPhotography(string $brief): bool
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_COLOUR_PHRASES as $phrase) {
             if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
@@ -2496,6 +2498,7 @@ final class DesignDirectionStep implements Step
     /** The canvas a brief states in so many words, or null. */
     public static function statedCanvas(string $brief): ?string
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_FRAMED_PHRASES as $phrase) {
             if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
@@ -2581,6 +2584,43 @@ final class DesignDirectionStep implements Step
                         . self::describe($accent) . '; delivered=' . self::describe($accent)
                         . '; disposition=retained because the stated hue cannot preserve this extreme lightness;'
                         . ' requested hue=' . self::describe($statedAccent['word']);
+                }
+            }
+        }
+        // A colour the brief names for the PALETTE, not for the accent. The
+        // accent reader above only fires next to "accent"/"button"/"cta", so
+        // "a deep forest green and warm cream palette" reached nothing and
+        // the build shipped a dark brown page with a red accent — none of the
+        // brief's colour anywhere. One role has to carry it, and `primary` is
+        // the brand role: base and contrast answer to the ground key, and the
+        // accent may be separately stated. If any role is already in the
+        // family the brief is satisfied and nothing moves, which is also what
+        // makes this a fixed point.
+        $statedPalette = AccentHue::statedPaletteFamilyFor($meta);
+        if ($statedPalette !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $carried = false;
+            foreach ($palette as $hex) {
+                if (is_string($hex) && AccentHue::inFamily($hex, $statedPalette)) {
+                    $carried = true;
+                    break;
+                }
+            }
+            $primary = is_string($palette['primary'] ?? null) ? $palette['primary'] : null;
+            if (!$carried && $primary !== null) {
+                $fixed = AccentHue::toFamily($primary, $statedPalette);
+                if ($fixed !== null && strcasecmp($fixed, $primary) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.primary authored '
+                        . self::describe($primary) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its palette colour (' . $statedPalette['word']
+                        . ') and no role carried it, so the brand role moves into that hue family'
+                        . ' and retains its lightness';
+                    $direction['palette']['primary'] = $fixed;
+                } elseif ($fixed === null) {
+                    $warnings[] = 'file="designDirection.json"; path="palette.primary"; authored='
+                        . self::describe($primary) . '; delivered=' . self::describe($primary)
+                        . '; disposition=retained because the stated palette hue cannot preserve this extreme'
+                        . ' lightness; requested hue=' . self::describe($statedPalette['word']);
                 }
             }
         }

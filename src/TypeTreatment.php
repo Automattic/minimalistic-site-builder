@@ -92,6 +92,7 @@ final class TypeTreatment
     /** Whether the brief explicitly requests tight letter spacing. */
     public static function statedTight(string $brief): bool
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_TIGHT_PHRASES as $phrase) {
             if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
@@ -130,6 +131,7 @@ final class TypeTreatment
     /** The site-wide heading case a brief states, or null. */
     public static function statedHeadingCase(string $brief): ?string
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_HEADING_CASE_PHRASES as $case => $phrases) {
             foreach ($phrases as $phrase) {

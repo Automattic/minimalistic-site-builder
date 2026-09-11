@@ -35,6 +35,7 @@ final class HeroComposition
     /** The wordmark case a brief states in so many words, or null. */
     public static function statedWordmarkCase(string $brief): ?string
     {
+        $brief = AffirmativeBrief::text($brief);
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_WORDMARK_CASE_PHRASES as $case => $phrases) {
             foreach ($phrases as $phrase) {
