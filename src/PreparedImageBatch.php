@@ -36,11 +36,7 @@ final class PreparedImageBatch
         $screenTheme = $kind === 'ui-mockup' ? DesignDirectionStep::screenThemeFor($project) : '';
         $context = GenerateImagesStep::siteContext($siteSpec);
         $policy = new InitialImagePolicy($plan, $generateAllImages);
-        $markup = [];
-        foreach ($project->markupFiles() as $file) {
-            $relative = substr($file, strlen($project->root) + 1);
-            $markup[$relative] = $project->readText($relative);
-        }
+        $markup = self::finalMarkup($project);
         $requests = [];
         $selected = [];
         $omitted = [];
@@ -70,6 +66,49 @@ final class PreparedImageBatch
             $requests[$index] = GenerateImagesStep::generationSpec($spec, $context, $grade, $crop);
         }
         return new self($project->root, $requests, $selected, $omitted, self::hashInputs($project));
+    }
+
+    /** Read final templates, manifest pages, and the parts that they reference. */
+    private static function finalMarkup(Project $project): array
+    {
+        $queue = [];
+        foreach (glob($project->themePath('templates/*.html')) ?: [] as $file) {
+            $queue[] = 'theme/templates/' . basename($file);
+        }
+        foreach ((array) ($project->readJson('plugin/pages.json')['pages'] ?? []) as $page) {
+            $slug = is_array($page) ? (string) ($page['slug'] ?? '') : '';
+            if (preg_match('/^[a-z0-9][a-z0-9-]*$/i', $slug) !== 1) {
+                throw new \RuntimeException('plugin/pages.json contains an invalid page slug');
+            }
+            $queue[] = 'plugin/pages/' . $slug . '.html';
+        }
+        $markup = [];
+        for ($index = 0; $index < count($queue); $index++) {
+            $file = $queue[$index];
+            if (isset($markup[$file])) {
+                continue;
+            }
+            $markup[$file] = $project->readText($file);
+            $document = BlockMarkup::parse($markup[$file]);
+            foreach ($document->indices() as $block) {
+                if ($document->name($block) !== 'template-part') {
+                    continue;
+                }
+                $attributes = $document->attrs($block) ?? [];
+                $slug = (string) ($attributes['slug'] ?? '');
+                if (preg_match('/^[a-z0-9][a-z0-9-]*$/i', $slug) !== 1
+                    || (isset($attributes['theme']) && $attributes['theme'] !== $project->slug())
+                ) {
+                    continue;
+                }
+                $part = 'theme/parts/' . $slug . '.html';
+                if (!isset($markup[$part]) && $project->exists($part)) {
+                    $queue[] = $part;
+                }
+            }
+        }
+        ksort($markup);
+        return $markup;
     }
 
     /** @param array<string,mixed> $spec @param array<string,string> $markup */
@@ -114,8 +153,8 @@ final class PreparedImageBatch
     private static function hashInputs(Project $project): array
     {
         $files = ['images.json', 'pages.json', 'siteSpec.json', 'designDirection.json', 'plugin/pages.json'];
-        foreach ($project->markupFiles() as $file) {
-            $files[] = substr($file, strlen($project->root) + 1);
+        foreach (array_keys(self::finalMarkup($project)) as $file) {
+            $files[] = $file;
         }
         sort($files);
         $hashes = [];

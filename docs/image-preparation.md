@@ -2,7 +2,7 @@
 
 The blocks graph can prepare requests after `assemble-pages`. The HTML-first graph must also finish `fix-pages`. Both points follow the block repairs that can remove images. Keep `collect-images` before `fix-blocks`, because block serialization clears cover descriptions.
 
-The preparation reads final page and chrome markup. It excludes unreferenced images, completed images, and images that the initial image policy defers. It retains the synthetic site logo. It calls `GenerateImagesStep::generationSpec()`, so request composition and image size keep one source of truth.
+The preparation reads theme templates, pages in the final plugin manifest, and their recursively referenced template parts. It excludes orphan source parts and unlisted plugin pages. It excludes unreferenced images, completed images, and images that the initial image policy defers. It retains the synthetic site logo. It calls `GenerateImagesStep::generationSpec()`, so request composition and image size keep one source of truth.
 
 Before preparation, the host must finish local image renders and validate the final references. The optional `providerEligible` predicate excludes specifications that must use another renderer. It receives the specification with its committed image kind. This keeps the primitive independent of a particular local renderer. Preparation itself makes no network request.
 
