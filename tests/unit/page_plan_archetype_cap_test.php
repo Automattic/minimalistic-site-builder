@@ -115,20 +115,19 @@ test('every mechanical archetype change is recorded durably', function () {
 });
 
 test('the cap leaves a legitimate short page alone', function () {
-    // A contact page is 2 to 4 sections (BIGR-858). Two compositions twice each
-    // is the correct plan for one, and must not be rejected as dominance.
+    // A contact page is 2 to 3 sections (BIGR-1001). One composition twice is the
+    // correct plan for one, and must not be rejected as dominance.
     $plan = [
         cap_section('hero', 'bento-grid'),
         cap_section('form', 'asymmetric-split'),
         cap_section('map', 'bento-grid'),
-        cap_section('cta', 'asymmetric-split'),
     ];
     $warnings = [];
     $repairs = [];
     $out = PagePlanStep::normalize($plan, false, null, [], $warnings, 'contact', $repairs, true);
-    assert_eq(4, count($out), 'the plan survives intact');
+    assert_eq(3, count($out), 'the plan survives intact');
     assert_eq(
-        ['bento-grid', 'asymmetric-split', 'bento-grid', 'asymmetric-split'],
+        ['bento-grid', 'asymmetric-split', 'bento-grid'],
         array_column($out, 'layout_archetype'),
         'nothing was reassigned',
     );

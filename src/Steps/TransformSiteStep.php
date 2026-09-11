@@ -183,7 +183,25 @@ final class TransformSiteStep implements Step
                     $chromeKeys[$area] = $key;
                 }
             }
+            // Count the same page-owned units that become block parts. Nested
+            // content and shared chrome do not spend another section slot.
+            $selected = PagePlanStep::selectPageSections($page, $extracted['sections']);
+            $keptSlugs = array_column($selected, 'slug');
             foreach ($extracted['sections'] as $section) {
+                if (in_array($section['slug'], $keptSlugs, true)) {
+                    continue;
+                }
+                $section['output'] = 'theme/parts/' . SectionsStep::partSlug($slug, $section['slug']) . '.html';
+                $drop = self::dropRow($section, [], 'section_budget_exceeded');
+                $droppedFragments[] = $drop;
+                $fallbackCodes[] = 'section_budget_exceeded';
+                $warnings[] = self::dropWarning(
+                    $section,
+                    $drop,
+                    'page capped at ' . PagePlanStep::maxSectionsFor($page) . ' sections including the hero',
+                );
+            }
+            foreach ($selected as $section) {
                 $sectionSlug = (string) $section['slug'];
                 $key = "page:{$slug}:{$sectionSlug}";
                 $fragments[$key] = $section + [

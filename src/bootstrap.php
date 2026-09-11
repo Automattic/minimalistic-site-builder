@@ -415,13 +415,17 @@ function make_image_client(): ImageClient
  * A null $llm still generates images, minus the prompt repair. Callers that
  * preflight the transport may pass that same client instance for execution.
  */
-function make_generate_images_step(?Llm $llm, ?ImageClient $imageClient = null): GenerateImagesStep
-{
+function make_generate_images_step(
+    ?Llm $llm,
+    ?ImageClient $imageClient = null,
+    bool $generateAllImages = false,
+): GenerateImagesStep {
     return new GenerateImagesStep(
         $imageClient ?? make_image_client(),
         $llm,
         step_models()['image-prompt-repair'] ?? null,
         inspectImages: image_qa_enabled(),
+        generateAllImages: $generateAllImages,
     );
 }
 

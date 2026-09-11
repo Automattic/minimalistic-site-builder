@@ -144,9 +144,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
     putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         assert_eq(
-            '601a66d76f34cb8e9fcefd29e1b9d9037a7ed783a00e58ed58507cf6644eb8d7',
+            'f4afb233744c2dbfabc12ac658c7a7423b157cd98073cdc9d22ff0a3c43fc956',
             hash_file('sha256', repo_path('src/Steps/TransformSiteStep.php')),
-            'transform-site source stays frozen after the retired-mood filter on regenerated chrome',
+            'transform-site source includes the BIGR-1001 section budget before materialization',
         );
         assert_eq(
             '7dba6aee066690a529ce8c866eeb0e55e0bb820d05011de54414ad25a529d420',
