@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 
 /**
  * Keeps the `display` preset for the one headline it was sized for: the front
@@ -30,9 +31,10 @@ use Automattic\SiteBuild\BlockMarkup;
  * `HeroFallback`'s `display`. This pass only makes the delivered path agree
  * with the fallback path.
  *
- * Two shapes deliver the masthead scale, and both are demoted:
+ * Three forms can supply the display size. This pass reduces each form:
  *
  * - An explicit `"fontSize":"display"`.
+ * - A `has-display-font-size` class in `className` or the saved HTML.
  * - No size at all. `ThemeJsonStep` sets `styles.elements.h1` to the display
  *   preset, so a bare H1 inherits the masthead token with nothing in the
  *   markup to show for it — the `/about/` case. The theme is consulted for
@@ -66,7 +68,8 @@ final class OpeningHeadlineScale
         if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
             return $markup;
         }
-        $bareIsDisplay = self::h1ElementUsesDisplay($themeJson);
+        $theme = self::theme($themeJson);
+        $bareIsDisplay = self::h1ElementUsesDisplay($theme);
         $changed = false;
         foreach ($document->indices() as $index) {
             if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
@@ -82,6 +85,8 @@ final class OpeningHeadlineScale
             }
             $current = $attrs['fontSize'] ?? null;
             $current = is_string($current) && $current !== '' ? $current : null;
+            // A preset class can supply the size without a fontSize attribute.
+            $current ??= self::presetFromClasses($document, $index, $attrs, $theme);
             if ($current === null && !$bareIsDisplay) {
                 continue;
             }
@@ -127,19 +132,43 @@ final class OpeningHeadlineScale
         return preg_split('/[\x20\t\r\n\f]+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     }
 
-    /**
-     * Whether a bare H1 inherits the display preset from the theme's own h1
-     * element style. Both spellings WordPress accepts count.
-     *
-     * @param string|array<mixed>|null $themeJson
-     */
-    private static function h1ElementUsesDisplay(string|array|null $themeJson): bool
+    /** Read the preset classes from the comment and the root element. */
+    private static function presetFromClasses(BlockMarkup $document, int $index, array $attrs, ?array $theme): ?string
     {
-        $theme = is_array($themeJson) ? $themeJson : null;
+        $root = HtmlFragment::parse($document->ownHtml($index))->root()->elementChildren()[0] ?? null;
+        $classes = array_merge(
+            self::classTokens(is_string($attrs['className'] ?? null) ? $attrs['className'] : ''),
+            self::classTokens($root?->attribute('class') ?? ''),
+        );
+        $preset = null;
+        // The theme emits preset rules in this order. The last rule that matches takes effect.
+        foreach ((array) ($theme['settings']['typography']['fontSizes'] ?? []) as $entry) {
+            $slug = is_array($entry) ? ($entry['slug'] ?? null) : null;
+            if (is_string($slug) && $slug !== '' && in_array('has-' . $slug . '-font-size', $classes, true)) {
+                $preset = $slug;
+            }
+        }
+        return $preset;
+    }
+
+    private static function theme(string|array|null $themeJson): ?array
+    {
+        if (is_array($themeJson)) {
+            return $themeJson;
+        }
         if (is_string($themeJson) && trim($themeJson) !== '') {
             $decoded = json_decode($themeJson, true);
-            $theme = is_array($decoded) ? $decoded : null;
+            return is_array($decoded) ? $decoded : null;
         }
+        return null;
+    }
+
+    /**
+     * Check whether the H1 element style supplies the display preset.
+     * Accept both WordPress forms of a preset reference.
+     */
+    private static function h1ElementUsesDisplay(?array $theme): bool
+    {
         if ($theme === null) {
             return false;
         }

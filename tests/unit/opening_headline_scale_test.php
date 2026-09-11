@@ -13,6 +13,8 @@ function ohs_theme(string $h1Size = 'var:preset|font-size|display'): array
 {
     return [
         'settings' => ['typography' => ['fontSizes' => [
+            ['slug' => 'lead', 'size' => '1.565rem'],
+            ['slug' => 'heading', 'size' => '2.449rem'],
             ['slug' => 'section-title', 'size' => 'clamp(3.062rem, 3vw, 3.834rem)'],
             ['slug' => 'display', 'size' => 'clamp(3.797rem, 7vw, 6rem)'],
         ]]],
@@ -151,6 +153,68 @@ test('a heading the model already sized below the masthead is untouched', functi
         assert_eq($markup, OpeningHeadlineScale::enforce($markup, 'p', ohs_theme(), $repairs), "byte-identical for {$slug}");
         assert_eq([], $repairs, "no repair row for {$slug}");
     }
+});
+
+test('a smaller preset class survives without a fontSize attribute', function () {
+    foreach (['heading', 'lead', 'section-title'] as $slug) {
+        foreach (['html', 'comment', 'both'] as $source) {
+            $class = 'has-' . $slug . '-font-size';
+            $attrs = ['level' => 1];
+            if ($source !== 'html') {
+                $attrs['className'] = 'reveal-blur ' . $class;
+            }
+            $markup = ohs_opening(
+                (string) json_encode($attrs),
+                'wp-block-heading reveal-blur' . ($source === 'comment' ? '' : ' ' . $class),
+            );
+            $repairs = [];
+            $out = OpeningHeadlineScale::enforce($markup, 'p', json_encode(ohs_theme()), $repairs);
+            assert_eq($markup, $out, "preserve the authored bytes for {$slug} in {$source}");
+            assert_eq([], $repairs);
+            $final = ohs_fixed_markup($out);
+            assert_eq(ohs_fixed_markup($markup), $final, 'preserve the final HTML');
+            assert_contains($class, $final);
+        }
+    }
+});
+
+test('a display class without a fontSize attribute still receives the size limit', function () {
+    $theme = ohs_theme('var:preset|font-size|heading');
+    foreach (['html', 'comment', 'both'] as $source) {
+        $attrs = ['level' => 1];
+        if ($source !== 'html') {
+            $attrs['className'] = 'has-display-font-size';
+        }
+        $markup = ohs_opening(
+            (string) json_encode($attrs),
+            'wp-block-heading' . ($source === 'comment' ? '' : ' has-display-font-size'),
+        );
+        $repairs = [];
+        $out = OpeningHeadlineScale::enforce($markup, 'p', $theme, $repairs);
+        $final = ohs_fixed_markup($out);
+        assert_contains('has-section-title-font-size', $final);
+        assert_true(!str_contains($final, 'has-display-font-size'));
+        assert_eq('display', $repairs[0]['authored'] ?? null);
+        $again = [];
+        assert_eq($final, OpeningHeadlineScale::enforce($final, 'p', $theme, $again));
+        assert_eq([], $again);
+    }
+});
+
+test('preset detection reads only the root classes and the theme presets', function () {
+    $markup = ohs_opening('{"level":1}', 'wp-block-heading has-unknown-font-size');
+    $markup = str_replace(
+        'Traditional Georgian and Caucasian cuisine',
+        '<span class="has-heading-font-size">Traditional Georgian</span> and Caucasian cuisine',
+        $markup,
+    );
+    $repairs = [];
+    $out = OpeningHeadlineScale::enforce($markup, 'p', ohs_theme(), $repairs);
+    $final = ohs_fixed_markup($out);
+    assert_contains('has-section-title-font-size', $final, 'the root still inherits the display size');
+    assert_contains('<span class="has-heading-font-size">Traditional Georgian</span>', $final);
+    assert_contains('has-unknown-font-size', $final, 'unrelated classes must remain');
+    assert_eq(1, count($repairs));
 });
 
 test('an explicitly pinned size is a decision of its own and survives', function () {
