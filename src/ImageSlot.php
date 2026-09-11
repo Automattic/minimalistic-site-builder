@@ -11,12 +11,17 @@ final class ImageSlot
     public static function annotate(Project $project, array $specs): array
     {
         $heroes = [];
+        $heroAnchors = [];
         $plan = $project->exists('pages.json') ? $project->readJson('pages.json') : [];
         foreach ($plan['pages'] ?? [] as $page) {
             $sections = array_values($page['sections'] ?? []);
             foreach ($sections as $index => $section) {
                 if (($section['role'] ?? SectionRole::forPosition($index, count($sections))) === SectionRole::HERO) {
                     $heroes['parts/' . SectionsStep::partSlug($page['slug'], $section['slug']) . '.html'] = true;
+                    $heroAnchors['plugin/pages/' . $page['slug'] . '.html'][$section['slug']] = true;
+                    if (!empty($page['front'])) {
+                        $heroAnchors['theme/templates/front-page.html'][$section['slug']] = true;
+                    }
                 }
             }
         }
@@ -26,7 +31,8 @@ final class ImageSlot
         } else {
             foreach (['theme/parts/*.html', 'theme/templates/*.html', 'plugin/pages/*.html'] as $pattern) {
                 foreach (glob($project->root . '/' . $pattern) ?: [] as $file) {
-                    $markup[] = $project->readText(substr($file, strlen($project->root) + 1));
+                    $relative = substr($file, strlen($project->root) + 1);
+                    $markup[$relative] = $project->readText($relative);
                 }
             }
         }
@@ -34,7 +40,7 @@ final class ImageSlot
         foreach ($specs as &$spec) {
             $spec['hero_slot'] = array_intersect_key($heroes, array_flip($spec['sources'] ?? [])) !== [];
             $slot = null;
-            foreach ($documents as $doc) {
+            foreach ($documents as $file => $doc) {
                 foreach ($doc->indices() as $index) {
                     $name = $doc->name($index);
                     if (!in_array($name, ['image', 'cover'], true)) {
@@ -50,10 +56,13 @@ final class ImageSlot
                         }
                         $candidate = $name === 'cover' ? 'cover' : 'image';
                         for ($parent = $index; $parent !== null; $parent = $doc->parent($parent)) {
-                            $classes = (string) (($doc->attrs($parent) ?? [])['className'] ?? '');
+                            $parentAttrs = $doc->attrs($parent) ?? [];
+                            if (isset($heroAnchors[$file][$parentAttrs['anchor'] ?? ''])) {
+                                $spec['hero_slot'] = true;
+                            }
+                            $classes = (string) ($parentAttrs['className'] ?? '');
                             if (preg_match('/\b(?:card(?:-media(?:-tall)?)?|card-media-thumb|tile)\b/', $classes) === 1) {
                                 $candidate = 'card';
-                                break;
                             }
                         }
                         // A shared asset must satisfy its largest slot.

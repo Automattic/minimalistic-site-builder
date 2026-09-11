@@ -37,11 +37,11 @@ final class ImageQa
         if (!empty($spec['hero_slot']) || ($spec['image_slot'] ?? '') === 'cover') {
             return true;
         }
-        if (isset($spec['image_slot'])) {
-            return false;
-        }
         if (preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1) {
             return true;
+        }
+        if (isset($spec['image_slot'])) {
+            return false;
         }
         $pageContext = (string) ($spec['pageContext'] ?? '');
         if (ImageCrop::fullFrameSlot(
