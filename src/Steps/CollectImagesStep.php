@@ -552,31 +552,72 @@ final class CollectImagesStep implements Step
      * image's aspect, and the second pass below treats a theme asset no marker
      * declares as one nothing will generate — so stripping here would make a
      * re-run delete every image block on sight.
+     *
+     * `$undrawn` names the files no picture was drawn for — the interior
+     * images the initial-image policy defers to a local placeholder
+     * (BIGR-1000), whose delivered asset is the neutral gradient. The subject
+     * describes a photograph that is not on the page, so those take `alt=""`
+     * and read as decorative instead of announcing a picture nobody drew. A
+     * later `bin/images.php <slug> --all` draws them and this pass gives them
+     * their description; images.json keeps the subject in the meantime.
+     *
+     * A FAILED image is not in that set on purpose. Nothing renders there at
+     * all, so a reader who meets the retained block should meet prose.
+     *
+     * @param array<string,true> $undrawn filename => true
      */
-    public static function describeAlts(string $content): string
+    public static function describeAlts(string $content, array $undrawn = []): string
     {
         if (!str_contains($content, 'AI_IMAGE:')) {
             return $content;
         }
 
-        // The value is bounded to its own tag. This writes its result back, so
-        // an unbalanced quote must not let the match run on to the next quote
-        // in the file and take every sibling in between with it; a tag too
-        // malformed to match keeps its marker, which is the safe way to fail.
-
+        // Bounded to one tag: `[^>]*` cannot cross the tag's own close, so a
+        // tag too malformed to carry a closing quote keeps its marker rather
+        // than letting a match run on to the next quote in the file and take
+        // every sibling in between with it. That is the safe way to fail.
         return (string) preg_replace_callback(
-            '/(<img[^>]+(?<![\w-])alt=)(["\'])AI_IMAGE:\s*([^>]*?)\2/is',
-            static function (array $match): string {
-                $body = html_entity_decode($match[3], ENT_QUOTES | ENT_HTML5);
-                $fields = self::splitMarkerFields($body);
-                $subject = $fields === null ? trim($body) : $fields['subject'];
+            '/<img\b[^>]*>/is',
+            static function (array $tag) use ($undrawn): string {
+                return (string) preg_replace_callback(
+                    '/((?<![\w-])alt=)(["\'])AI_IMAGE:\s*(.*?)\2/is',
+                    static function (array $match) use ($tag, $undrawn): string {
+                        $body = html_entity_decode($match[3], ENT_QUOTES | ENT_HTML5);
+                        $fields = self::splitMarkerFields($body);
+                        $subject = $fields === null ? trim($body) : $fields['subject'];
+                        if ($subject === '') {
+                            return $match[0];
+                        }
+                        if (self::tagIsUndrawn($tag[0], $undrawn)) {
+                            return $match[1] . $match[2] . $match[2];
+                        }
 
-                return $subject === ''
-                    ? $match[0]
-                    : $match[1] . $match[2] . htmlspecialchars($subject, ENT_QUOTES | ENT_HTML5) . $match[2];
+                        return $match[1] . $match[2] . htmlspecialchars($subject, ENT_QUOTES | ENT_HTML5) . $match[2];
+                    },
+                    $tag[0],
+                    1
+                );
             },
             $content
         );
+    }
+
+    /**
+     * Whether this img tag points at a file nothing drew a picture for.
+     *
+     * @param array<string,true> $undrawn filename => true
+     */
+    private static function tagIsUndrawn(string $tag, array $undrawn): bool
+    {
+        if ($undrawn === []) {
+            return false;
+        }
+        if (preg_match('/(?<![\w-])src=(["\'])(.*?)\1/is', $tag, $src) !== 1) {
+            return false;
+        }
+        $path = (string) parse_url(html_entity_decode($src[2], ENT_QUOTES | ENT_HTML5), PHP_URL_PATH);
+
+        return isset($undrawn[basename($path !== '' ? $path : $src[2])]);
     }
 
     /** Where an image is used, read off the part path assemble-pages keys on. */

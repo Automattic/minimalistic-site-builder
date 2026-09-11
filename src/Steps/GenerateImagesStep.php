@@ -407,7 +407,7 @@ final class GenerateImagesStep implements Step
         // Unconditional: $resolved holds only what completed, and a run where
         // everything failed still has markers to take out of the blocks
         // removeFailedImageReferences could not isolate safely.
-        $this->rewriteMarkup($project, $resolved);
+        $this->rewriteMarkup($project, $resolved, self::undrawnFiles($specs));
 
         $this->shipPluginImages($project);
         $this->markComplete($project);
@@ -1339,13 +1339,17 @@ final class GenerateImagesStep implements Step
      * Patterns are not swept here; extract-patterns re-derives them from these
      * pages after this step.
      *
+     * A deferred placeholder's alt goes empty rather than describing a photo
+     * that was never drawn; see describeAlts().
+     *
      * @param array<string,string> $resolved theme: src => served URL
+     * @param array<string,true> $undrawn filename => true
      */
-    private function rewriteMarkup(Project $project, array $resolved): void
+    private function rewriteMarkup(Project $project, array $resolved, array $undrawn = []): void
     {
         foreach ($project->themeFiles() as $rel) {
             $content = $project->readText('theme/' . $rel);
-            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved));
+            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved), $undrawn);
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
             }
@@ -1357,10 +1361,35 @@ final class GenerateImagesStep implements Step
         foreach (glob($project->path('plugin/pages/*.html')) ?: [] as $abs) {
             $rel = 'plugin/pages/' . basename($abs);
             $content = $project->readText($rel);
-            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved));
+            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved), $undrawn);
             if ($updated !== $content) {
                 $project->writeText($rel, $updated);
             }
         }
+    }
+
+    /**
+     * The files the run delivered a local placeholder for, rather than a
+     * drawn picture. The initial-image policy defers interior images
+     * (BIGR-1000) and the delivered asset is the neutral gradient, so the
+     * model's subject describes something the page does not show.
+     *
+     * @param list<array<string,mixed>> $specs
+     * @return array<string,true>
+     */
+    private static function undrawnFiles(array $specs): array
+    {
+        $undrawn = [];
+        foreach ($specs as $spec) {
+            if (($spec['status'] ?? '') !== 'placeholder') {
+                continue;
+            }
+            $filename = (string) ($spec['filename'] ?? '');
+            if ($filename !== '') {
+                $undrawn[$filename] = true;
+            }
+        }
+
+        return $undrawn;
     }
 }

@@ -1018,6 +1018,58 @@ test('describeAlts hands the alt back to the subject it was carrying', function 
     assert_eq($ordinary, CollectImagesStep::describeAlts($ordinary));
 });
 
+test('describeAlts leaves a deferred placeholder decorative, not described', function () {
+    // The initial-image policy draws home and hero images and defers the rest
+    // to the neutral local gradient. The subject describes a photograph that
+    // is not on the page, so announcing it to a screen reader is worse than
+    // saying nothing: the picture it describes was never drawn.
+    $subject = 'A stack of unglazed stoneware plates on a worn wooden table';
+    $undrawn = ['b.jpg' => true];
+
+    assert_eq(
+        '<img src="theme:./assets/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'a deferred placeholder ships an empty alt',
+    );
+
+    // Its drawn sibling in the same markup is unaffected.
+    assert_eq(
+        '<img src="theme:./assets/a.jpg" alt="' . $subject . '"/>'
+        . '<img src="theme:./assets/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/a.jpg" alt="AI_IMAGE: ' . $subject . ' | hero | photo | landscape"/>'
+            . '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'only the undrawn file goes empty',
+    );
+
+    // The set is matched on the file, not the path it is served from: by this
+    // point the src has already been rewritten to the uploaded URL.
+    assert_eq(
+        '<img src="https://example.com/wp-content/uploads/2026/09/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="https://example.com/wp-content/uploads/2026/09/b.jpg"'
+            . ' alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'a served URL resolves to the same file',
+    );
+
+    // Without the set — every caller before BIGR-1000, and every fully drawn
+    // build — nothing changes.
+    assert_eq(
+        '<img src="theme:./assets/b.jpg" alt="' . $subject . '"/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>'
+        ),
+        'an empty set describes everything, as before',
+    );
+});
+
 test('describeAlts cannot take a tag\'s siblings with it', function () {
     // An unbalanced quote used to let the match run to the next quote in the
     // file: the paragraph and the second image between them were deleted, with
