@@ -14,15 +14,6 @@ DESIGN DIRECTION (the committed creative concept for THIS site — let it shape 
 SITE PAGES (every page of the site; plan ONLY the one marked below):
 {{site_pages}}
 
-THIS PAGE:
-  Title:   {{page_title}}
-  Slug:    {{page_slug}}
-  Purpose: {{page_purpose}}
-
-{{page_emphasis}}
-
-{{front_hero_context}}
-
 Tailor the section choice to the site's `site_type` / `area` and THIS page's purpose: derive the sections from what this site offers, who it serves, and what the visitor must be able to do, starting from the spec's `sections` list. Pick what genuinely fits THIS page rather than a rigid template.
 
 You are also the page's art director: each section will be built independently and concurrently by a different author who sees only its own brief, so YOU own the page-level visual rhythm. Assign every section a layout archetype and a background treatment, and describe its seams, so adjacent sections never repeat compositions and the background bands pace the page deliberately.
@@ -54,7 +45,6 @@ Return a single JSON object with this exact shape:
   "intent": "One planning sentence explaining what the action helps the visitor do",
   "destination": "/an-exact-page-path/ or #an-exact-planned-section-anchor"
 }
-{{primary_action_rule}}
 {{action_capabilities}}
 When present, keep `label` to 1-80 Unicode grapheme clusters of plain text with no
 markup or control characters. Use that exact visitor-facing label; `intent` is
@@ -120,7 +110,7 @@ Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" and "type" are machine-facing identifiers and are ALWAYS plain English words in lowercase a-z ASCII, regardless of {{language}} — they are never rendered on the page.
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly. Any planned email, phone, address, or URL must be an exact SITE SPEC value — never invent alternates, and never construct an address at `email_domain`.
 - A shop is a catalog: product cards, prices only when SITE SPEC supplies them, enquire. Never plan a cart, checkout, quantity field, or add-to-cart control. There is no cart backend.
-- THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. The purpose is the contract — do not pad a narrow page (contact, enquiry, hours) with homepage-style bands. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path ONLY when that exact path appears in SITE PAGES (e.g. "closes with a link to /menu/"). Never invent paths for pages that are not listed; on a one-page site, keep CTAs on-page (section anchors or same-page actions) instead of dead routes like /menu/ or /about/. Follow {{page_emphasis}} for section count: {{plan_budgets}} These totals include the hero and closing section; shared header/footer template parts do not count. Combine related topics within the budget instead of adding bands.
+- THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. The purpose is the contract — do not pad a narrow page (contact, enquiry, hours) with homepage-style bands. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path ONLY when that exact path appears in SITE PAGES (e.g. "closes with a link to /menu/"). Never invent paths for pages that are not listed; on a one-page site, keep CTAs on-page (section anchors or same-page actions) instead of dead routes like /menu/ or /about/. Follow the page brief for section count: {{plan_budgets}} These totals include the hero and closing section; shared header/footer template parts do not count. Combine related topics within the budget instead of adding bands.
 - The FIRST section is the page-opening hero. In a plan with two or more sections, the LAST provides a strong closing next step, while every section between them carries the page's content. A one-section plan is necessarily the opening hero.
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (the opening section's slug is "hero"; every other slug names its own content).
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.
@@ -148,4 +138,3 @@ Rules:
 - "handoff" must name the actual neighbors' assignments — the archetype and background of the section above, the archetype and background of the section below, and why this section's own assignment makes that transition work — in your own words each time. For the first section the neighbor above is the site header; for the last it is the footer.
 - Before returning, re-check the finished list top-to-bottom: if any two ADJACENT sections share a layout_archetype, if any archetype is used more than twice on the page, if "equal-card-grid" appears more than twice, or if a page of {{min_banded_sections}}+ sections has every section on "base" or more than {{max_non_base_sections}} non-base backgrounds, change one of them — the plan is rejected or deterministically repaired otherwise.
 
-Output ONLY the JSON object.
