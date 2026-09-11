@@ -113,3 +113,83 @@ test('equivalent request keys retain size MIME kind and the strongest QA policy'
     $specs[1]['image_kind'] = 'ui-mockup';
     assert_eq([], ImageRequestReuse::aliases($specs, [$request, $request]));
 });
+
+
+function deferred_reuse_fixture(): array
+{
+    [$project, $tmp] = reuse_fixture();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'photo', 'role' => 'content']]],
+        ['slug' => 'about', 'front' => false, 'sections' => [['slug' => 'photo', 'role' => 'content']]],
+    ]]);
+    $rows = $project->readJson('images.json');
+    $rows[0]['sources'] = ['parts/page-home--photo.html'];
+    $rows[1]['sources'] = ['parts/page-about--photo.html'];
+    $project->writeJson('images.json', $rows);
+    return [$project, $tmp];
+}
+
+test('a deferred interior asset reuses final homepage pixels without another request', function () {
+    [$project, $tmp] = deferred_reuse_fixture();
+    try {
+        $client = new FakeImageClient();
+        $llm = new FakeLlm();
+        $llm->queueText(GI_QA_ROTATED);
+        $llm->queueText(GI_QA_PASS);
+        $step = new GenerateImagesStep($client, $llm);
+        $step->run($project);
+        assert_eq(2, count($client->calls), 'one original request and one QA replacement');
+        $rows = $project->readJson('images.json');
+        assert_eq('completed', $rows[1]['status']);
+        assert_eq('hero.jpg', $rows[1]['reused_from']);
+        assert_eq($project->readText('theme/assets/hero.jpg'), $project->readText('theme/assets/hero-copy.jpg'));
+        assert_eq(true, $rows[1]['qa']['regenerated']);
+        $step->run($project);
+        assert_eq(2, count($client->calls));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('an exact completed source supplies a later interior asset at no provider cost', function () {
+    [$project, $tmp] = deferred_reuse_fixture();
+    try {
+        $rows = $project->readJson('images.json');
+        $project->writeJson('images.json', [$rows[0]]);
+        $client = new FakeImageClient();
+        $llm = new FakeLlm();
+        $llm->queueText(GI_QA_PASS);
+        $step = new GenerateImagesStep($client, $llm);
+        $step->run($project);
+        $complete = $project->readJson('images.json')[0];
+        $project->writeJson('images.json', [$complete, $rows[1]]);
+        $step->run($project);
+        assert_eq(1, count($client->calls));
+        assert_eq('hero.jpg', $project->readJson('images.json')[1]['reused_from']);
+        $different = array_replace($rows[1], ['filename' => 'different.jpg', 'src' => 'theme:./assets/different.jpg', 'subject' => 'A different table']);
+        $project->writeJson('images.json', [$complete, $different]);
+        $step->run($project);
+        assert_eq(1, count($client->calls));
+        assert_eq('placeholder', $project->readJson('images.json')[1]['status']);
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('a failed shared request preserves the deferred image slot with a local placeholder', function () {
+    [$project, $tmp] = deferred_reuse_fixture();
+    try {
+        $client = new FakeImageClient(fail: true);
+        $step = new GenerateImagesStep($client, inspectImages: false);
+        $step->run($project);
+        assert_eq(1, count($client->calls));
+        $rows = $project->readJson('images.json');
+        assert_eq('failed', $rows[0]['status']);
+        assert_eq('placeholder', $rows[1]['status']);
+        assert_true($project->exists('theme/assets/hero-copy.jpg'));
+        assert_contains('hero-copy.jpg', $project->readText('theme/parts/copy.html'));
+        assert_contains('equivalent image request failed', implode(' ', $project->readJson('warnings.json')['generate-images']));
+    } finally {
+        remove_tree($tmp);
+    }
+});

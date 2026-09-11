@@ -12,12 +12,7 @@ final class ImageRequestReuse
         $groups = [];
         foreach ($specs as $i => $spec) {
             $request = $requests[$i];
-            $key = json_encode([
-                $request['prompt'], $request['aspect_ratio'], $request['sample_image_size'], $request['mime'],
-                ImageKind::effectiveKind($spec), $spec['role'] ?? '',
-                $spec['subject'] ?? '', $spec['pageContext'] ?? '', $spec['aspectRatio'] ?? '',
-                $spec['style'] ?? '',
-            ], JSON_THROW_ON_ERROR);
+            $key = self::key($spec, $request);
             $groups[$key][] = $i;
         }
         $aliases = [];
@@ -37,4 +32,15 @@ final class ImageRequestReuse
         }
         return $aliases;
     }
+    /** Include the complete pixel contract and exclude only the destination filename. */
+    public static function key(array $spec, array $request): string
+    {
+        return hash('sha256', json_encode([
+                $request['prompt'], $request['aspect_ratio'], $request['sample_image_size'], $request['mime'],
+                ImageKind::effectiveKind($spec), $spec['role'] ?? '',
+                $spec['subject'] ?? '', $spec['pageContext'] ?? '', $spec['aspectRatio'] ?? '',
+                $spec['style'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+    }
+
 }

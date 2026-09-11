@@ -69,7 +69,7 @@ final class PreparedImageBatch
     }
 
     /** Read final templates, manifest pages, and the parts that they reference. */
-    private static function finalMarkup(Project $project): array
+    public static function finalMarkup(Project $project): array
     {
         $queue = [];
         foreach (glob($project->themePath('templates/*.html')) ?: [] as $file) {
@@ -112,7 +112,7 @@ final class PreparedImageBatch
     }
 
     /** @param array<string,mixed> $spec @param array<string,string> $markup */
-    private static function referenced(array $spec, array $markup): bool
+    public static function referenced(array $spec, array $markup): bool
     {
         // The collector adds this asset for the site identity. It has no placeholder source.
         if (($spec['role'] ?? '') === 'site-logo') {

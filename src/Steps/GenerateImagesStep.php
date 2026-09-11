@@ -267,14 +267,50 @@ final class GenerateImagesStep implements Step
             $project->exists('pages.json') ? $project->readJson('pages.json') : null,
             $this->generateAllImages,
         );
+        $markup = $project->exists('plugin/pages.json')
+            ? \Automattic\SiteBuild\PreparedImageBatch::finalMarkup($project) : null;
+        $requestKeys = [];
+        $available = [];
+        foreach ($specs as $i => $spec) {
+            if ($markup !== null && !\Automattic\SiteBuild\PreparedImageBatch::referenced($spec, $markup)) {
+                $specs[$i]['status'] = 'unreferenced';
+                continue;
+            }
+            if (($spec['status'] ?? '') === 'unreferenced') {
+                $specs[$i]['status'] = 'pending';
+            }
+            $key = ImageRequestReuse::key($spec, self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop));
+            $requestKeys[$i] = $key;
+            if (($spec['status'] ?? '') === 'completed') {
+                $file = 'theme/assets/' . $spec['filename'];
+                if (($spec['request_fingerprint'] ?? '') === $key && $project->exists($file)
+                    && GeminiImage::mimeFromBytes($project->readText($file)) === GeminiImage::mimeForFilename($spec['filename'])) {
+                    $available[$key] = $i;
+                }
+            } elseif ($policy->shouldGenerate($spec)) {
+                $available[$key] ??= $i;
+            }
+        }
+        $freeAliases = [];
         $placeholderWarnings = [];
         $unplanned = [];
 
         // Already-completed images need no work — just record them for the rewrite.
         $pending = [];
         foreach ($specs as $i => $spec) {
+            if (($spec['status'] ?? '') === 'unreferenced') {
+                continue;
+            }
             if (($spec['status'] ?? 'pending') === 'completed') {
                 $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
+                continue;
+            }
+            $source = $available[$requestKeys[$i]] ?? null;
+            if ($source !== null && $source !== $i
+                && (($specs[$source]['status'] ?? '') === 'completed' || !$policy->shouldGenerate($spec))
+                && (!ImageQa::applies($spec) || !empty($specs[$source]['qa_checked'])
+                    || (($specs[$source]['status'] ?? '') !== 'completed' && ImageQa::applies($specs[$source])))) {
+                $freeAliases[$i] = $source;
                 continue;
             }
             if (!$policy->shouldGenerate($spec)) {
@@ -297,7 +333,8 @@ final class GenerateImagesStep implements Step
             if ($policy->unplaced($spec)) {
                 $unplanned[] = 'theme/assets/' . $spec['filename'];
             }
-            $pending[$i] = $spec; // preserve the original images.json index
+            $specs[$i]['request_fingerprint'] = $requestKeys[$i];
+            $pending[$i] = $specs[$i]; // preserve the original images.json index
         }
         if ($placeholderWarnings !== []) {
             $project->addWarnings($this->id(), $placeholderWarnings);
@@ -437,6 +474,26 @@ final class GenerateImagesStep implements Step
             $this->deliverReused($project, $specs, $aliases, $resolved);
         }
 
+        // A deferred image keeps its local fallback if the shared provider request fails.
+        foreach ($freeAliases as $i => $source) {
+            while (isset($aliases[$source])) {
+                $source = $aliases[$source];
+            }
+            if (($specs[$source]['status'] ?? '') === 'completed') {
+                $this->deliverReused($project, $specs, [$i => $source], $resolved);
+                continue;
+            }
+            $spec = $specs[$i];
+            $project->writeText('theme/assets/' . $spec['filename'], ImagePlaceholder::bytes($spec));
+            $specs[$i]['status'] = 'placeholder';
+            $specs[$i]['url'] = $this->servedUrl($project, $spec['filename']);
+            $resolved[$spec['src']] = $specs[$i]['url'];
+            $project->addWarnings($this->id(), ['file=' . Warnings::value('theme/assets/' . $spec['filename'])
+                . '; block=' . Warnings::value(implode(', ', $spec['sources'] ?? []))
+                . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                . '; delivered=neutral local placeholder; disposition=equivalent image request failed']);
+        }
+
         // A failed asset reference is dead UI. Remove only the safe media block
         // that contains each failed source (or a bare matching img tag), leaving
         // every sibling byte-for-byte intact.
@@ -472,6 +529,11 @@ final class GenerateImagesStep implements Step
             $specs[$i]['status'] = 'completed';
             $specs[$i]['url'] = $this->servedUrl($project, $filename);
             $specs[$i]['reused_from'] = $sourceFilename;
+            foreach (['request_fingerprint', 'qa_checked'] as $field) {
+                if (isset($source[$field])) {
+                    $specs[$i][$field] = $source[$field];
+                }
+            }
             unset($specs[$i]['error'], $specs[$i]['qa']);
             if (isset($source['qa'])) {
                 $specs[$i]['qa'] = $source['qa'];
@@ -503,9 +565,13 @@ final class GenerateImagesStep implements Step
             return; // theme-only composition, or assemble-pages never ran
         }
         $roles = [];
+        $unreferenced = [];
         if ($project->exists('images.json')) {
             foreach ((array) $project->readJson('images.json') as $spec) {
                 if (is_array($spec) && isset($spec['filename'])) {
+                    if (($spec['status'] ?? '') === 'unreferenced') {
+                        $unreferenced[(string) $spec['filename']] = true;
+                    }
                     $roles[(string) $spec['filename']] = (string) ($spec['role'] ?? '');
                 }
             }
@@ -518,7 +584,7 @@ final class GenerateImagesStep implements Step
                 continue;
             }
             $filename = (string) ($image['filename'] ?? '');
-            if ($filename === '') {
+            if ($filename === '' || isset($unreferenced[$filename])) {
                 continue;
             }
             if (($image['role'] ?? '') === 'site-logo' && ($roles[$filename] ?? '') !== 'site-logo') {
@@ -555,7 +621,7 @@ final class GenerateImagesStep implements Step
             $addedIcon = true;
         }
 
-        if ($droppedLogo || $addedIcon) {
+        if ($droppedLogo || $addedIcon || $unreferenced !== []) {
             $project->writeJson('plugin/images.json', ['images' => $kept]);
         }
     }
@@ -983,6 +1049,7 @@ final class GenerateImagesStep implements Step
                 $spec = $specs[$i];
                 $filename = (string) $spec['filename'];
                 $verdict = $verdicts[$i] ?? null;
+                $specs[$i]['qa_checked'] = $verdict !== null;
                 if ($state['attempts'] > 0) {
                     $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $state['finding']];
                 }

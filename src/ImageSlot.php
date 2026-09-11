@@ -20,12 +20,17 @@ final class ImageSlot
                 }
             }
         }
-        $documents = [];
-        foreach (['theme/parts/*.html', 'theme/templates/*.html', 'plugin/pages/*.html'] as $pattern) {
-            foreach (glob($project->root . '/' . $pattern) ?: [] as $file) {
-                $documents[] = BlockMarkup::parse((string) file_get_contents($file));
+        $markup = [];
+        if ($project->exists('plugin/pages.json')) {
+            $markup = PreparedImageBatch::finalMarkup($project);
+        } else {
+            foreach (['theme/parts/*.html', 'theme/templates/*.html', 'plugin/pages/*.html'] as $pattern) {
+                foreach (glob($project->root . '/' . $pattern) ?: [] as $file) {
+                    $markup[] = (string) file_get_contents($file);
+                }
             }
         }
+        $documents = array_map(BlockMarkup::parse(...), $markup);
         foreach ($specs as &$spec) {
             $spec['hero_slot'] = array_intersect_key($heroes, array_flip($spec['sources'] ?? [])) !== [];
             $slot = null;

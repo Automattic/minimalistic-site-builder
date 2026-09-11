@@ -196,3 +196,28 @@ test('image preparation follows recursive template parts and terminates cycles',
         assert_eq('unreferenced', PreparedImageBatch::fromProject($project)->omitted()[1]['reason']);
     });
 });
+
+
+test('the active image step excludes orphan and unlisted references', function () {
+    with_project('builder_active_reference_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('theme/parts/orphan.html', '<img src="theme:./assets/removed.jpg">');
+        $project->writeText('plugin/pages/unlisted.html', '<img src="theme:./assets/removed.jpg">');
+        $project->writeJson('plugin/images.json', ['images' => [
+            ['filename' => 'hero.jpg'], ['filename' => 'removed.jpg'],
+        ]]);
+        $client = new FakeImageClient();
+        $step = new \Automattic\SiteBuild\Steps\GenerateImagesStep($client, inspectImages: false);
+        $step->run($project);
+        assert_eq(2, count($client->calls));
+        assert_eq('unreferenced', $project->readJson('images.json')[1]['status']);
+        assert_true(!$project->exists('theme/assets/removed.jpg'));
+        assert_eq(['hero.jpg'], array_column($project->readJson('plugin/images.json')['images'], 'filename'));
+        $step->run($project);
+        assert_eq(2, count($client->calls));
+        $project->writeText('plugin/pages/about.html', '<img src="theme:./assets/removed.jpg">');
+        $step->run($project);
+        assert_eq(3, count($client->calls), 'a restored reference can generate');
+        assert_eq('completed', $project->readJson('images.json')[1]['status']);
+    });
+});
