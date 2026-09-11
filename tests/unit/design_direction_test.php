@@ -1798,9 +1798,9 @@ test('theme-json injects the design direction into its prompt', function () {
     (new ThemeJsonStep($llm, $renderer))->run($project);
 
     assert_contains('Editorial-magazine', $llm->calls[0]['prompt']);
-    assert_contains('base #FDF6EC', $llm->calls[0]['prompt'], 'structured palette reaches the theme prompt');
+    assert_true(!str_contains($llm->calls[0]['prompt'], '#FDF6EC'), 'the compiler owns palette values');
     assert_contains(
-        'heading — Spectral; weights 900',
+        '"family":"Spectral","weights":[900]',
         $llm->calls[0]['prompt'],
         'structured type reaches the theme prompt',
     );
