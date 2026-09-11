@@ -161,10 +161,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * rate rose WITH length rather than falling: 59% of 5-section pages, 81% of
      * 6-section, and 42 of 42 seven-section pages. Long pages are exactly where
      * pacing bands earn their keep, so a minimum is the only thing that catches
-     * it. Short pages — every contact page is 2 to 3 sections (BIGR-858) — are
-     * left alone, where one uniform ground is a fine answer.
+     * it. Short pages are left alone, where one uniform ground is a fine answer.
+     *
+     * The number tracks the page budgets, it is not independent of them. It was
+     * 5 when front pages ran 5-8 and the only short page was a 2-4 section
+     * contact page. BIGR-1001 cut those to 5 / 4 / 3, which would have left this
+     * floor above every interior page and above all but an exactly-5 front page,
+     * so the 73% finding would simply have come back everywhere. 4 keeps the
+     * same intent against the new budgets: contact pages stay exempt, every
+     * other page is held to at least one band.
      */
-    private const MIN_BANDED_SECTIONS = 5;
+    private const MIN_BANDED_SECTIONS = 4;
 
     /** Long pages may spend at most two deliberate beats off the base surface. */
     private const MAX_NON_BASE_SECTIONS = 2;
@@ -177,18 +184,63 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
+    /**
+     * Page section budgets, including the hero and closing and excluding shared
+     * chrome. BIGR-1001. Every brief the model reads is built from these, so the
+     * number the prompt states and the number capPageSections() enforces cannot
+     * drift apart.
+     */
+    public const MAX_FRONT_SECTIONS = 5;
+    public const MAX_INTERIOR_SECTIONS = 4;
+    public const MAX_CONTACT_SECTIONS = 3;
+    private const MIN_FRONT_SECTIONS = 3;
+    private const MIN_INTERIOR_SECTIONS = 3;
+    private const MIN_CONTACT_SECTIONS = 2;
+
+    /**
+     * The budgets as prose, for the markdown prompts. They are rendered rather
+     * than typed so a change to the constants above reaches every brief the
+     * model reads, instead of leaving a prompt quoting a number the code no
+     * longer enforces.
+     */
+    public static function planBudgets(): string
+    {
+        return 'homepages have ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+            . ' sections, interior pages ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ', and contact pages ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS . '.';
+    }
+
+    /** The homepage budget for the design prompt, which authors below an existing hero. */
+    public static function homeBodyBudget(): string
+    {
+        return 'Write ' . (self::MIN_FRONT_SECTIONS - 1) . ' to ' . (self::MAX_FRONT_SECTIONS - 1)
+            . ' top-level content sections inside `<main>`, never more: with the existing preview hero, the'
+            . ' finished homepage has ' . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS . ' sections total.';
+    }
+
+    /** The interior and contact budgets for the design prompt, which authors the hero too. */
+    public static function innerPageBudget(): string
+    {
+        return 'Write ' . self::MIN_INTERIOR_SECTIONS . ' to ' . self::MAX_INTERIOR_SECTIONS
+            . ' top-level sections including the compact opening hero, never more. Contact or enquiry pages'
+            . ' instead have ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+            . ' sections total including the hero.';
+    }
+
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
-        . ' energy: an opening hero, 1 to 3 focused content sections, and a closing next step that follows from this page\'s purpose.'
+        . ' energy: an opening hero, 1 to ' . (self::MAX_FRONT_SECTIONS - 2) . ' focused content sections, and a closing next step that follows from this page\'s purpose.'
         . " Use the spec's \"sections\" list as a starting point, but prioritize it: combine, reorder, or rename"
         . " sections so the page stays concise and flows well. Let the design direction's mood"
-        . " inform which sections you choose and how they're framed. Aim for 3 to 5 sections total including the hero, never more. The shared header and footer do not count.";
+        . " inform which sections you choose and how they're framed. Aim for " . self::MIN_FRONT_SECTIONS . ' to ' . self::MAX_FRONT_SECTIONS
+        . ' sections total including the hero, never more. The shared header and footer do not count.';
 
     /**
      * Interior default. Contact-like pages use a tighter brief via emphasisFor()
      * so a "reach us" purpose is not padded to homepage length (BIGR-858).
      */
-    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 4 sections total including the hero, never more.'
+    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for ' . self::MIN_INTERIOR_SECTIONS . ' to '
+        . self::MAX_INTERIOR_SECTIONS . ' sections total including the hero, never more.'
         . ' The shared header and footer do not count.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
         . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
@@ -202,10 +254,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
 
-    /** Page section budgets include the hero and closing, excluding shared chrome. BIGR-1001. */
-    public const MAX_FRONT_SECTIONS = 5;
-    public const MAX_INTERIOR_SECTIONS = 4;
-    public const MAX_CONTACT_SECTIONS = 3;
 
     /**
      * Slug/title identities that belong to some other page even when the
@@ -420,6 +468,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         $page,
                         (bool) ($meta['form_placeholders'] ?? false),
                     ),
+                    'plan_budgets'           => self::planBudgets(),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -2156,7 +2205,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : ' There is no form backend: present only contact facts present in SITE SPEC;'
                     . ' omit mailto/tel when none exist, never a fake form.';
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
-                . '. Honor it. A contact page is brief — 2 to 3 sections total including the hero, never more. The shared header and footer do not count. '
+                . '. Honor it. A contact page is brief — ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
+                . ' sections total including the hero, never more. The shared header and footer do not count. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
                 . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
