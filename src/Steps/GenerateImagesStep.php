@@ -312,7 +312,9 @@ final class GenerateImagesStep implements Step
         // Draw supported interface illustrations before the network batch.
         $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
         foreach ($pending as $i => $spec) {
-            if (GeminiImage::mimeForFilename((string) $spec['filename']) !== 'image/jpeg') {
+            if (UiMockupImage::layout($spec) === null
+                || GeminiImage::mimeForFilename((string) $spec['filename']) !== 'image/jpeg'
+            ) {
                 continue;
             }
             $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
