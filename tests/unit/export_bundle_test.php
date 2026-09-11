@@ -172,3 +172,29 @@ test('shared parts are exported and checked with the pages', function () {
 
     assert_eq(1, count($project->readJson(PatternArtifacts::BUNDLE)['parts']));
 });
+
+/**
+ * The checked-in fixture is a real four-page site composed from a theme's own
+ * patterns. Running the export over it is the closest thing to an end-to-end
+ * check available while the earlier stages are still being extracted, and it
+ * is what keeps the fixture honest as the bundle's shape changes.
+ */
+test('the conference-hub fixture exports a bundle that passes its checks', function () {
+    $fixtures = dirname(__DIR__) . '/fixtures/patterns/conference-hub';
+    $dir = sys_get_temp_dir() . '/export-fixture-' . bin2hex(random_bytes(4));
+    mkdir($dir, 0o777, true);
+    exec(sprintf('cp -R %s/. %s/', escapeshellarg($fixtures), escapeshellarg($dir)));
+
+    $project = new Project($dir, basename($dir));
+    (new ExportBundleStep())->run($project);
+
+    $bundle = $project->readJson(PatternArtifacts::BUNDLE);
+    $report = $project->readJson(PatternArtifacts::REPORT);
+
+    exec('rm -rf ' . escapeshellarg($dir));
+
+    assert_eq(true, $report['passed']);
+    assert_eq(['home', 'agenda', 'speakers', 'venue'], array_column($bundle['pages'], 'slug'));
+    assert_eq('twentytwentyfive', $bundle['theme']);
+    assert_eq(5, count($bundle['pages'][0]['sections']));
+});

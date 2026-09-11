@@ -1,0 +1,31 @@
+{
+  "patterns": [
+    {
+      "id": "twentytwentyfive/banner-cover-big-heading"
+    },
+    {
+      "id": "twentytwentyfive/contact-info-locations"
+    },
+    {
+      "id": "twentytwentyfive/event-3-col"
+    },
+    {
+      "id": "twentytwentyfive/event-rsvp"
+    },
+    {
+      "id": "twentytwentyfive/event-schedule"
+    },
+    {
+      "id": "twentytwentyfive/services-3-col"
+    },
+    {
+      "id": "twentytwentyfive/sponsors"
+    },
+    {
+      "id": "twentytwentyfive/stats"
+    },
+    {
+      "id": "twentytwentyfive/text-faqs"
+    }
+  ]
+}
