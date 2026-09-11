@@ -542,6 +542,8 @@ if ($withImages) {
         $imageClient instanceof \Automattic\SiteBuild\ImageUsageReporting ? $imageClient->imageUsageTotals() : null,
         $localImages,
     );
+    $report->setImageReuse(count(array_filter($specs, static fn (array $spec): bool =>
+        ($spec['status'] ?? '') === 'completed' && isset($spec['reused_from']))));
 }
 
 if ($project->exists('patterns.json')) {
