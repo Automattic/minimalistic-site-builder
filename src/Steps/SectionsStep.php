@@ -1138,6 +1138,7 @@ final class SectionsStep implements Step
                 $opening = $i === 0;
                 $input = $common + [
                     'outline'   => $outline,
+                    'is_opening' => $opening,
                     'page'      => [
                         'slug'  => (string) ($page['slug'] ?? ''),
                         'title' => (string) ($page['title'] ?? ''),

@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
+use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -189,12 +190,20 @@ final class FinalizeThemeStep implements Step
             TypeTreatment::kitCss($typeTreatment),
             $headerWarnings,
         );
+        $bandGeometry = DesignDirectionStep::bandGeometryFor($project);
+        $bandShipped = self::writeOverlayKit($project, self::bandKit(), BandGeometry::kitCss($bandGeometry, $shape), $headerWarnings);
+        if ($bandShipped) {
+            array_push($headerWarnings, ...self::clippedBandWarnings($bandGeometry, $device));
+        }
         $overlays = [];
         if ($emphasisShipped) {
             $overlays[] = self::emphasisKit();
         }
         if ($labelShipped) {
             $overlays[] = self::labelKit();
+        }
+        if ($bandShipped) {
+            $overlays[] = self::bandKit();
         }
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
@@ -273,6 +282,24 @@ final class FinalizeThemeStep implements Step
      *
      * @return list<string>
      */
+    /**
+     * A rounded band clips to its corner, so anything a section deliberately
+     * hangs over that edge is cut and nobody sees the loss. The one-band CSS
+     * device is the case the vocabulary names — a stamp sits rotated at a
+     * band's corner by design. Record it; do not undo either commitment.
+     *
+     * @return list<string>
+     */
+    private static function clippedBandWarnings(string $bandGeometry, string $device): array
+    {
+        if ($bandGeometry !== 'rounded' || $device === '' || $device === 'none') {
+            return [];
+        }
+        return ["file='theme/assets/band/band.css'; path=\"band_geometry\"; authored=device '{$device}'"
+            . " with band_geometry 'rounded'; delivered=both, the band clipped;"
+            . ' disposition a rounded band uses overflow: clip, so a mark placed over its edge is cut'];
+    }
+
     private static function claimedPseudoElementWarnings(Project $project, string $surface): array
     {
         if (!$project->exists('theme/style.css')) {
@@ -332,6 +359,7 @@ final class FinalizeThemeStep implements Step
             self::surfaceKit(),
             self::deviceKit(),
             self::typeTreatmentKit(),
+            self::bandKit(),
         ];
     }
 
@@ -343,6 +371,11 @@ final class FinalizeThemeStep implements Step
     public static function labelKit(): OverlayKit
     {
         return new OverlayKit('label', '// Apply the section_label token after style.css.');
+    }
+
+    public static function bandKit(): OverlayKit
+    {
+        return new OverlayKit('band', '// Apply the band_geometry token after style.css.');
     }
 
     public static function surfaceKit(): OverlayKit
