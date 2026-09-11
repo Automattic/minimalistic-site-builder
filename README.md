@@ -57,7 +57,7 @@ from a supported coding-agent harness.
 ```bash
 php bin/build.php "A cozy neighborhood bakery"
 php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate images
-php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
+php bin/build.php "A cozy neighborhood bakery" --provider=openai   # Use Astra and Terra.
 php bin/build.php "A cozy neighborhood bakery" --html-first     # author an HTML+CSS design, then convert it to blocks
 php bin/build.php "A cozy neighborhood bakery" --blocks-first   # author block markup directly (the default)
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
@@ -145,10 +145,21 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | Provider | large | small |
 |----------|-------|-------|
 | `anthropic` (default) | `claude-opus-5` | `claude-haiku-4-5` |
-| `openai` | `gpt-5.5` | `gpt-5.4-mini` |
+| `openai` | `gpt-6-astra` | `gpt-5.6-terra` |
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
 | `baseten` | `deepseek-ai/DeepSeek-V4-Pro` | `zai-org/GLM-5.3-Flash` |
+
+Both the OpenAI API transport and the Codex transport set `gpt-6-astra` to `low` reasoning effort.
+Astra requires at least `low`; it does not support `none`.
+The API transport omits unsupported temperature parameters and keeps the existing token limits.
+Both transports set the small model, `gpt-5.6-terra`, to `none` reasoning effort.
+This explicit setting prevents Terra from using its default `medium` effort.
+
+Terra has higher token prices than GPT-5.4-mini. See the [Terra model page](https://developers.openai.com/api/docs/models/gpt-5.6-terra).
+Astra has higher token prices than GPT-5.5, so `low` does not guarantee equal cost or latency.
+See the [OpenAI model guide](https://developers.openai.com/api/docs/guides/latest-model)
+and the [Astra model page](https://developers.openai.com/api/docs/models/gpt-6-astra).
 
 `baseten` reaches Baseten's open-weight models through the WordPress.com AI
 proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
@@ -306,7 +317,7 @@ Useful variants:
 ```bash
 php bin/build-demos.php --with-images --only=tbilisi     # just one demo
 SITE_BUILD_IMAGE_QA=0 php bin/build-demos.php --with-images  # skip the vision check on delivered heroes
-php bin/build-demos.php --with-images --provider=openai  # build the set on GPT-5.x
+php bin/build-demos.php --with-images --provider=openai  # Use Astra and Terra.
 php bin/build-demos.php --with-images --parallel=2       # cap concurrent builds
 php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots
 php bin/build-demos.php --with-images --serve            # serve all sites afterward

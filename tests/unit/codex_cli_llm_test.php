@@ -401,6 +401,30 @@ test('Codex pins reasoning effort instead of inheriting the CLI default', functi
     });
 });
 
+test('Codex uses low effort for Astra and none for the small model in one batch', function (): void {
+    codex_cli_environment(function (string $binary): void {
+        (new CodexCliLlm('gpt-6-astra', $binary))->completeBatch([
+            ['prompt' => 'astra-effort'],
+            ['prompt' => 'small-effort', 'model' => 'gpt-5.6-terra'],
+        ]);
+        $calls = codex_cli_calls($binary);
+        foreach (['astra-effort' => 'low', 'small-effort' => 'none'] as $prompt => $effort) {
+            $call = codex_cli_call_for_stdin($calls, $prompt);
+            $index = array_search('-c', $call['argv'], true);
+            assert_true($index !== false);
+            assert_eq('model_reasoning_effort="' . $effort . '"', $call['argv'][$index + 1]);
+        }
+    });
+});
+
+test('Codex uses low effort when a request overrides the model with Astra', function (): void {
+    codex_cli_environment(function (string $binary): void {
+        (new CodexCliLlm('gpt-5.6-terra', $binary))->complete('astra-override', ['model' => 'gpt-6-astra']);
+        $argv = codex_cli_calls($binary)[0]['argv'];
+        assert_true(in_array('model_reasoning_effort="low"', $argv, true));
+    });
+});
+
 test('Codex argv matches the measured exec invocation and carries no prompt', function (): void {
     codex_cli_environment(function (string $binary): void {
         (new CodexCliLlm('m', $binary))->complete('argv-probe');

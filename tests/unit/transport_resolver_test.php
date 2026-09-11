@@ -1531,10 +1531,10 @@ test('W17 codex-cli implies OpenAI models for transport and steps', function ():
         assert_true(is_array($details), $output);
         assert_eq('Automattic\\SiteBuild\\CodexCliLlm', $details['class']);
         assert_eq('openai', $details['provider']);
-        assert_eq('gpt-5.5', $details['model']);
+        assert_eq('gpt-6-astra', $details['model']);
         assert_eq($details['model'], $details['default']);
-        assert_eq('gpt-5.4-mini', $details['steps']['site-spec']);
-        assert_eq('gpt-5.5', $details['steps']['sections']);
+        assert_eq('gpt-5.6-terra', $details['steps']['site-spec']);
+        assert_eq('gpt-6-astra', $details['steps']['sections']);
         assert_true(!str_starts_with($details['steps']['sections'], 'claude-'));
     });
 });
@@ -1598,7 +1598,7 @@ test('W18 coherent explicit provider and harness pairing proceeds', function ():
         assert_true(is_array($details), $output);
         assert_eq('Automattic\\SiteBuild\\CodexCliLlm', $details['class']);
         assert_eq('openai', $details['provider']);
-        assert_eq('gpt-5.5', $details['model']);
+        assert_eq('gpt-6-astra', $details['model']);
         assert_true(!file_exists($binary . '.count'));
     });
 });
