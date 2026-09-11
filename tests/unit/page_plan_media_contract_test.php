@@ -5,6 +5,22 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('the page plan schema uses provider-supported bounds', function () {
+    $schema = PagePlanStep::jsonSchema();
+    $count = $schema['properties']['sections']['items']['properties']['image_count'];
+    assert_eq('integer', $count['type']);
+    assert_eq(range(0, 12), $count['enum']);
+    $check = function (array $node) use (&$check): void {
+        foreach ($node as $key => $value) {
+            assert_true(!in_array($key, ['minimum', 'maximum', 'minLength', 'maxLength'], true));
+            if (is_array($value)) {
+                $check($value);
+            }
+        }
+    };
+    $check($schema);
+});
+
 test('a product gallery preserves six photographs before markup generation', function () {
     with_project('builder_media_contract_', function ($project) {
         $project->writeJson('meta.json', ['prompt' => 'A lamp studio with six product photographs.']);
