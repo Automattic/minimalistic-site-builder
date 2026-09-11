@@ -36,6 +36,7 @@ Return a single JSON object with this exact shape:
       "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
+      "image_count": 0,
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, offset-grid, equal-card-grid, bento-grid, faq-split, cta-panel, pricing-tiers, stat-ledger, feature-row-hairlines, zigzag-steps, project-grid-2x2, logo-strip",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
@@ -61,6 +62,13 @@ non-empty plain-text planning context and must never become button copy;
 route, placeholder `#`, phone number, or external URL. A contact mailto or
 tel: is valid only when that exact address or number appears in SITE SPEC.
 Never invent an email, street address, phone number, or URL. An invented factual claim includes a count of stock, customers or members, an operational policy such as vetting or quality checks, a guarantee, and any term of business the spec does not state.
+
+Set `image_count` to the number of images the section needs, from 0 to 12.
+Count the section cover, if present. Keep this count consistent with `content_notes`.
+Preserve photographs that the brief requests. Select the composition after this count.
+Use `equal-card-grid` for six to twelve product photographs, with one photograph per card.
+Use rows of two to four cards. Image cards use the `card` item pattern, including sites with a ruled text idiom.
+Never assign a text-only composition to a section with required photographs.
 
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text. ALWAYS pair it with background "image": the section delivers one wp:cover band, and only the "image" treatment lets the builder run that band edge to edge (any other background frames the cover inside a padded solid band, and the builder forces the pairing to "image" anyway).

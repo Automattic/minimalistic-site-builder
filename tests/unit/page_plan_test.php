@@ -95,6 +95,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         'type',
         'purpose',
         'content_notes',
+        'image_count',
         'layout_archetype',
         'background',
         'vertical_density',
@@ -107,7 +108,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     assert_eq($fields, $item['required']);
     assert_eq(false, $item['additionalProperties']);
     assert_eq($fields, array_keys($item['properties']));
-    foreach (array_diff($fields, ['item_pattern', 'primary_action']) as $field) {
+    foreach (array_diff($fields, ['item_pattern', 'primary_action', 'image_count']) as $field) {
         assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
     }
     assert_eq(['null', 'string'], array_column($item['properties']['item_pattern']['anyOf'], 'type'));
