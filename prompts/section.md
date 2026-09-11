@@ -109,6 +109,8 @@ IMAGE INSTRUCTIONS:
 
 <!-- cache-layer:brief -->
 SECTION TO BUILD:
+Use an h2 for the section title before any h3 item titles. An interior hero uses the page h1.
+Use the `body` preset for a paragraph longer than 120 characters. Keep `lead` for short introductions.
   Title:    {{section_title}}
   Slug:     {{section_slug}}
   Role:     {{section_role}}
