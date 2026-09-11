@@ -1151,7 +1151,19 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private function plannedPages(Project $project, array $pages, array $results): array
     {
         $siteSpec = $project->readJson('siteSpec.json');
-        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $sitePages = array_column(self::flattenPages($siteSpec), null, 'slug');
+        $savedPages = $project->exists('pages.json') ? $project->readJson('pages.json')['pages'] ?? [] : [];
+        foreach ($savedPages as $savedPage) {
+            $slug = is_array($savedPage) ? ($savedPage['slug'] ?? '') : '';
+            if (isset($sitePages[$slug]) && is_array($savedPage['sections'] ?? null)) {
+                $sitePages[$slug]['sections'] = $savedPage['sections'];
+            }
+        }
+        $actionContext = self::withPlannedSectionAnchors(
+            self::primaryActionContext($siteSpec, array_values($sitePages)),
+            array_values($sitePages),
+            array_replace($sitePages, $results),
+        );
         $allowOffsetGrid = self::allowOffsetGridFor($project);
         $warnings = [];
         $repairs = [];
@@ -1195,6 +1207,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out,
             DesignDirectionStep::itemPatternFor($project),
             $repairs,
+        );
+        $contextPages = array_replace(array_column($sitePages, null, 'slug'), array_column($out, null, 'slug'));
+        $out = self::reconcileActionCapabilities(
+            $out, $siteSpec, $warnings, (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false),
+            array_values($contextPages),
         );
         $project->addWarnings($this->id(), $warnings);
         return $out;
@@ -2097,13 +2114,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /** Reconcile labels after every page and section destination is final. */
-    public static function reconcileActionCapabilities(array $pages, array $siteSpec, array &$warnings = [], bool $formPlaceholders = false): array
+    public static function reconcileActionCapabilities(array $pages, array $siteSpec, array &$warnings = [], bool $formPlaceholders = false, ?array $contextPages = null): array
     {
         // A host form needs its actual markup. The CTA step checks its destination after sections exist.
         if ($formPlaceholders) {
             return $pages;
         }
-        $context = ActionCapabilities::context($siteSpec, $pages);
+        $context = ActionCapabilities::context($siteSpec, $contextPages ?? $pages);
         foreach ($pages as $pageIndex => $page) {
             foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
                 $action = $section['primary_action'] ?? null;
