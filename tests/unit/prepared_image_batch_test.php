@@ -246,3 +246,34 @@ test('resumed image collection keeps the planned hero through its final section 
         assert_eq(true, \Automattic\SiteBuild\ImageQa::applies(['filename' => 'hero-room.jpg', 'image_slot' => 'image']));
     });
 });
+
+
+test('an explicit full-width image keeps a wide crop under a square design', function () {
+    with_project('builder_full_width_slot_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('plugin/pages/home.html', '<!-- wp:image {"align":"full"} --><figure class="alignfull"><img src="theme:./assets/hero.jpg"></figure><!-- /wp:image -->');
+        $specs = \Automattic\SiteBuild\ImageSlot::annotate($project, $project->readJson('images.json'));
+        $request = \Automattic\SiteBuild\Steps\GenerateImagesStep::generationSpec($specs[0], '', '', 'square');
+        assert_eq('full-width', $specs[0]['image_slot']);
+        assert_eq('16:9', $request['aspect_ratio']);
+        assert_eq('2K', $request['sample_image_size']);
+    });
+});
+
+test('final image references follow only used local patterns and their nested parts', function () {
+    with_project('builder_pattern_reference_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('plugin/pages/home.html', '<!-- wp:pattern {"slug":"demo/room"} /-->');
+        $project->writeText('theme/patterns/room.php', "<?php /** Slug: demo/room */ ?>"
+            . "<img src=\"<?php echo esc_url( get_theme_file_uri( 'assets/hero.jpg' ) ); ?>\">"
+            . '<!-- wp:template-part {"slug":"brand"} /-->');
+        $project->writeText('theme/parts/brand.html', '<!-- wp:pattern {"slug":"demo/room"} /-->');
+        $project->writeText('theme/patterns/orphan.php', '<?php /** Slug: demo/orphan */ ?><img src="theme:./assets/removed.jpg">');
+        $batch = PreparedImageBatch::fromProject($project);
+        assert_eq([0, 3], array_keys($batch->requests()));
+        assert_eq('unreferenced', $batch->omitted()[1]['reason']);
+        assert_true($batch->isCurrent($project));
+        $project->writeText('theme/patterns/room.php', '<?php /** Slug: demo/room */ ?><p>No image.</p>');
+        assert_true(!$batch->isCurrent($project));
+    });
+});
