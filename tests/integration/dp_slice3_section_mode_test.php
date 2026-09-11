@@ -164,8 +164,7 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
 
         $llm->queueJson(dp3_integration_site_spec());
         $llm->queueJson(['seeds' => ['Measured Folio', 'Studio Ledger', 'Northstar Index', 'Working Proof']]);
-        $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
-        $llm->queueJson(dp3_integration_direction());
+        $llm->queueJson(['winner' => 0, 'why' => 'The concept fits the subject.'] + dp3_integration_direction());
         $llm->queueJson(dp3_integration_theme());
         $llm->queueJson(['sections' => [
             dp3_integration_section('about-intro', 'About intro', 'bento-grid'),
