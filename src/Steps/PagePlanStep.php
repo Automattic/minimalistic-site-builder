@@ -441,6 +441,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $designDirection = DesignDirectionStep::readFor($project);
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
+            'min_banded_sections' => (string) self::MIN_BANDED_SECTIONS,
+            'max_non_base_sections' => (string) self::MAX_NON_BASE_SECTIONS,
             'site_spec'        => SiteSpecStep::promptText($project),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => $designDirection,
@@ -1678,6 +1680,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $errors[] = "page-plan: the FIRST section '{$out[0]['slug']}' of this INTERIOR page uses "
                 . "layout_archetype 'full-bleed-cover' — interior pages open with a COMPACT hero, not a second "
                 . 'homepage hero; pick a compact archetype (use background "image" if the opening should be image-led)';
+        }
+
+        // Repair surface budgets before a model request. Preserve structural images and the assigned hero.
+        if ($errors === []) {
+            $out = self::withSurfaceRestraint($out, $pageSlug, $warnings, $front && $frontProjection !== null);
+            $out = self::withPacingBand($out, $pageSlug, $warnings);
         }
 
         // Report every violation at once so the single repair call can fix them all.
