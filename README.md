@@ -65,6 +65,19 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu,
 php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
 ```
 
+`--with-images` generates every homepage image (including shared header/footer
+imagery and the site logo) and existing hero images on interior pages. Other
+interior images use neutral local placeholders in their authored shape and
+format, without an image-generation request. A text-only hero stays text-only.
+The same policy applies to `bin/images.php` and embedding hosts using
+`GenerateImagesStep`, on both build graphs. Deferred images retain their authored
+specs in `images.json` with `status: "placeholder"`; reruns keep those placeholders
+without spending more image requests. `php bin/images.php <slug> --all` ignores the
+policy and generates every pending image, which is how an eval or a demo gets a
+fully imaged build. An image whose source parts the plan does not name is generated
+rather than deferred, and recorded in `warnings.json`. This limits which images
+generate, rather than imposing a numeric ceiling on homepage imagery.
+
 Hero composition is selected from a reviewed code-owned catalog after filtering
 the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
 `--max-hero-images`, and `--hero-copy-capacity`.
