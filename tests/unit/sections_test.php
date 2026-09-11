@@ -653,7 +653,7 @@ test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', fu
     }
 });
 
-test('the header prompt carries an archetype assignment and the full catalog', function () {
+test('the header prompt carries only its assigned recipe', function () {
     putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -662,7 +662,7 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     // The fixture's front hero is an image-led cover over a dark opening, so
     // the computed overlay mode mandates the single minimal-overlay archetype.
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
-    assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
+    assert_true(!str_contains($reqs['header']['prompt'], 'branded-lockup'));
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
     // One page of two bands has too little depth for chrome that never
     // leaves, so the overlay the fixture earns is the transient one.
@@ -1073,7 +1073,6 @@ test('chrome nav rules follow the page count: anchors for one page, inner pages 
 
     assert_contains('NEVER include the homepage in `wp:navigation`', $reqs['header']['prompt']);
     assert_contains('Do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
-    assert_contains('SITE PAGES except the front page', $reqs['header']['prompt']);
     assert_contains('EVERY SITE PAGES entry except the front page', $reqs['header']['prompt']);
     assert_contains('omitting any inner page is forbidden', $reqs['header']['prompt']);
     assert_contains('one horizontal row (identity start, nav end)', $reqs['header']['prompt']);

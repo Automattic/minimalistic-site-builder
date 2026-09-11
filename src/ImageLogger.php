@@ -29,6 +29,23 @@ final class ImageLogger
     /** Slug used when a label reduces to nothing. */
     private const SLUG_FALLBACK = 'image';
 
+    /** Append one provider attempt. Keep image bytes and credentials out of the record. */
+    public static function attempt(array $record): void
+    {
+        if (self::$disabled || self::$dir === null) {
+            return;
+        }
+        try {
+            if (!is_dir(self::$dir) && !@mkdir(self::$dir, 0777, true) && !is_dir(self::$dir)) {
+                return;
+            }
+            @file_put_contents(self::$dir . '/attempts.jsonl',
+                json_encode($record, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n", FILE_APPEND | LOCK_EX);
+        } catch (\Throwable) {
+            // A log failure must not abort a build.
+        }
+    }
+
     /**
      * Write one image-request transcript. Never throws.
      *

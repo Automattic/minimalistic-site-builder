@@ -88,9 +88,6 @@ ATTRIBUTE-LIGHT BLOCK SAVE MARKUP:
 - Keep every `AI_IMAGE` `<img>` `src` and `alt` exactly as instructed below. Image collection runs before final block serialization.
 - Every block comment must be correctly closed. Never remove content or functional attributes merely to make the HTML shorter.
 
-IMAGE INSTRUCTIONS:
-{{image_instructions}}
-
 FORM INSTRUCTIONS:
 {{form_instructions}}
 
@@ -106,6 +103,9 @@ THE FULL PAGE OUTLINE (for context — build ONLY the section named in the final
 
 SITE PAGES (the whole site, for internal links):
 {{site_pages}}
+
+IMAGE INSTRUCTIONS:
+{{image_instructions}}
 
 <!-- cache-layer:brief -->
 SECTION TO BUILD:

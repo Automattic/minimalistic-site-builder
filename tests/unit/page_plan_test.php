@@ -95,6 +95,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         'type',
         'purpose',
         'content_notes',
+        'image_count',
         'layout_archetype',
         'background',
         'vertical_density',
@@ -107,7 +108,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     assert_eq($fields, $item['required']);
     assert_eq(false, $item['additionalProperties']);
     assert_eq($fields, array_keys($item['properties']));
-    foreach (array_diff($fields, ['item_pattern', 'primary_action']) as $field) {
+    foreach (array_diff($fields, ['item_pattern', 'primary_action', 'image_count']) as $field) {
         assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
     }
     assert_eq(['null', 'string'], array_column($item['properties']['item_pattern']['anyOf'], 'type'));
@@ -1090,7 +1091,7 @@ test('page-plan writes pages.json with sections per page', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan sends an over-budget page through repair, then demotes mechanically', function () {
+test('page-plan repairs a surface budget before another model request', function () {
     $tmp = sys_get_temp_dir() . '/builder_pp_surface_restraint_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
@@ -1120,17 +1121,13 @@ test('page-plan sends an over-budget page through repair, then demotes mechanica
     }
 
     $llm = new FakeLlm();
-    // Six bands on six sections is rejected, and the repair keeps them all.
-    $llm->queueJson(['sections' => $sections]);
     $llm->queueJson(['sections' => $sections]);
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq(2, count($llm->calls), 'one plan, one repair, then the mechanical backstop');
-    assert_contains(
-        'sit on a non-base background',
-        $llm->calls[1]['prompt'],
-        'the model is told which rule it broke before the build demotes anything',
-    );
+    assert_eq(1, count($llm->calls), 'surface repair needs no model request');
+    assert_contains('4 or more sections', $llm->calls[0]['prompt']);
+    assert_contains('AT MOST 2 non-base backgrounds', $llm->calls[0]['prompt']);
+    assert_contains('authored=', implode("\n", $project->readJson('warnings.json')['page-plan']));
 
     $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
     $backgrounds = array_column($delivered, 'background');

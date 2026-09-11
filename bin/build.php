@@ -537,6 +537,11 @@ if ($withImages) {
         };
     }
     $report->setImages($generated, $failed, count($specs), $placeholders);
+    $localImages = count(array_filter($specs, static fn (array $spec): bool => ($spec['renderer'] ?? '') === 'native-ui'));
+    $report->setImageRequests(
+        $imageClient instanceof \Automattic\SiteBuild\ImageUsageReporting ? $imageClient->imageUsageTotals() : null,
+        $localImages,
+    );
     $report->setImageReuse(count(array_filter($specs, static fn (array $spec): bool =>
         ($spec['status'] ?? '') === 'completed' && isset($spec['reused_from']))));
 }
