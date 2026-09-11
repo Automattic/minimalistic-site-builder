@@ -307,6 +307,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'type'             => ['type' => 'string'],
             'purpose'          => ['type' => 'string'],
             'content_notes'    => ['type' => 'string'],
+            'image_count'      => ['type' => 'integer', 'enum' => range(0, 12)],
             'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
@@ -326,9 +327,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         'additionalProperties' => false,
                         'required'             => ['label', 'intent', 'destination'],
                         'properties'           => [
-                            'label'       => ['type' => 'string', 'minLength' => 1, 'maxLength' => 80],
-                            'intent'      => ['type' => 'string', 'minLength' => 1],
-                            'destination' => ['type' => 'string', 'minLength' => 1],
+                            'label'       => ['type' => 'string', 'description' => 'Use 1 to 80 characters.'],
+                            'intent'      => ['type' => 'string', 'description' => 'Use a non-empty intent.'],
+                            'destination' => ['type' => 'string', 'description' => 'Use a non-empty destination.'],
                         ],
                     ],
                 ],
@@ -926,7 +927,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     }
                     continue;
                 }
-                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
+                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)
+                    || ($archetype === 'equal-card-grid' && (int) ($section['image_count'] ?? 0) > 0)
+                ) {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
                     if ($explicit !== ItemPattern::DEFAULT) {
                         if ($explicit !== null) {
@@ -1606,6 +1609,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $sectionPath,
             );
 
+            $authoredImageCount = $section['image_count'] ?? 0;
+            $imageCount = is_numeric($authoredImageCount) ? max(0, min(12, (int) $authoredImageCount)) : 0;
+            if (!is_numeric($authoredImageCount) || (float) $authoredImageCount !== (float) $imageCount) {
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, count($out)) . '.image_count',
+                    $authoredImageCount,
+                    $imageCount,
+                    'replaced an image count outside the supported integer range 0..12',
+                );
+            }
+
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -1613,6 +1627,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
+                'image_count'      => $imageCount,
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
@@ -1670,6 +1685,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $out = self::restrictOffsetGrid($out, $allowOffsetGrid, $front, $warnings, $pageSlug);
+        $out = self::reconcileMediaAssignments($out, $frontProjection !== null, $warnings, $pageSlug, $allowOffsetGrid);
 
         // An interior page that opens with a full-viewport cover is a second
         // homepage, not an inner page (the prompt demands a COMPACT opening).
@@ -1694,6 +1710,66 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
+    }
+
+    /**
+     * Preserve image requirements before the section model selects markup.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function reconcileMediaAssignments(
+        array $sections,
+        bool $frontHeroLocked = false,
+        array &$warnings = [],
+        string $pageSlug = '',
+        bool $allowOffsetGrid = true,
+    ): array {
+        foreach ($sections as $index => $section) {
+            $count = (int) ($section['image_count'] ?? 0);
+            $authored = (string) ($section['layout_archetype'] ?? '');
+            if ($count === 0 || !SectionComposition::isKnown($authored)
+                || ($frontHeroLocked && $index === 0)
+                || SectionComposition::metadata($authored)['max_images'] >= $count
+            ) {
+                continue;
+            }
+            $candidates = [];
+            foreach (['equal-card-grid', 'bento-grid', 'offset-grid', 'asymmetric-split'] as $candidate) {
+                if (!self::archetypeEligible($candidate, $allowOffsetGrid)
+                    || SectionComposition::metadata($candidate)['max_images'] < $count
+                ) {
+                    continue;
+                }
+                $candidates[] = $candidate;
+                if ($candidate !== ($sections[$index - 1]['layout_archetype'] ?? null)
+                    && $candidate !== ($sections[$index + 1]['layout_archetype'] ?? null)
+                ) {
+                    break;
+                }
+            }
+            $delivered = end($candidates);
+            if ($delivered === false) {
+                continue;
+            }
+            $sections[$index]['layout_archetype'] = $delivered;
+            $sections[$index]['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                . " Build correction: preserve all {$count} requested images and their subjects."
+                . " Use the {$delivered} recipe. This assignment replaces the earlier {$authored} structure."
+                . ' Use image cards instead of text-only rows or ruled tables.';
+            $sections[$index]['handoff'] = self::withSeamCorrection(
+                $section['handoff'] ?? '',
+                "this section now uses {$delivered} to preserve its {$count} images",
+            );
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($pageSlug, (int) $index) . '.layout_archetype',
+                $authored,
+                $delivered,
+                "replaced an incompatible composition to preserve {$count} requested images",
+            );
+        }
+        return $sections;
     }
 
     /**
