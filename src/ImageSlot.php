@@ -26,7 +26,7 @@ final class ImageSlot
         } else {
             foreach (['theme/parts/*.html', 'theme/templates/*.html', 'plugin/pages/*.html'] as $pattern) {
                 foreach (glob($project->root . '/' . $pattern) ?: [] as $file) {
-                    $markup[] = (string) file_get_contents($file);
+                    $markup[] = $project->readText(substr($file, strlen($project->root) + 1));
                 }
             }
         }
