@@ -35,8 +35,14 @@ final class SiteIcon
      * sample came back 1264x848 — so the ink is measured and fitted, not
      * centre-cropped: a wide lockup spanning more than the render's short side
      * would lose both ends to a crop, invisibly, its middle still being ink.
+     *
+     * `$groundHex` is the ground to paint behind the mark. Pass the header's
+     * own background so a host with GD and a host with Imagick cut the same
+     * icon: the Imagick path flattens the keyed mark over that colour, and two
+     * builds of one site should not put different tiles in the tab. White is
+     * the fallback, because an unkeyed render already sits on one.
      */
-    public static function fromMark(string $pngBytes): ?string
+    public static function fromMark(string $pngBytes, ?string $groundHex = null): ?string
     {
         if ($pngBytes === '' || !function_exists('imagecreatefromstring')) {
             return null;
@@ -45,6 +51,14 @@ final class SiteIcon
         $source = @imagecreatefromstring($pngBytes);
         if ($source === false) {
             return null;
+        }
+
+        // A palette PNG answers imagecolorat() with an index, not a packed
+        // colour, and inkBounds() would then measure index arithmetic. An
+        // 8-bit render is ordinary currency here, and the failure would be
+        // silent, so convert before a single pixel is read.
+        if (!imageistruecolor($source)) {
+            imagepalettetotruecolor($source);
         }
 
         // Mark generation can come back blank, and a white square in the tab
@@ -64,7 +78,8 @@ final class SiteIcon
         $canvas = imagecreatetruecolor(self::SIDE, self::SIDE);
         // A tab has no bar behind it, and iOS composites a transparent touch
         // icon onto black, so the icon carries its own ground.
-        imagefill($canvas, 0, 0, (int) imagecolorallocate($canvas, 255, 255, 255));
+        [$red, $green, $blue] = ContrastMath::hexToRgb((string) $groundHex) ?? [255, 255, 255];
+        imagefill($canvas, 0, 0, (int) imagecolorallocate($canvas, $red, $green, $blue));
         $copied = imagecopyresampled(
             $canvas,
             $source,
@@ -77,13 +92,16 @@ final class SiteIcon
             $inkWidth,
             $inkHeight
         );
+        imagedestroy($source);
         if (!$copied) {
+            imagedestroy($canvas);
             return null;
         }
 
         ob_start();
         $written = imagepng($canvas);
         $bytes = (string) ob_get_clean();
+        imagedestroy($canvas);
 
         return $written && $bytes !== '' ? $bytes : null;
     }
@@ -100,6 +118,9 @@ final class SiteIcon
     {
         $width = imagesx($source);
         $height = imagesy($source);
+        // The corner is the ground on every mark render the prompt asks for.
+        // A render whose corner is ink inverts the measurement, which fails
+        // soft: the box still covers the mark, only with less breathing room.
         $ground = imagecolorat($source, 0, 0);
 
         $left = $width;

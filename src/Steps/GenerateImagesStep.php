@@ -157,6 +157,19 @@ final class GenerateImagesStep implements Step
      * favicon disappears on a light browser tab. Falls back to `base`, which
      * is what an unstyled header paints.
      */
+    /**
+     * Drop an icon an earlier attempt left behind when this render yields
+     * none. run() is resumable and the icon row keys off this file alone, so
+     * a survivor would be shipped against a mark it does not come from.
+     */
+    private static function discardStaleIcon(Project $project, ?string $iconBytes): void
+    {
+        if ($iconBytes !== null || !$project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
+            return;
+        }
+        @unlink($project->path('theme/assets/' . self::SITE_ICON_FILE));
+    }
+
     public static function headerBackgroundHex(Project $project): ?string
     {
         return self::headerPaletteHex($project, 'backgroundColor', 'base');
@@ -789,13 +802,8 @@ final class GenerateImagesStep implements Step
                     // wants an opaque square — so the icon is still cut from
                     // this render, by GD, which the Dotcom host does have.
                     unset($specs[$i]['role']);
-                    $iconBytes = SiteIcon::fromMark($bytes);
-                    if ($iconBytes === null && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
-                        // run() is resumable, and shipping now keys off this
-                        // file alone: an icon from an earlier attempt would
-                        // outlive the render that disowned it.
-                        @unlink($project->path('theme/assets/' . self::SITE_ICON_FILE));
-                    }
+                    $iconBytes = SiteIcon::fromMark($bytes, self::headerBackgroundHex($project));
+                    self::discardStaleIcon($project, $iconBytes);
                     $project->addWarnings($this->id(), [
                         "file='theme/assets/{$filename}'; asset='site-logo.png'; authored role=site-logo; "
                         . 'delivered unkeyed opaque PNG kept as a theme asset only; '
@@ -824,6 +832,12 @@ final class GenerateImagesStep implements Step
                             $iconBytes = $flattened;
                         }
                     }
+                    // Same resume rule as the unkeyed branch above. A null
+                    // here is ordinary — no header ground, or a flatten that
+                    // changed nothing — and shipping keys off the file alone,
+                    // so an icon from an earlier attempt must not outlive the
+                    // render that no longer yields one.
+                    self::discardStaleIcon($project, $iconBytes);
                 }
             }
         } catch (\Throwable $e) {

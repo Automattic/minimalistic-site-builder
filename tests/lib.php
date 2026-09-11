@@ -135,6 +135,16 @@ function png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
  * have — and the no-Imagick path is exactly what the site-icon tests exercise,
  * so their fixtures cannot depend on it.
  */
+/** A palette-mode PNG of a mark, the 8-bit form a render can come back in. */
+function gd_palette_mark_png(int $w = 120, int $h = 80): string
+{
+    $im = imagecreatefromstring(gd_mark_png($w, $h));
+    imagetruecolortopalette($im, false, 8);
+    ob_start();
+    imagepng($im);
+    return (string) ob_get_clean();
+}
+
 function gd_mark_png(int $w = 120, int $h = 80): string
 {
     $im = imagecreatetruecolor($w, $h);

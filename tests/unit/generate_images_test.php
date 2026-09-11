@@ -1526,6 +1526,53 @@ test('generate-images ships an opaque site icon beside the transparent logo', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images discards an earlier icon when a keyed render yields none', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        png_fixture('white', 'red', 60, 60)
+    );
+    // No header part, so there is no ground to flatten the icon over and this
+    // render yields none. Shipping keys off the file alone, so an icon an
+    // earlier attempt left behind would go out against a mark it is not from.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText('theme/assets/site-icon.png', 'stale bytes from an earlier run');
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    (new GenerateImagesStep(new FakeImageClient($mark)))->run($project);
+
+    assert_true(!$project->exists('theme/assets/site-icon.png'), 'the stale icon is gone');
+    $rows = [];
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        $rows[$row['filename']] = $row['role'] ?? null;
+    }
+    assert_true(!isset($rows['site-icon.png']), 'and no icon row is shipped');
+    assert_eq('site-logo', $rows['site-logo.png'] ?? null, 'the logo is unaffected');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images ships no site icon when the mark was dropped', function () {
     if (!\Automattic\SiteBuild\ImageTransparency::available()) {
         skip_test('imagick not loaded');
