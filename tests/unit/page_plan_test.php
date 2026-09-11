@@ -10,6 +10,11 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+function plan_request_text(array $request): string
+{
+    return implode('', $request['cached_prefixes'] ?? $request['opts']['cached_prefixes'] ?? []) . $request['prompt'];
+}
+
 test('page-plan excludes a retired spec mood on resume and preserves the user brief and footer rule', function () {
     with_project('builder_plan_resume_', function ($project) {
         $project->writeJson('siteSpec.json', plan_spec(['visual_vibe' => 'sophisticated']));
@@ -23,11 +28,11 @@ test('page-plan excludes a retired spec mood on resume and preserves the user br
 
         assert_eq(3, count($requests));
         foreach ($requests as $request) {
-            assert_true(!str_contains($request['prompt'], 'visual_vibe'));
-            assert_true(!str_contains($request['prompt'], 'sophisticated'));
-            assert_contains('Demo', $request['prompt']);
-            assert_contains('Use a warm and rustic style.', $request['prompt']);
-            assert_contains($footerRule, $request['prompt']);
+            assert_true(!str_contains(plan_request_text($request), 'visual_vibe'));
+            assert_true(!str_contains(plan_request_text($request), 'sophisticated'));
+            assert_contains('Demo', plan_request_text($request));
+            assert_contains('Use a warm and rustic style.', plan_request_text($request));
+            assert_contains($footerRule, plan_request_text($request));
         }
     });
 });
@@ -988,27 +993,27 @@ test('page-plan fans out one request per page with per-page context', function (
     $reqs = (new PagePlanStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_eq(['home', 'menu', 'breads'], array_keys($reqs));
-    assert_contains('in es-AR', $reqs['home']['prompt']);
-    assert_contains('front page', $reqs['home']['prompt']);          // front emphasis
-    assert_contains('interior page', $reqs['menu']['prompt']);       // interior emphasis
-    assert_contains('"Menu"', $reqs['menu']['prompt']);              // its own title
-    assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
-    assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
-    assert_contains('`type` is an open-ended semantic label, always in English', $reqs['home']['prompt']);
-    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', $reqs['home']['prompt']);
-    assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
-    assert_contains('examples:', $reqs['home']['prompt']);
-    assert_contains('Never plan a footer or site-chrome section', $reqs['home']['prompt']);
-    assert_contains('appends it after this page\'s LAST section', $reqs['home']['prompt']);
-    assert_contains('cinematic-safe-zone', $reqs['home']['prompt'], 'front plan sees exactly its blueprint');
+    assert_contains('in es-AR', plan_request_text($reqs['home']));
+    assert_contains('front page', plan_request_text($reqs['home']));          // front emphasis
+    assert_contains('interior page', plan_request_text($reqs['menu']));       // interior emphasis
+    assert_contains('"Menu"', plan_request_text($reqs['menu']));              // its own title
+    assert_contains('What we bake', plan_request_text($reqs['menu']));        // its own purpose
+    assert_contains('/menu/breads/', plan_request_text($reqs['menu']));       // site pages list
+    assert_contains('`type` is an open-ended semantic label, always in English', plan_request_text($reqs['home']));
+    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', plan_request_text($reqs['home']));
+    assert_contains('builder derives each section\'s structural role', plan_request_text($reqs['home']));
+    assert_contains('examples:', plan_request_text($reqs['home']));
+    assert_contains('Never plan a footer or site-chrome section', plan_request_text($reqs['home']));
+    assert_contains('appends it after this page\'s LAST section', plan_request_text($reqs['home']));
+    assert_contains('cinematic-safe-zone', plan_request_text($reqs['home']), 'front plan sees exactly its blueprint');
     assert_true(
-        !str_contains($reqs['menu']['prompt'], 'cinematic-safe-zone'),
+        !str_contains(plan_request_text($reqs['menu']), 'cinematic-safe-zone'),
         'interior page plan receives no front-page blueprint variable',
     );
-    assert_contains('`primary_action` is REQUIRED on every section', $reqs['home']['prompt']);
-    assert_contains('Return `primary_action`: null on EVERY section', $reqs['menu']['prompt']);
-    assert_true(!str_contains($reqs['home']['prompt'], '"role"'), 'role is absent from the requested JSON shape');
-    assert_true(!str_contains($reqs['home']['prompt'], '"type": "one of:'), 'semantic types are examples, not a closed list');
+    assert_contains('`primary_action` is REQUIRED on every section', plan_request_text($reqs['home']));
+    assert_contains('Return `primary_action`: null on EVERY section', plan_request_text($reqs['menu']));
+    assert_true(!str_contains(plan_request_text($reqs['home']), '"role"'), 'role is absent from the requested JSON shape');
+    assert_true(!str_contains(plan_request_text($reqs['home']), '"type": "one of:'), 'semantic types are examples, not a closed list');
 
     $expectedSchema = ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()];
     foreach ($reqs as $req) {
@@ -1125,8 +1130,8 @@ test('page-plan repairs a surface budget before another model request', function
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq(1, count($llm->calls), 'surface repair needs no model request');
-    assert_contains('4 or more sections', $llm->calls[0]['prompt']);
-    assert_contains('AT MOST 2 non-base backgrounds', $llm->calls[0]['prompt']);
+    assert_contains('4 or more sections', plan_request_text($llm->calls[0]));
+    assert_contains('AT MOST 2 non-base backgrounds', plan_request_text($llm->calls[0]));
     assert_contains('authored=', implode("\n", $project->readJson('warnings.json')['page-plan']));
 
     $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
@@ -2750,5 +2755,34 @@ test('BIGR-1001 caps scoped page plans without overwriting existing sibling arti
         assert_eq(4, count($pages[0]['sections']));
         assert_eq('{"untouched":"siblings"}', $project->readText('pages.json'));
         assert_contains('trimmed interior page to 4', implode("\n", $project->readJson('warnings.json')['page-plan']));
+    });
+});
+
+test('page plans share all common context and retain it on repair', function () {
+    with_project('builder_plan_cache_', function ($project) {
+        $project->writeJson('siteSpec.json', plan_spec());
+        $project->writeJson('meta.json', ['prompt' => 'Keep the bakery menu.']);
+        seed_test_design_direction($project);
+        $llm = new FakeLlm();
+        $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+        $requests = $step->requests($project);
+        $prefix = $requests['home']['cached_prefixes'];
+        assert_eq(1, count($prefix));
+        assert_contains('Keep the bakery menu.', $prefix[0]);
+        assert_contains('Layout archetypes', $prefix[0]);
+        foreach ($requests as $request) {
+            assert_eq($prefix, $request['cached_prefixes']);
+            assert_true(!str_contains($request['prompt'], 'Layout archetypes'));
+            $body = Automattic\SiteBuild\AnthropicClient::bodyFor($request, 'model', 1000);
+            assert_eq($prefix[0], $body['messages'][0]['content'][0]['text']);
+            assert_true(isset($body['messages'][0]['content'][0]['cache_control']));
+            assert_eq($request['prompt'], $body['messages'][0]['content'][1]['text']);
+        }
+        $llm->queueJson(['sections' => []]);
+        $repair = new ReflectionMethod(PagePlanStep::class, 'repairAll');
+        $repair->invoke($step, $project, ['menu' => ['plan' => ['sections' => []], 'errors' => 'No sections.']]);
+        assert_eq($prefix, $llm->calls[0]['opts']['cached_prefixes']);
+        assert_contains($requests['menu']['prompt'], $llm->calls[0]['prompt']);
+        assert_contains('No sections.', $llm->calls[0]['prompt']);
     });
 });

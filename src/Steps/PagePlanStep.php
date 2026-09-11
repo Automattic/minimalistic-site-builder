@@ -451,6 +451,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'design_direction' => $designDirection,
             'item_pattern'     => DesignDirectionStep::itemPatternFor($project),
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
+            'plan_budgets'     => self::planBudgets(),
             // One footer part renders below every page here, and these requests
             // fan out concurrently blind to each other — so this is the only
             // point where the MODEL can be steered off it. The deterministic
@@ -461,11 +462,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ];
 
         $requests = [];
+        $prefix = $this->renderer->render('page-plan.md', $shared);
         $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
             $front = (bool) $page['front'];
             $requests[$page['slug']] = $this->withOptions([
-                'prompt' => $this->renderer->render('page-plan.md', $shared + [
+                'cached_prefixes' => [$prefix],
+                'prompt' => $this->renderer->render('page-plan-brief.md', [
                     'page_title'             => (string) $page['title'],
                     'page_slug'              => (string) $page['slug'],
                     'page_purpose'           => (string) $page['purpose'],
@@ -473,7 +476,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         $page,
                         (bool) ($meta['form_placeholders'] ?? false),
                     ),
-                    'plan_budgets'           => self::planBudgets(),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -1260,6 +1262,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $requests[$slug] = $this->withOptions([
                 'prompt'      => (string) $prompts[$slug]['prompt']
                     . self::repairSuffix($rejection['plan'], $rejection['errors']),
+                'cached_prefixes' => $prompts[$slug]['cached_prefixes'],
                 'log_label'   => $this->id() . "-{$slug}-repair",
                 'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
             ]);
