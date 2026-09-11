@@ -668,7 +668,7 @@ final class GenerateImagesStep implements Step
      * @param array<string,mixed> $spec one images.json row
      * @return array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}
      */
-    private static function generationSpec(
+    public static function generationSpec(
         array $spec,
         string $siteContext,
         string $imageGrade,
