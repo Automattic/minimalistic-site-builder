@@ -46,30 +46,15 @@ test('the archetype cap holds at two for every real page length', function () {
     assert_true(PagePlanStep::archetypeCap(1) >= 2, 'the cap is never unsatisfiable on a short page');
 });
 
-test('a page that alternates two archetypes is rejected even with no adjacent duplicates', function () {
-    // This is the whole point. "No two ADJACENT sections share an archetype" is
-    // fully satisfied by A,B,A,B,A,B — and 77% of audited sections were one
-    // archetype while that rule held. Only a whole-page count sees it.
+test('a page that alternates two archetypes receives a deterministic repair', function () {
     $plan = cap_alternating_plan();
-    $adjacent = 0;
-    foreach ($plan as $i => $section) {
-        if ($i > 0 && $section['layout_archetype'] === $plan[$i - 1]['layout_archetype']) {
-            $adjacent++;
-        }
-    }
-    assert_eq(0, $adjacent, 'the fixture breaks no adjacency rule');
-
     $warnings = [];
     $repairs = [];
-    $rejected = false;
-    try {
-        PagePlanStep::normalize($plan, true, null, [], $warnings, 'home', $repairs, true);
-    } catch (\RuntimeException $e) {
-        $rejected = true;
-        assert_contains("'asymmetric-split' is used 3 times across 6 sections", $e->getMessage());
-        assert_contains('no archetype may carry more than 2', $e->getMessage());
-    }
-    assert_true($rejected, 'an alternating page is a rejection, not an accepted plan');
+    $out = PagePlanStep::normalize($plan, true, null, [], $warnings, 'home', $repairs, true);
+    assert_eq(array_column($plan, 'slug'), array_column($out, 'slug'));
+    $counts = array_count_values(array_column($out, 'layout_archetype'));
+    assert_true(max($counts) <= 2);
+    assert_true(count($warnings) > 0);
 });
 
 test('repairVariety re-homes the excess onto the least-used composition', function () {

@@ -682,14 +682,14 @@ test('PagePlanStep::normalize rejects spacious density for content-dense section
     assert_eq('spacious', $shortCta[0]['vertical_density'], 'short editorial CTA may deliberately breathe');
 });
 
-test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function () {
-    assert_throws(function () {
-        PagePlanStep::normalize([
+test('PagePlanStep::normalize repairs adjacent duplicate archetypes', function () {
+    $sections = PagePlanStep::normalize([
             plan_section(),
             plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
             plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid', 'background' => 'tinted']),
         ]);
-    }, 'adjacent');
+    assert_eq(3, count($sections));
+    assert_true($sections[1]['layout_archetype'] !== $sections[2]['layout_archetype']);
 });
 
 test('PagePlanStep::normalize allows a repeated archetype when not adjacent', function () {
@@ -835,16 +835,16 @@ test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed
     assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
 });
 
-test('PagePlanStep::normalize caps equal-card-grid at twice per page', function () {
-    assert_throws(function () {
-        PagePlanStep::normalize([
+test('PagePlanStep::normalize caps equal-card-grid without a model request', function () {
+    $sections = PagePlanStep::normalize([
             plan_section(['layout_archetype' => 'equal-card-grid']),
             plan_section(['slug' => 'a', 'role' => 'content', 'layout_archetype' => 'bento-grid']),
             plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'equal-card-grid']),
             plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
             plan_section(['slug' => 'd', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid']),
         ]);
-    }, 'equal-card-grid');
+    assert_eq(5, count($sections));
+    assert_true(count(array_filter($sections, fn ($section) => $section['layout_archetype'] === 'equal-card-grid')) <= 2);
 });
 
 test('PagePlanStep::repairVariety reassigns the later section of each adjacent duplicate pair', function () {
@@ -1210,11 +1210,8 @@ test('page-plan removes a generated footer before recomputing variety and roles'
         array_column($sections, 'layout_archetype'),
         'variety is validated against the surviving adjacency'
     );
-    assert_eq(2, count($llm->calls), 'the filtered adjacency receives one semantic repair');
-    assert_true(
-        !str_contains($llm->calls[1]['prompt'], '"slug": "footer-info"'),
-        'the repair prompt cannot ask the model to restore removed site chrome'
-    );
+    assert_eq(1, count($llm->calls), 'code repairs the filtered adjacency');
+    assert_true(!in_array('footer-info', array_column($sections, 'slug'), true));
 
     $warnings = $project->readJson('warnings.json')['page-plan'] ?? [];
     $joined = implode("\n", $warnings);
@@ -1272,7 +1269,7 @@ test('page-plan stamps roles after a repair even when model role annotations sta
     // Its role annotations are deliberately wrong and must not create another
     // validation failure.
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'welcome', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'welcome', 'handoff' => '', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'story', 'role' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'contrast']),
         plan_section(['slug' => 'visit', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
@@ -1312,7 +1309,7 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     $llm->queueJson(['sections' => [plan_section()]]);
     // …menu plan violates the adjacency rule…
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     // …and the repair call returns a fixed menu plan (compact opening — menu
@@ -1361,11 +1358,11 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     // the three pages need a repair.
     $llm->queueJson(['sections' => [plan_section()]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'm1', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'm1', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'm2', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a1', 'handoff' => '', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
         plan_section(['slug' => 'a2', 'layout_archetype' => 'equal-card-grid', 'background' => 'contrast']),
     ]]);
     // Both repairs come back fixed, in page order.
@@ -1468,7 +1465,7 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     $llm = new FakeLlm();
     // The plan has adjacent duplicates…
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'credibility-block', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'closing-cta', 'role' => 'closing', 'layout_archetype' => 'full-bleed-cover', 'background' => 'contrast']),
     ]]);
     // …and the repair fumbles it by keeping the following section on the

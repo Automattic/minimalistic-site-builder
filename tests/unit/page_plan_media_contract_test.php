@@ -108,3 +108,47 @@ test('an out-of-schema image count records its delivered limit', function () {
     assert_contains('authored=13', $warning);
     assert_contains('delivered=12', $warning);
 });
+
+/** Return a complete section for the media boundary tests. */
+function media_boundary_section(string $slug, string $layout, int $count): array
+{
+    return ['slug' => $slug, 'title' => ucfirst($slug), 'type' => $count > 0 ? 'gallery' : 'content',
+        'purpose' => 'Show the restaurant.', 'content_notes' => "Keep the content for {$slug}.", 'image_count' => $count,
+        'layout_archetype' => $layout, 'background' => $slug === 'intro' ? 'tinted' : 'base',
+        'vertical_density' => 'standard', 'text_placement' => 'left-column', 'handoff' => 'After the previous section.',
+        'primary_action' => null, 'item_pattern' => null];
+}
+
+test('adjacent eight-photo galleries retain all sections through recovery', function () {
+    $raw = [media_boundary_section('intro', 'asymmetric-split', 0),
+        media_boundary_section('food', 'feature-row-hairlines', 8),
+        media_boundary_section('rooms', 'stat-ledger', 8),
+        media_boundary_section('visit', 'asymmetric-split', 0)];
+    $warnings = [];
+    $repairs = [];
+    $out = PagePlanStep::normalize($raw, false, null, [], $warnings, 'gallery', $repairs, false);
+    assert_eq(array_column($raw, 'slug'), array_column($out, 'slug'));
+    assert_eq([0, 8, 8, 0], array_column($out, 'image_count'));
+    foreach ($out as $index => $section) {
+        assert_contains($raw[$index]['content_notes'], $section['content_notes']);
+    }
+    assert_eq($out, PagePlanStep::normalize($out, false, null, [], $warnings, 'gallery', $repairs, false));
+    $recovered = PagePlanStep::recoverSections($raw, false, $warnings, 'gallery', null, [], $repairs, false);
+    assert_eq(array_column($raw, 'slug'), array_column($recovered, 'slug'));
+    assert_eq([0, 8, 8, 0], array_column($recovered, 'image_count'));
+    assert_contains('layout_archetype', implode("\n", $warnings));
+});
+
+test('an impossible gallery layout budget retains all content', function () {
+    $raw = [];
+    foreach (range(1, 6) as $index) {
+        $raw[] = media_boundary_section('gallery-' . $index, 'equal-card-grid', 12);
+    }
+    $warnings = [];
+    $repairs = [];
+    $out = PagePlanStep::normalize($raw, false, null, [], $warnings, 'photos', $repairs, false);
+    assert_eq(array_column($raw, 'slug'), array_column($out, 'slug'));
+    assert_eq(72, array_sum(array_column($out, 'image_count')));
+    assert_contains('retained repeated layouts', implode("\n", $warnings));
+    assert_eq($out, PagePlanStep::normalize($out, false, null, [], $warnings, 'photos', $repairs, false));
+});
