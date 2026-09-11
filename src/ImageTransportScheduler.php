@@ -26,6 +26,12 @@ final class ImageTransportScheduler
     {
         if (self::$active !== null && \Fiber::getCurrent() !== null) {
             \Fiber::suspend(microtime(true) + max(0, $seconds));
+        } elseif (self::$active !== null) {
+            $until = microtime(true) + max(0, $seconds);
+            do {
+                self::$active->poll();
+                self::$active->waitForIo();
+            } while (microtime(true) < $until);
         } elseif ($seconds > 0) {
             usleep((int) round($seconds * 1_000_000));
         }
@@ -41,7 +47,7 @@ final class ImageTransportScheduler
 
     public function releaseImageBytes(int $bytes): void { $this->imageBytes -= $bytes; }
 
-    public function run(callable $task): void
+    public function start(callable $task): void
     {
         if (self::$active !== null) {
             throw new \LogicException('An image transport scheduler is already active');
@@ -50,36 +56,72 @@ final class ImageTransportScheduler
         $this->multi = curl_multi_init();
         $this->spawn($task);
         try {
+            $this->poll();
+        } catch (\Throwable $error) {
+            $this->cancel();
+            throw $error;
+        }
+    }
+
+    /** Advance tasks and dispatch their ready handles before returning. */
+    public function poll(): void
+    {
+        if ($this->multi === null) {
+            return;
+        }
+        foreach ($this->tasks as $index => &$state) {
+            if ($state['wake'] > microtime(true)) {
+                continue;
+            }
+            $fiber = $state['fiber'];
+            $state['wake'] = (float) ($fiber->isStarted() ? $fiber->resume() : $fiber->start());
+            if ($fiber->isTerminated()) {
+                unset($this->tasks[$index]);
+            }
+        }
+        unset($state);
+        $this->pump();
+    }
+
+    public function join(): void
+    {
+        try {
             while ($this->tasks !== []) {
-                foreach ($this->tasks as $index => &$state) {
-                    if ($state['wake'] > microtime(true)) {
-                        continue;
-                    }
-                    $fiber = $state['fiber'];
-                    $state['wake'] = (float) ($fiber->isStarted() ? $fiber->resume() : $fiber->start());
-                    if ($fiber->isTerminated()) {
-                        unset($this->tasks[$index]);
-                    }
-                }
-                unset($state);
-                $this->pump();
-                if ($this->tasks !== []) {
-                    // A short wait keeps provider backoff and byte-budget waits cooperative.
-                    if ($this->handles === [] || curl_multi_select($this->multi, 0.001) === -1) {
-                        usleep(1000);
-                    }
-                }
+                $this->poll();
+                $this->waitForIo();
             }
         } finally {
-            foreach ($this->handles as $entry) {
-                curl_multi_remove_handle($this->multi, $entry['handle']);
-            }
-            $this->handles = [];
-            $this->jobs = [];
-            $this->tasks = [];
-            curl_multi_close($this->multi);
-            $this->multi = null;
-            self::$active = null;
+            $this->cancel();
+        }
+    }
+
+    public function run(callable $task): void
+    {
+        $this->start($task);
+        $this->join();
+    }
+
+    /** Release in-flight handles when the host stops the graph. */
+    public function cancel(): void
+    {
+        if ($this->multi === null) {
+            return;
+        }
+        foreach ($this->handles as $entry) {
+            curl_multi_remove_handle($this->multi, $entry['handle']);
+        }
+        $this->handles = [];
+        $this->jobs = [];
+        $this->tasks = [];
+        curl_multi_close($this->multi);
+        $this->multi = null;
+        self::$active = null;
+    }
+
+    private function waitForIo(): void
+    {
+        if ($this->multi === null || $this->handles === [] || curl_multi_select($this->multi, 0.001) === -1) {
+            usleep(1000);
         }
     }
 
