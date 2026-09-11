@@ -61,7 +61,8 @@ final class ImageSlot
                                 $spec['hero_slot'] = true;
                             }
                             $classes = (string) ($parentAttrs['className'] ?? '');
-                            if (preg_match('/\b(?:card(?:-media(?:-tall)?)?|card-media-thumb|tile)\b/', $classes) === 1) {
+                            if ($candidate === 'image'
+                                && preg_match('/\b(?:card(?:-media(?:-tall)?)?|card-media-thumb|tile)\b/', $classes) === 1) {
                                 $candidate = 'card';
                             }
                         }
