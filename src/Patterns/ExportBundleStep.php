@@ -20,10 +20,7 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class ExportBundleStep implements Step
 {
-    /**
-     * Bumped when the bundle's shape changes in a way a host must notice.
-     * A host reads this before applying and refuses a version it predates.
-     */
+    /** Bumped when the bundle's shape changes in a way a host must notice. */
     public const BUNDLE_VERSION = 1;
 
     public function id(): string
@@ -69,8 +66,8 @@ final class ExportBundleStep implements Step
 
         $violations = ContentOnlyGuard::check(
             $bundle,
-            self::stringList($inputs['inventory_ids'] ?? []),
-            self::stringList($inputs['capabilities']['classes'] ?? []),
+            $inputs['inventory_ids'] ?? [],
+            $inputs['capabilities']['classes'] ?? [],
         );
 
         $project->writeJson(PatternArtifacts::REPORT, [
@@ -110,7 +107,7 @@ final class ExportBundleStep implements Step
         }
 
         $pages = [];
-        foreach (self::jsonFiles($project, 'patterns/pages') as $file) {
+        foreach (self::jsonFiles($project, rtrim(PatternArtifacts::PAGES, '/*')) as $file) {
             $page = json_decode((string) file_get_contents($file), true);
             if (!is_array($page) || !isset($page['slug'])) {
                 continue;
@@ -135,7 +132,7 @@ final class ExportBundleStep implements Step
     private static function readParts(Project $project): array
     {
         $parts = [];
-        foreach (self::jsonFiles($project, 'patterns/parts') as $file) {
+        foreach (self::jsonFiles($project, PatternArtifacts::PARTS) as $file) {
             $part = json_decode((string) file_get_contents($file), true);
             if (is_array($part) && isset($part['slug'])) {
                 $parts[] = $part;
@@ -157,18 +154,5 @@ final class ExportBundleStep implements Step
         sort($files);
 
         return $files;
-    }
-
-    /**
-     * @param mixed $value
-     * @return list<string>
-     */
-    private static function stringList(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-
-        return array_values(array_filter($value, 'is_string'));
     }
 }

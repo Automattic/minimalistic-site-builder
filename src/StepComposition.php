@@ -117,20 +117,14 @@ final class StepComposition
      * from patterns the host's theme already styles avoids that by
      * construction.
      *
-     * Every stage below is a declared placeholder today. The behaviour is
-     * arriving one stage at a time, and the graph carries the contract from
-     * the start so each stage has a shape to satisfy on landing, and so a
+     * The stages before the export are declared placeholders today. The
+     * behaviour is arriving one at a time, and the graph carries the contract
+     * from the start so each stage has a shape to satisfy on landing, and so a
      * caller who runs past the extracted prefix is told which stage is missing
      * rather than handed an empty bundle.
-     *
-     * @param Llm            $llm      Taken now so the signature stays stable
-     *                                 once the planning and content stages land.
-     * @param PromptRenderer $renderer As above.
      */
-    public static function patterns(Llm $llm, PromptRenderer $renderer): self
+    public static function patterns(): self
     {
-        unset($llm, $renderer);
-
         return new self(
             [
                 new PendingExtractionStep(
