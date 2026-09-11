@@ -18,10 +18,37 @@ test('the rounded band kit insets contrast and band surfaces with the panel radi
     assert_contains('border-radius: 1.5rem', $css, 'the radius is the committed panel scale');
     assert_contains('overflow: clip', $css);
     assert_contains(':not(.page-opening--section)', $css);
+
+    // The gutter is for a full-bleed band alone. WordPress gives every other
+    // constrained child `margin-left/right: auto !important`, so a margin on a
+    // wide band is discarded and the rule would promise an inset it never
+    // delivers. Every declaration that carries the gutter is `.alignfull`.
+    foreach (['margin-inline: var(--wp--preset--spacing--md, 1.5rem)', 'margin-inline: var(--wp--preset--spacing--sm, 0.75rem)'] as $gutter) {
+        $rule = substr($css, 0, (int) strpos($css, $gutter));
+        $selector = substr($rule, (int) strrpos($rule, '}') + 1);
+        assert_contains('.alignfull', $selector, 'the gutter is scoped to a full-bleed band');
+    }
+    // The radius and the clip are not: a wide band is already inset by the
+    // wide measure, and it still has to read as a plate.
+    $radiusRule = substr($css, 0, (int) strpos($css, 'border-radius'));
+    assert_true(
+        !str_contains(substr($radiusRule, (int) strrpos($radiusRule, '*/') + 2), '.alignfull'),
+        'a wide band still takes the radius',
+    );
     assert_true(!str_contains($css, 'overflow: hidden'));
     assert_contains('margin-inline: var(--wp--preset--spacing--sm, 0.75rem)', $css, 'phones keep a smaller gutter');
     assert_true(!str_contains($css, '!important'), 'the band kit fights nothing');
     assert_contains('inset from the viewport', BandGeometry::meaning('rounded'));
+    assert_contains('wide band keeps the wide measure', BandGeometry::meaning('rounded'), 'the promise matches the CSS');
+});
+
+test('the band radius answers to the committed corner language (frm W4c)', function () {
+    // A `sharp` direction sets every other corner on the page to zero. A 24px
+    // plate in the middle of that reads as a rendering accident, not a choice.
+    assert_contains('border-radius: 0.5rem', (string) BandGeometry::kitCss('rounded', 'sharp'));
+    assert_contains('border-radius: 1.5rem', (string) BandGeometry::kitCss('rounded', 'soft'));
+    assert_contains('border-radius: 2.5rem', (string) BandGeometry::kitCss('rounded', 'round'));
+    assert_contains('border-radius: 1.5rem', (string) BandGeometry::kitCss('rounded', null), 'an unknown shape takes the soft scale');
 });
 
 test('the direction normalizes, persists, formats and reads band_geometry (frm W4c)', function () {
@@ -88,7 +115,7 @@ test('band geometry reads explicit brief phrases and preserves other fields', fu
         assert_eq([], $repairs);
     }
     assert_eq(null, DesignDirectionStep::statedBandGeometry('A hero in a rounded frame'));
-    foreach (['sharp' => '1.5rem', 'soft' => '1.5rem', 'round' => '2.5rem'] as $shape => $radius) {
+    foreach (['sharp' => '0.5rem', 'soft' => '1.5rem', 'round' => '2.5rem'] as $shape => $radius) {
         assert_contains('border-radius: ' . $radius, BandGeometry::kitCss('rounded', $shape));
     }
 });
