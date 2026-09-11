@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\Patterns\ExportBundleStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
@@ -167,18 +168,7 @@ final class StepComposition
                     writes: [PatternArtifacts::MEDIA],
                     source: 'big-sky/images/class.image-utils.php',
                 ),
-                new PendingExtractionStep(
-                    id: 'export-bundle',
-                    label: 'Verify inventory and Brand constraints, then export content only',
-                    reads: [
-                        PatternArtifacts::NORMALIZED,
-                        PatternArtifacts::PAGES,
-                        PatternArtifacts::PROVENANCE,
-                        PatternArtifacts::MEDIA,
-                    ],
-                    writes: [PatternArtifacts::BUNDLE, PatternArtifacts::REPORT],
-                    source: 'class-generate-blueprint-job.php, minus the theme zip',
-                ),
+                new ExportBundleStep(),
             ],
             PatternArtifacts::SEEDS,
         );
