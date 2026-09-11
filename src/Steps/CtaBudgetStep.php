@@ -85,6 +85,9 @@ final class CtaBudgetStep implements Step
             $file = 'theme/parts/' . basename($absolute);
             $markup = $project->readText($file);
             $result = ActionCapabilities::repairMarkup($markup, $context, $file, $paths[$file] ?? '/');
+            $copy = ActionCapabilities::repairContactCopy($result['markup'], $context, $file, $paths[$file] ?? '/');
+            $result['markup'] = $copy['markup'];
+            $result['warnings'] = array_merge($result['warnings'], $copy['warnings']);
             if ($result['markup'] !== $markup) {
                 $project->writeText($file, $result['markup']);
             }
