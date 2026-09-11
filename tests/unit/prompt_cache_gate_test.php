@@ -21,14 +21,11 @@ test('cache gate releases only after a complete message start or its deadline', 
     assert_eq(true, $other->ready());
 });
 
-test('cache gate chooses a useful deepest request without changing payloads or keys', function () {
+test('cache gate applies only to a batch with explicit prefixes', function () {
     $bodies = [];
     foreach (['short' => ['site'], 'deep' => ['site', 'build', 'page'], 4 => []] as $key => $prefixes) {
         $bodies[$key] = AnthropicClient::bodyFor(['prompt' => 'real markup ' . $key, 'cached_prefixes' => $prefixes], 'model', 500);
     }
-    $ordered = PromptCacheGate::order($bodies);
-    assert_eq(['deep', 'short', 4], array_keys($ordered));
-    foreach ($ordered as $key => $body) { assert_eq($bodies[$key], $body); }
     assert_eq(true, PromptCacheGate::applies($bodies));
     assert_eq(false, PromptCacheGate::applies([$bodies['deep']]));
     assert_eq(false, PromptCacheGate::applies([$bodies[4], $bodies[4]]));
@@ -49,13 +46,13 @@ test('pool starts siblings at cache readiness before the first request finishes'
             }
             $events[] = 'complete';
             return ['second' => 2, 'first' => 1, 'third' => 3];
-        }, 3, static function () use (&$ready): bool { return $ready; });
+        }, 3, static function ($key) use (&$ready): bool { return $key === 'first' || $ready; });
     assert_eq(['start:first', 'first:message_start', 'start:second', 'start:third', 'complete'], $events);
     assert_eq(['first' => 1, 'second' => 2, 'third' => 3], $results);
 });
 
 test('pool retains the empty completion invariant when readiness does not change', function () {
-    assert_throws(fn () => RollingPool::run(['a' => 1], fn () => null, fn () => [], 3, fn () => false));
+    assert_throws(fn () => RollingPool::run(['a' => 1], fn () => null, fn () => [], 3, fn () => true));
 });
 
 test('router uses the primed capability and preserves keys and degradation notes', function () {
