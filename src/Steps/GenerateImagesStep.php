@@ -1044,6 +1044,7 @@ final class GenerateImagesStep implements Step
             if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec) || !$project->exists($file)) {
                 continue;
             }
+            clearstatcache(true, $project->path($file));
             $size = filesize($project->path($file));
             if ($size === false) {
                 throw new \RuntimeException('Could not read the image size: ' . $file);
@@ -1139,6 +1140,7 @@ final class GenerateImagesStep implements Step
         $bytes = 0;
         foreach ($specs as $i => $spec) {
             $filename = (string) $spec['filename'];
+            clearstatcache(true, $project->path('theme/assets/' . $filename));
             $size = filesize($project->path('theme/assets/' . $filename));
             if ($size === false) {
                 throw new \RuntimeException('Could not read the image size: ' . $filename);
