@@ -1,0 +1,34 @@
+{
+  "theme": "twentytwentyfive",
+  "locale": "en",
+  "pages": [
+    {
+      "slug": "home",
+      "title": "Home",
+      "intent": "Frame the conference and drive registration."
+    },
+    {
+      "slug": "agenda",
+      "title": "Agenda",
+      "intent": "Show the schedule at a glance."
+    },
+    {
+      "slug": "speakers",
+      "title": "Speakers",
+      "intent": "Feature the people on stage."
+    },
+    {
+      "slug": "venue",
+      "title": "Venue",
+      "intent": "Cover the location and logistics."
+    }
+  ],
+  "facts": {
+    "intent": "Run a multi-session conference from one hub.",
+    "audience": "Events teams running multi-track conferences.",
+    "primary_cta": "Register"
+  },
+  "capabilities": {
+    "classes": []
+  }
+}

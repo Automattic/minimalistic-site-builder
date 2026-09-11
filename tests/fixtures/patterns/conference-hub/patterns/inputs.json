@@ -1,0 +1,37 @@
+{
+  "theme": "twentytwentyfive",
+  "brand": {
+    "settings": {
+      "color": {
+        "palette": [
+          {
+            "slug": "base",
+            "color": "#FCFAF6"
+          },
+          {
+            "slug": "contrast",
+            "color": "#0B2B3C"
+          },
+          {
+            "slug": "accent-1",
+            "color": "#E2725B"
+          }
+        ]
+      }
+    }
+  },
+  "inventory_ids": [
+    "twentytwentyfive/banner-cover-big-heading",
+    "twentytwentyfive/contact-info-locations",
+    "twentytwentyfive/event-3-col",
+    "twentytwentyfive/event-rsvp",
+    "twentytwentyfive/event-schedule",
+    "twentytwentyfive/services-3-col",
+    "twentytwentyfive/sponsors",
+    "twentytwentyfive/stats",
+    "twentytwentyfive/text-faqs"
+  ],
+  "capabilities": {
+    "classes": []
+  }
+}

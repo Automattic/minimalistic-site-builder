@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "color": {
+      "palette": [
+        {
+          "slug": "base",
+          "color": "#FCFAF6"
+        },
+        {
+          "slug": "contrast",
+          "color": "#0B2B3C"
+        },
+        {
+          "slug": "accent-1",
+          "color": "#E2725B"
+        }
+      ]
+    }
+  }
+}
