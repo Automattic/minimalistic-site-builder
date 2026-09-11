@@ -39,7 +39,7 @@ function queue_image_fixture(int $count): array
     return [$project, $tmp];
 }
 
-test('the QA queue starts a failed replacement before the next ten-image group', function () {
+test('the QA queue preserves pooled replacements after bounded checks', function () {
     [$project, $tmp] = queue_image_fixture(12);
     try {
         $client = new FakeImageClient();
@@ -62,7 +62,7 @@ test('the QA queue starts a failed replacement before the next ten-image group',
         };
         (new GenerateImagesStep($client, $llm))->run($project);
         assert_eq([10, 2], $llm->counts);
-        assert_eq(['qa-0', 'replacement', 'qa-10'], $events);
+        assert_eq(['qa-0', 'qa-10', 'replacement'], $events);
         assert_eq([12, 1], array_map('count', $client->batches));
         assert_eq(array_fill(0, 12, 'completed'), array_column($project->readJson('images.json'), 'status'));
         assert_contains('regeneration failed', implode(' ', $project->readJson('warnings.json')['generate-images']));
@@ -99,9 +99,58 @@ test('an image above the QA byte limit survives with an actionable warning', fun
         assert_eq([], $llm->counts);
         assert_eq('completed', $project->readJson('images.json')[0]['status']);
         $warnings = implode(' ', $project->readJson('warnings.json')['generate-images']);
-        foreach (['img-0.jpg', 'authored image bytes=', 'delivered=original image', 'QA skipped'] as $expected) {
+        foreach (['img-0.jpg', 'QA payload exceeds the byte limit', 'delivered as generated', 'QA skipped'] as $expected) {
             assert_contains($expected, $warnings);
         }
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('twenty failed checks keep all replacements in one provider pool', function () {
+    [$project, $tmp] = queue_image_fixture(20);
+    try {
+        $client = new FakeImageClient();
+        $llm = new QueueImageLlm();
+        $seen = [];
+        $llm->answer = function ($requests) use (&$seen): array {
+            $answers = [];
+            foreach ($requests as $index => $_request) {
+                $answers[$index] = isset($seen[$index]) ? GI_QA_PASS : GI_QA_ROTATED;
+                $seen[$index] = true;
+            }
+            return $answers;
+        };
+        (new GenerateImagesStep($client, $llm))->run($project);
+        assert_eq([20, 20], array_map('count', $client->batches));
+        assert_eq([10, 10, 10, 10], $llm->counts);
+        assert_eq(20, count($seen));
+        assert_true(!$project->exists('warnings.json'));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('failed checks from different groups share one replacement pool', function () {
+    [$project, $tmp] = queue_image_fixture(20);
+    try {
+        $client = new FakeImageClient();
+        $llm = new QueueImageLlm();
+        $seen = [];
+        $llm->answer = function ($requests) use (&$seen): array {
+            $answers = [];
+            foreach ($requests as $index => $_request) {
+                $answers[$index] = !isset($seen[$index]) && in_array($index, [0, 10], true)
+                    ? GI_QA_ROTATED : GI_QA_PASS;
+                $seen[$index] = true;
+            }
+            return $answers;
+        };
+        (new GenerateImagesStep($client, $llm))->run($project);
+        assert_eq([20, 2], array_map('count', $client->batches));
+        assert_eq([0, 10], array_keys($client->batches[1]));
+        assert_eq([10, 10, 2], $llm->counts);
+        assert_eq(22, count($client->calls));
     } finally {
         remove_tree($tmp);
     }

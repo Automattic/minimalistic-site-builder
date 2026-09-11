@@ -1036,47 +1036,14 @@ final class GenerateImagesStep implements Step
         string $imageGrade,
         string $imageCrop,
     ): void {
-        $group = [];
-        $bytes = 0;
+        $active = [];
         foreach ($indices as $i) {
             $spec = $specs[$i];
-            $file = 'theme/assets/' . $spec['filename'];
-            if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec) || !$project->exists($file)) {
-                continue;
+            if (($spec['status'] ?? '') === 'completed' && ImageQa::applies($spec)
+                && $project->exists('theme/assets/' . $spec['filename'])) {
+                $active[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
             }
-            clearstatcache(true, $project->path($file));
-            $size = filesize($project->path($file));
-            if ($size === false) {
-                throw new \RuntimeException('Could not read the image size: ' . $file);
-            }
-            if ($size > self::MAX_QA_BYTES) {
-                $project->addWarnings($this->id(), ['file=' . Warnings::value($file)
-                    . '; block=' . Warnings::value(implode(', ', $spec['sources'] ?? []))
-                    . '; authored image bytes=' . $size . '; delivered=original image; disposition=QA skipped because the image exceeds the payload limit']);
-                continue;
-            }
-            if ($group !== [] && (count($group) >= self::MAX_QA_IMAGES || $bytes + $size > self::MAX_QA_BYTES)) {
-                $this->inspectGroup($project, $specs, $group, $siteContext, $imageGrade, $imageCrop);
-                $group = [];
-                $bytes = 0;
-            }
-            $group[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
-            $bytes += $size;
         }
-        if ($group !== []) {
-            $this->inspectGroup($project, $specs, $group, $siteContext, $imageGrade, $imageCrop);
-        }
-    }
-
-    /** Finish each bounded group before the next group loads image bytes. */
-    private function inspectGroup(
-        Project $project,
-        array &$specs,
-        array $active,
-        string $siteContext,
-        string $imageGrade,
-        string $imageCrop,
-    ): void {
         while ($active !== []) {
             $verdicts = $this->inspectBatch($project, array_intersect_key($specs, $active));
             $regenerations = [];
