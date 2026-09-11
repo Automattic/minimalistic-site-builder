@@ -473,10 +473,9 @@ test('theme-json prompt delegates heading case and tracking to type treatment', 
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_contains('**Type treatment**: lowercase', $prompt);
-    assert_contains('relaxed 0.01em tracking', $prompt);
+    assert_contains('"type_treatment":"lowercase"', $prompt);
     assert_contains('owns `textTransform` and `letterSpacing`', $prompt);
-    assert_contains('preserving every line-height choice', $prompt);
+    assert_contains('preserves every line-height choice', $prompt);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -1064,9 +1063,9 @@ test('theme-json prompt delegates density-scaled spacing to the build', function
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_contains('**Density**: airy', $prompt);
-    assert_contains('do not emit `spacingSizes`', $prompt);
-    assert_contains('section-padding ramp, component spacing, and page gutter', $prompt);
+    assert_contains('"density":"airy"', $prompt);
+    assert_contains('Omit settings', $prompt);
+    assert_contains('font sizes, spacing, widths', $prompt);
     assert_true(!str_contains($prompt, 'clamp(4rem, 6vw, 6rem)'), 'the shared literal ramp is gone');
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -2400,8 +2399,8 @@ test('theme-json repairs malformed top-level styles values with durable warnings
                 . json_encode($authored, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             $joined,
         );
-        assert_contains('delivered build-supplied styles object', $joined);
-        assert_contains('disposition replaced malformed shape before normalization', $joined);
+        assert_contains('disposition replaced malformed shape', $joined);
+        assert_contains('with scaffold default', $joined);
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
@@ -2779,7 +2778,7 @@ test('theme-json scaffold references only frozen preset slugs', function () {
     }
 });
 
-test('theme-json sends no json_schema', function () {
+test('theme-json constrains the small typography response', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_no_schema_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
@@ -2791,8 +2790,8 @@ test('theme-json sends no json_schema', function () {
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json'];
 
-    assert_true(!array_key_exists('json_schema', $request));
-    assert_eq(['prompt'], array_keys($request), 'default request contains prompt only');
+    assert_eq('theme_typography', $request['json_schema']['name']);
+    assert_eq(['styles'], $request['json_schema']['schema']['required']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -2833,7 +2832,7 @@ test('theme-json receives the front hero blueprint as focused sizing context', f
     ))->requests($project)['theme-json'];
     $prompt = $request['prompt'];
 
-    assert_contains('FRONT-PAGE HERO BLUEPRINT (front-page type sizing context only)', $prompt);
+    assert_contains('HERO TYPE CONTEXT:', $prompt);
     assert_contains('cinematic-safe-zone', $prompt);
     assert_contains('headline', strtolower($prompt));
     assert_eq(1, substr_count($prompt, 'cinematic-safe-zone'), 'recipe appears only in focused context');
@@ -2842,7 +2841,7 @@ test('theme-json receives the front hero blueprint as focused sizing context', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json absent CSS prompt matches the recorded legacy bytes', function () {
+test('theme-json block prompt is smaller than the full theme prompt', function () {
     $expectation = json_decode(
         file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
         true,
@@ -2860,8 +2859,8 @@ test('theme-json absent CSS prompt matches the recorded legacy bytes', function 
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_eq($expectation['bytes'], strlen($prompt));
-    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    assert_true(strlen($prompt) < $expectation['bytes'] / 3);
+    assert_contains('Return a JSON object with only `styles`.', $prompt);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -2887,8 +2886,8 @@ test('theme-json legacy mode ignores stale design CSS bytes', function () {
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_eq($expectation['bytes'], strlen($prompt));
-    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    assert_true(strlen($prompt) < $expectation['bytes'] / 3);
+    assert_contains('Return a JSON object with only `styles`.', $prompt);
     assert_true(!str_contains($prompt, '#C0FFEE'));
     assert_true(!str_contains($prompt, 'Stale Font'));
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -2920,7 +2919,7 @@ test('theme-json sparse CSS keeps direction prompt and writes actionable warning
         'design/site.css',
         file_get_contents(repo_path('tests/fixtures/design/tokens-sparse.css')) ?: '',
     );
-    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')), htmlFirst: true);
     $htmlFirstStep = new ThemeJsonStep(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
@@ -2953,7 +2952,7 @@ test('theme-json html-first resume does not abort when design css was never writ
         seed_test_design_direction($project);
     }
 
-    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')), htmlFirst: true);
     $htmlFirstStep = new ThemeJsonStep(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
@@ -2998,7 +2997,7 @@ test('theme-json invalid UTF-8 CSS keeps direction prompt and writes sparse warn
         'design/site.css',
         "body { color: #112233; font-family: \"Bad\xC3\", serif; padding: 1rem; }",
     );
-    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')), htmlFirst: true);
     $htmlFirstStep = new ThemeJsonStep(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
@@ -3028,13 +3027,8 @@ test('theme-json request makes both committed shape radii build-owned', function
     ))->requests($project)['theme-json'];
     $prompt = $request['prompt'];
 
-    assert_contains('**Shape**: round', $prompt);
-    assert_contains('`sharp` removes the `core/image` radius and gives buttons `0`', $prompt);
-    assert_contains('`soft` gives both `0.5rem`', $prompt);
-    assert_contains('`round` gives `core/image` `1.25rem` and buttons `9999px`', $prompt);
-    assert_contains('Never restate or reset any build-owned radius', $prompt);
-    assert_contains('in a theme.json `css` string or structured style', $prompt);
-    assert_contains('block variations, and responsive or interaction states', $prompt);
+    assert_contains('CTA construction, shape, depth, image treatment, and contrast repair', $prompt);
+    assert_contains('Omit settings, CSS, block decoration', $prompt);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -3051,8 +3045,8 @@ test('theme-json request delegates the committed type scale to the build', funct
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_contains('**Type scale**: brutal', $prompt);
-    assert_contains('Do not emit `settings.typography.fontSizes`', $prompt);
+    assert_contains('"type_scale":"brutal"', $prompt);
+    assert_contains('font families, font sizes', $prompt);
     assert_true(!str_contains($prompt, '0.875rem / 1.125rem / 1.375rem'), 'copied example scale is gone');
     assert_true(!str_contains($prompt, 'roughly 5–7rem'), 'model no longer chooses the display ceiling');
 
@@ -3330,9 +3324,8 @@ test('theme-json prompt delegates committed measure to the build', function () {
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_contains('**Measure**: narrow', $prompt);
-    assert_contains('visible frame edge below the full-bleed hero', $prompt);
-    assert_contains('Do not emit settings.layout.contentSize', $prompt);
+    assert_contains('font sizes, spacing, widths', $prompt);
+    assert_contains('Omit settings', $prompt);
     assert_true(!str_contains($prompt, '800–900px'), 'the shared literal content window is gone');
     assert_true(!str_contains($prompt, '1200–1400px'), 'the shared literal wide window is gone');
     exec('rm -rf ' . escapeshellarg($tmp));

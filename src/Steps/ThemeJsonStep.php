@@ -37,11 +37,11 @@ use Automattic\SiteBuild\Warnings;
 use Throwable;
 
 /**
- * Step (LLM): generate the block theme's theme.json.
+ * Compile fixed theme values and request the remaining typography choices.
  *
  * Input:  meta.json (user prompt) + siteSpec.json (factual info) +
  *         designDirection.json (the committed creative and typography floor).
- *         The model translates that direction into theme.json tokens.
+ *         Code supplies palette and font presets from the direction.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the six color
@@ -444,6 +444,19 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     public function requests(Project $project): array
     {
+        if (!$this->htmlFirst) {
+            $direction = DesignDirectionStep::dataFor($project);
+            $contract = array_intersect_key($direction, array_flip([
+                'title', 'description', 'type', 'type_treatment', 'type_scale', 'cta_style', 'density',
+            ]));
+            return [self::REQ => $this->withOptions([
+                'prompt' => $this->renderer->render('theme-typography.md', [
+                    'design_contract' => json_encode($contract, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                    'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint(DesignDirectionStep::heroBlueprintFor($project)),
+                ]),
+                'json_schema' => ['name' => 'theme_typography', 'schema' => self::typographySchema()],
+            ])];
+        }
         $meta = $project->readJson('meta.json');
         $designDirection = DesignDirectionStep::readFor($project);
         if ($this->htmlFirst) {
@@ -495,7 +508,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($theme)) {
             throw new \RuntimeException('theme-json: missing model output');
         }
-        $this->writeTheme($project, $theme);
+        $warnings = $theme === [] ? [
+            'theme/theme.json at styles: authored empty object; delivered default typography; disposition missing typography choices replaced',
+        ] : [];
+        $this->writeTheme($project, $theme, $warnings);
     }
 
     public function consumeGeneratedJsonFailure(
@@ -515,6 +531,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /** @param array<mixed> $theme @param list<string> $warnings */
     private function writeTheme(Project $project, array $theme, array $warnings = []): void
     {
+        if (!$this->htmlFirst) {
+            $theme = self::mergeScaffoldDefaultsAtPath(
+                self::compileDefaults(DesignDirectionStep::dataFor($project)), $theme, '', $warnings,
+            );
+        }
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
@@ -693,6 +714,69 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $project->writeJson('theme/theme.json', $theme);
+    }
+
+    /** Compile the fixed values before the normal repair passes. */
+    public static function compileDefaults(array $direction): array
+    {
+        $palette = [];
+        foreach (self::FALLBACK_COLORS as $slug => $fallback) {
+            $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $direction['palette'][$slug] ?? $fallback];
+        }
+        $fonts = [];
+        foreach (self::FALLBACK_FONTS as $slug => $fallback) {
+            $family = $direction['type'][$slug]['family'] ?? null;
+            if ($slug === 'accent' && (!is_string($family) || trim($family) === '')) {
+                continue;
+            }
+            $fonts[] = [
+                'slug' => $slug, 'name' => ucfirst($slug),
+                'fontFamily' => is_string($family) && trim($family) !== ''
+                    ? self::replacePrimaryFamily($fallback, trim($family)) : $fallback,
+            ];
+        }
+        return [
+            'settings' => [
+                'color' => ['palette' => $palette],
+                'typography' => ['fontFamilies' => $fonts, 'fluid' => true],
+            ],
+            'styles' => [
+                'typography' => ['fontWeight' => self::compiledWeight($direction, 'body', '400')],
+                'elements' => ['heading' => ['typography' => [
+                    'fontWeight' => self::compiledWeight($direction, 'heading', '600'),
+                    'lineHeight' => '1.15',
+                ]]],
+            ],
+        ];
+    }
+
+    private static function compiledWeight(array $direction, string $slot, string $fallback): string
+    {
+        foreach ($direction['type'][$slot]['weights'] ?? [] as $weight) {
+            if (is_int($weight) && $weight >= 100 && $weight <= 900 && $weight % 100 === 0) {
+                return (string) $weight;
+            }
+        }
+        return $fallback;
+    }
+
+    /** Keep the model response small and constrain its free typography choices. */
+    private static function typographySchema(): array
+    {
+        $object = static fn (array $properties): array => [
+            'type' => 'object', 'properties' => $properties,
+            'required' => array_keys($properties), 'additionalProperties' => false,
+        ];
+        $choice = static fn (array $values): array => ['type' => 'string', 'enum' => $values];
+        $weight = $object(['typography' => $object(['fontWeight' => $choice(['400', '500', '600', '700'])])]);
+        return $object(['styles' => $object([
+            'typography' => $object(['lineHeight' => $choice(['1.5', '1.6', '1.7'])]),
+            'elements' => $object([
+                'heading' => $object(['typography' => $object(['lineHeight' => $choice(['1.05', '1.1', '1.15', '1.2'])])]),
+                'button' => $weight,
+            ]),
+            'blocks' => $object(['core/navigation' => $weight]),
+        ])]);
     }
 
     public function run(Project $project): void
