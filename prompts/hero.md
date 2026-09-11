@@ -68,3 +68,5 @@ Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
 {{image_instructions}}
 
 {{block_markup_output_contract}}
+
+Use the `body` preset for a paragraph longer than 120 characters. Keep `lead` for a short introduction.

@@ -227,6 +227,8 @@ final class SectionUnit extends AbstractPageSectionUnit
                     . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
             }
         }
+        $markup = SectionReadabilityContract::enforce($markup, $input, $this->key($input), $repairs, $warnings);
+        $markup = CardPreparation::enforce($markup, $cardStyle, $this->key($input), $repairs, $warnings, $input['theme_json'] ?? null);
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,
