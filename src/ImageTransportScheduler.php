@@ -15,6 +15,7 @@ final class ImageTransportScheduler
     private int $nextJob = 0;
     private int $imageBytes = 0;
     private bool $inPoll = false;
+    private bool $cancelling = false;
     private ?\CurlMultiHandle $multi = null;
 
     public static function current(): ?self { return self::$active; }
@@ -124,10 +125,19 @@ final class ImageTransportScheduler
     /** Release in-flight handles when the host stops the graph. */
     public function cancel(): void
     {
-        if ($this->multi === null) {
+        if ($this->multi === null || $this->cancelling) {
             return;
         }
+        $this->cancelling = true;
         foreach ($this->handles as $entry) {
+            $callback = $this->jobs[$entry['job']]['onCancel'] ?? null;
+            if ($callback !== null) {
+                try {
+                    $callback($entry['key'], $entry['handle']);
+                } catch (\Throwable) {
+                    // Keep the original failure and release every remaining handle.
+                }
+            }
             curl_multi_remove_handle($this->multi, $entry['handle']);
         }
         $this->handles = [];
@@ -141,6 +151,7 @@ final class ImageTransportScheduler
         curl_multi_close($this->multi);
         $this->multi = null;
         self::$active = null;
+        $this->cancelling = false;
     }
 
     private function waitForIo(): void
@@ -150,13 +161,13 @@ final class ImageTransportScheduler
         }
     }
 
-    public function batch(array $items, callable $build, callable $classify, int $cap, ?callable $canStart, ?callable $onComplete, string $lane): array
+    public function batch(array $items, callable $build, callable $classify, int $cap, ?callable $canStart, ?callable $onComplete, string $lane, ?callable $onCancel = null): array
     {
         $id = $this->nextJob++;
         $this->jobs[$id] = [
             'items' => $items, 'pending' => $items, 'build' => $build, 'classify' => $classify,
             'cap' => max(1, $cap), 'canStart' => $canStart, 'onComplete' => $onComplete,
-            'lane' => $lane, 'active' => 0, 'results' => [], 'held' => false,
+            'onCancel' => $onCancel, 'lane' => $lane, 'active' => 0, 'results' => [], 'held' => false,
         ];
         while (count($this->jobs[$id]['results']) < count($items)) {
             self::pause();
