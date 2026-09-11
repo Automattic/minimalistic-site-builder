@@ -505,6 +505,121 @@ final class CollectImagesStep implements Step
         return $images;
     }
 
+    /**
+     * The four fields an AI_IMAGE alt body carries, or null when it is not the
+     * documented form. The three trailing fields pop off the end, so the
+     * subject — the lead, and the only field meant to be rich — may itself
+     * contain pipes. The one place that knows the marker's grammar: the parser
+     * that reads specs out and the rewriter that takes the marker back out
+     * both come here.
+     *
+     * @return array{subject:string,pageContext:string,style:string,aspectRatio:string}|null
+     */
+    private static function splitMarkerFields(string $alt): ?array
+    {
+        $parts = explode('|', $alt);
+        if (count($parts) < 4) {
+            return null;
+        }
+        $aspectRatio = strtolower(trim(array_pop($parts)));
+        $style = strtolower(trim(array_pop($parts)));
+        $pageContext = trim(array_pop($parts));
+
+        return [
+            'subject' => trim(implode('|', $parts)),
+            'pageContext' => $pageContext,
+            'style' => $style,
+            'aspectRatio' => $aspectRatio,
+        ];
+    }
+
+    /**
+     * Replace the collection marker in every alt with the subject it carries.
+     *
+     * The marker is a protocol with this step, and ThemeValidator says as
+     * much: the value "belongs in an img alt until collect-images records it".
+     * Nothing ever took it back out, so delivered sites ship the whole prompt
+     * as alt text — read aloud, indexed as the image's description, handed to
+     * Jetpack as og:image:alt. The subject describes the picture, so the
+     * subject is the alt.
+     *
+     * It goes whatever shape it is in: ThemeValidator scans only url/src
+     * contexts, so a malformed marker in an alt is reported by nobody, and the
+     * text after it is still the model describing the picture.
+     *
+     * Called from generate-images, not from here, because the marker is still
+     * in use after this step: HeaderHeroStep reads its last field for each
+     * image's aspect, and the second pass below treats a theme asset no marker
+     * declares as one nothing will generate — so stripping here would make a
+     * re-run delete every image block on sight.
+     *
+     * `$undrawn` names the files no picture was drawn for — the interior
+     * images the initial-image policy defers to a local placeholder
+     * (BIGR-1000), whose delivered asset is the neutral gradient. The subject
+     * describes a photograph that is not on the page, so those take `alt=""`
+     * and read as decorative instead of announcing a picture nobody drew. A
+     * later `bin/images.php <slug> --all` draws them and this pass gives them
+     * their description; images.json keeps the subject in the meantime.
+     *
+     * A FAILED image is not in that set on purpose. Nothing renders there at
+     * all, so a reader who meets the retained block should meet prose.
+     *
+     * @param array<string,true> $undrawn filename => true
+     */
+    public static function describeAlts(string $content, array $undrawn = []): string
+    {
+        if (!str_contains($content, 'AI_IMAGE:')) {
+            return $content;
+        }
+
+        // Bounded to one tag: `[^>]*` cannot cross the tag's own close, so a
+        // tag too malformed to carry a closing quote keeps its marker rather
+        // than letting a match run on to the next quote in the file and take
+        // every sibling in between with it. That is the safe way to fail.
+        return (string) preg_replace_callback(
+            '/<img\b[^>]*>/is',
+            static function (array $tag) use ($undrawn): string {
+                return (string) preg_replace_callback(
+                    '/((?<![\w-])alt=)(["\'])AI_IMAGE:\s*(.*?)\2/is',
+                    static function (array $match) use ($tag, $undrawn): string {
+                        $body = html_entity_decode($match[3], ENT_QUOTES | ENT_HTML5);
+                        $fields = self::splitMarkerFields($body);
+                        $subject = $fields === null ? trim($body) : $fields['subject'];
+                        if ($subject === '') {
+                            return $match[0];
+                        }
+                        if (self::tagIsUndrawn($tag[0], $undrawn)) {
+                            return $match[1] . $match[2] . $match[2];
+                        }
+
+                        return $match[1] . $match[2] . htmlspecialchars($subject, ENT_QUOTES | ENT_HTML5) . $match[2];
+                    },
+                    $tag[0],
+                    1
+                );
+            },
+            $content
+        );
+    }
+
+    /**
+     * Whether this img tag points at a file nothing drew a picture for.
+     *
+     * @param array<string,true> $undrawn filename => true
+     */
+    private static function tagIsUndrawn(string $tag, array $undrawn): bool
+    {
+        if ($undrawn === []) {
+            return false;
+        }
+        if (preg_match('/(?<![\w-])src=(["\'])(.*?)\1/is', $tag, $src) !== 1) {
+            return false;
+        }
+        $path = (string) parse_url(html_entity_decode($src[2], ENT_QUOTES | ENT_HTML5), PHP_URL_PATH);
+
+        return isset($undrawn[basename($path !== '' ? $path : $src[2])]);
+    }
+
     /** Where an image is used, read off the part path assemble-pages keys on. */
     private static function pageContextFor(string $source): string
     {
@@ -593,20 +708,12 @@ final class CollectImagesStep implements Step
             $src      = $srcMatch[2];
             $filename = $srcMatch[3];
 
-            // subject | page-context | style | aspect-ratio. We pop the three
-            // trailing fixed fields from the end, so the subject (the lead, the
-            // only field meant to be rich) may itself contain pipes.
-            $parts = explode('|', $alt);
-            if (count($parts) < 4) {
+            $fields = self::splitMarkerFields($alt);
+            if ($fields === null || $fields['subject'] === '') {
                 continue;
             }
-            $aspectRatio = strtolower(trim(array_pop($parts)));
-            $style       = strtolower(trim(array_pop($parts)));
-            $pageContext = trim(array_pop($parts));
-            $subject     = trim(implode('|', $parts));
-            if ($subject === '') {
-                continue;
-            }
+            ['subject' => $subject, 'pageContext' => $pageContext] = $fields;
+            ['style' => $style, 'aspectRatio' => $aspectRatio] = $fields;
 
             $images[] = [
                 'filename'    => $filename,

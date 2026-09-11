@@ -975,3 +975,124 @@ test('collect-images skips the synthetic mark when site-logo.png was already col
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('describeAlts hands the alt back to the subject it was carrying', function () {
+    $subject = 'A row of soft-top foam surfboards leaning against a weathered fence';
+
+    assert_eq(
+        '<img src="theme:./assets/a.jpg" alt="' . $subject . '"/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/a.jpg" alt="AI_IMAGE: ' . $subject . ' | hero | photo | landscape"/>'
+        ),
+        'the three fixed trailing fields go, the subject stays',
+    );
+
+    // The parser accepts either quote, so this has to as well, and it keeps
+    // the one it found rather than swapping quoting style under the tag.
+    assert_eq(
+        "<img alt='Two beginners at low tide' src='theme:./assets/b.jpg'>",
+        CollectImagesStep::describeAlts(
+            "<img alt='AI_IMAGE: Two beginners at low tide | lessons | photo | landscape' src='theme:./assets/b.jpg'>"
+        ),
+    );
+
+    // A subject may contain pipes and entities: the fields pop off the end,
+    // and what is left is re-encoded for the attribute it lands in.
+    assert_eq(
+        '<img src="theme:./assets/c.jpg" alt="A sign reading &quot;open&quot; | weathered"/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/c.jpg" alt="AI_IMAGE: A sign reading &quot;open&quot; | weathered'
+            . ' | shopfront | photo | square"/>'
+        ),
+    );
+
+    // Malformed, so there are no trailing fields to pop — but the marker
+    // still goes. Nothing reports one left in an alt, and what follows it is
+    // the model describing the picture.
+    assert_eq(
+        '<img src="theme:./assets/d.jpg" alt="no fields at all"/>',
+        CollectImagesStep::describeAlts('<img src="theme:./assets/d.jpg" alt="AI_IMAGE: no fields at all"/>'),
+    );
+
+    $ordinary = '<img src="/wp-content/uploads/x.jpg" alt="An ordinary alt"/>';
+    assert_eq($ordinary, CollectImagesStep::describeAlts($ordinary));
+});
+
+test('describeAlts leaves a deferred placeholder decorative, not described', function () {
+    // The initial-image policy draws home and hero images and defers the rest
+    // to the neutral local gradient. The subject describes a photograph that
+    // is not on the page, so announcing it to a screen reader is worse than
+    // saying nothing: the picture it describes was never drawn.
+    $subject = 'A stack of unglazed stoneware plates on a worn wooden table';
+    $undrawn = ['b.jpg' => true];
+
+    assert_eq(
+        '<img src="theme:./assets/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'a deferred placeholder ships an empty alt',
+    );
+
+    // Its drawn sibling in the same markup is unaffected.
+    assert_eq(
+        '<img src="theme:./assets/a.jpg" alt="' . $subject . '"/>'
+        . '<img src="theme:./assets/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/a.jpg" alt="AI_IMAGE: ' . $subject . ' | hero | photo | landscape"/>'
+            . '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'only the undrawn file goes empty',
+    );
+
+    // The set is matched on the file, not the path it is served from: by this
+    // point the src has already been rewritten to the uploaded URL.
+    assert_eq(
+        '<img src="https://example.com/wp-content/uploads/2026/09/b.jpg" alt=""/>',
+        CollectImagesStep::describeAlts(
+            '<img src="https://example.com/wp-content/uploads/2026/09/b.jpg"'
+            . ' alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>',
+            $undrawn
+        ),
+        'a served URL resolves to the same file',
+    );
+
+    // Without the set — every caller before BIGR-1000, and every fully drawn
+    // build — nothing changes.
+    assert_eq(
+        '<img src="theme:./assets/b.jpg" alt="' . $subject . '"/>',
+        CollectImagesStep::describeAlts(
+            '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: ' . $subject . ' | collections | photo | portrait"/>'
+        ),
+        'an empty set describes everything, as before',
+    );
+});
+
+test('describeAlts cannot take a tag\'s siblings with it', function () {
+    // An unbalanced quote used to let the match run to the next quote in the
+    // file: the paragraph and the second image between them were deleted, with
+    // no warning. This writes its result back, so a tag too malformed to match
+    // keeps its marker instead — the safe way to fail.
+    $runOn = '<img src="a.jpg" alt="AI_IMAGE: A cat | hero | photo | landscape>'
+        . '<p>Some paragraph</p><img src="b.jpg" alt="Plain alt">';
+
+    assert_eq($runOn, CollectImagesStep::describeAlts($runOn), 'malformed tag and every sibling survive');
+});
+
+test('describeAlts rewrites the alt a reader gets, not data-alt', function () {
+    // The tag prefix used to absorb "data-", so a tag carrying only data-alt
+    // had it rewritten — an attribute no reader is served, and not this
+    // step's to touch.
+    $dataOnly = '<img data-alt="AI_IMAGE: A cat | hero | photo | landscape" src="theme:./assets/a.jpg">';
+    assert_eq($dataOnly, CollectImagesStep::describeAlts($dataOnly), 'data-alt is left alone');
+
+    // With both present the real alt is the one that gets the prose.
+    assert_eq(
+        '<img data-alt="AI_IMAGE: A cat | hero | photo | landscape" alt="A dog">',
+        CollectImagesStep::describeAlts(
+            '<img data-alt="AI_IMAGE: A cat | hero | photo | landscape" alt="AI_IMAGE: A dog | hero | photo | landscape">'
+        ),
+    );
+});

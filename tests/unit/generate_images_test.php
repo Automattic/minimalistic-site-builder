@@ -610,7 +610,15 @@ test('generate-images keeps an unsafe failed cover unchanged and reports the res
 
     (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
 
-    assert_eq($unclosed, $project->readText('theme/parts/hero.html'));
+    // The block is retained whole — that is what this pins — but a retained
+    // block is a shipped block, and its alt is the marker. A reader who meets
+    // this image meets prose, not the prompt that failed to draw it.
+    $expected = str_replace(
+        'alt="AI_IMAGE: An unsafe cover | hero | photorealistic | landscape"',
+        'alt="An unsafe cover"',
+        $unclosed,
+    );
+    assert_eq($expected, $project->readText('theme/parts/hero.html'));
     $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
     assert_contains('theme/parts/hero.html: authored media source theme:./assets/unsafe-cover.jpg', implode("\n", $warnings));
     assert_contains('pre-cleanup bytes kept', implode("\n", $warnings));
@@ -1589,6 +1597,28 @@ test('generate-images drops the site-logo role when Imagick is unavailable', fun
     assert_eq(['images' => []], $project->readJson('plugin/images.json'));
     $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
     assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images puts the alt back to prose in every shipped scope', function () {
+    [$project, $tmp] = generate_fixture();
+    // Assembled pages carry the same markup and ship to the seeder, so they
+    // need the same sweep the theme files get.
+    $project->writeText('plugin/pages/home.html', $project->readText('theme/parts/hero.html'));
+
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project);
+
+    foreach (['theme/parts/hero.html', 'theme/templates/page.html', 'plugin/pages/home.html'] as $rel) {
+        $markup = $project->readText($rel);
+        // The marker is a protocol with this pipeline, not a description of
+        // the picture: it shipped to readers, to search engines, and into
+        // og:image:alt.
+        assert_true(!str_contains($markup, 'AI_IMAGE:'), "{$rel}: no marker survives delivery");
+        assert_contains('alt="A bakery at dawn"', $markup, "{$rel}: the subject is the alt");
+        assert_true(!str_contains($markup, 'full-bleed hero'), "{$rel}: the page-context field is gone");
+        assert_true(!str_contains($markup, 'photorealistic'), "{$rel}: and the style field");
+    }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

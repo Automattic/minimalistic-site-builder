@@ -404,9 +404,10 @@ final class GenerateImagesStep implements Step
 
         $project->writeJsonAtomic('images.json', $specs);
 
-        if ($resolved !== []) {
-            $this->rewriteMarkup($project, $resolved);
-        }
+        // Unconditional: $resolved holds only what completed, and a run where
+        // everything failed still has markers to take out of the blocks
+        // removeFailedImageReferences could not isolate safely.
+        $this->rewriteMarkup($project, $resolved, self::undrawnFiles($specs));
 
         $this->shipPluginImages($project);
         $this->markComplete($project);
@@ -1326,19 +1327,29 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * Replace every "theme:./assets/<file>" reference (img src and wp:cover url)
-     * with the served URL, in every theme markup file and in assembled content
-     * plugin pages (assemble-pages inlines section markup into plugin/pages/*;
-     * CLI --with-images and hosts that schedule this step after assemble must
-     * rewrite those files or multipage covers keep theme: placeholders).
+     * Replace every "theme:./assets/<file>" reference (img src and wp:cover
+     * url) with the served URL, and put each AI_IMAGE alt back to the prose it
+     * carries — by now the marker's readers (this step, and HeaderHeroStep
+     * before it) are done with it.
+     *
+     * Over theme markup and the assembled content plugin pages both:
+     * assemble-pages inlines section markup into plugin/pages/*, and CLI
+     * --with-images and hosts that schedule this step after assemble must
+     * rewrite those files or multipage covers keep theme: placeholders.
+     * Patterns are not swept here; extract-patterns re-derives them from these
+     * pages after this step.
+     *
+     * A deferred placeholder's alt goes empty rather than describing a photo
+     * that was never drawn; see describeAlts().
      *
      * @param array<string,string> $resolved theme: src => served URL
+     * @param array<string,true> $undrawn filename => true
      */
-    private function rewriteMarkup(Project $project, array $resolved): void
+    private function rewriteMarkup(Project $project, array $resolved, array $undrawn = []): void
     {
         foreach ($project->themeFiles() as $rel) {
             $content = $project->readText('theme/' . $rel);
-            $updated = strtr($content, $resolved);
+            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved), $undrawn);
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
             }
@@ -1350,10 +1361,35 @@ final class GenerateImagesStep implements Step
         foreach (glob($project->path('plugin/pages/*.html')) ?: [] as $abs) {
             $rel = 'plugin/pages/' . basename($abs);
             $content = $project->readText($rel);
-            $updated = strtr($content, $resolved);
+            $updated = CollectImagesStep::describeAlts(strtr($content, $resolved), $undrawn);
             if ($updated !== $content) {
                 $project->writeText($rel, $updated);
             }
         }
+    }
+
+    /**
+     * The files the run delivered a local placeholder for, rather than a
+     * drawn picture. The initial-image policy defers interior images
+     * (BIGR-1000) and the delivered asset is the neutral gradient, so the
+     * model's subject describes something the page does not show.
+     *
+     * @param list<array<string,mixed>> $specs
+     * @return array<string,true>
+     */
+    private static function undrawnFiles(array $specs): array
+    {
+        $undrawn = [];
+        foreach ($specs as $spec) {
+            if (($spec['status'] ?? '') !== 'placeholder') {
+                continue;
+            }
+            $filename = (string) ($spec['filename'] ?? '');
+            if ($filename !== '') {
+                $undrawn[$filename] = true;
+            }
+        }
+
+        return $undrawn;
     }
 }
