@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\UiMockupImage;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\ImagePlaceholder;
@@ -305,6 +306,35 @@ final class GenerateImagesStep implements Step
             $project->addWarnings($this->id(), ['file=' . Warnings::value(implode(', ', $unplanned))
                 . '; delivered=generated; disposition=' . count($unplanned) . ' image(s) whose source parts'
                 . ' pages.json does not name, generated rather than deferred by a policy that cannot place them']);
+        }
+
+        // Draw supported interface illustrations before the network batch.
+        $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
+        foreach ($pending as $i => $spec) {
+            if (GeminiImage::mimeForFilename((string) $spec['filename']) !== 'image/jpeg') {
+                continue;
+            }
+            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
+            $bytes = UiMockupImage::render($spec, $genSpec['aspect_ratio'], $theme);
+            if ($bytes === null) {
+                continue;
+            }
+            $this->finish($project, $specs, $i, $genSpec,
+                ['ok' => true, 'bytes' => $bytes, 'renderer' => 'native-ui', 'model' => 'native-ui'],
+                $resolved, $imageGrade, $imageCrop);
+            if (($specs[$i]['status'] ?? '') !== 'completed') {
+                continue;
+            }
+            $specs[$i]['renderer'] = 'native-ui';
+            $project->addWarnings($this->id(), [
+                'file=' . Warnings::value('theme/assets/' . $spec['filename'])
+                . '; block=' . Warnings::value(implode(', ', (array) ($spec['sources'] ?? [])))
+                . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                . '; delivered=' . Warnings::value(UiMockupImage::layout($spec) . ' interface illustration')
+                . '; disposition=local layout uses placeholder bars and geometric tiles; exact screen details and photos are omitted',
+            ]);
+            unset($pending[$i]);
+            $project->writeJsonAtomic('images.json', $specs);
         }
 
         // Generate every pending image through ONE pooled batch: concurrency
@@ -770,6 +800,10 @@ final class GenerateImagesStep implements Step
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
+        if (isset($result['renderer'])) {
+            $logRequest['renderer'] = $result['renderer'];
+            $logRequest['model'] = $result['model'] ?? $result['renderer'];
+        }
         $iconBytes = null;
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
