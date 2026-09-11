@@ -18,7 +18,19 @@ use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
  */
 final class AuthoredLayoutCss
 {
-    /** @return array{css:string,repairs:list<string>} */
+    /**
+     * Block-axis spacing on a page-level band is the one property
+     * SectionRhythmStep owns outright, and promoting it here wins. That is the
+     * intended behaviour — an authored rhythm should reach the page — but two
+     * owners of one property is worth a row, because the loss is quiet: a page
+     * where two bands out of five carry promoted padding does not look broken,
+     * it looks slightly arrhythmic.
+     */
+    private const RHYTHM_PROPERTIES = ['padding', 'padding-top', 'padding-bottom', 'padding-block',
+        'padding-block-start', 'padding-block-end', 'margin', 'margin-top', 'margin-bottom',
+        'margin-block', 'margin-block-start', 'margin-block-end'];
+
+    /** @return array{css:string,repairs:list<string>,warnings:list<string>} */
     public static function reconcile(string $css, string $markup): array
     {
         $dom = Html::loadUtf8Html('<html><body>' . $markup . '</body></html>', LIBXML_NONET);
@@ -28,6 +40,15 @@ final class AuthoredLayoutCss
         $elements = iterator_to_array($dom->getElementsByTagName('*'));
         $eligible = [];
         $repairs = [];
+        $warnings = [];
+        // A page-level band is a top-level element of the delivered markup.
+        $pageLevel = [];
+        foreach ($elements as $element) {
+            $parent = $element->parentNode;
+            if ($parent instanceof \DOMElement && strtolower($parent->nodeName) === 'body') {
+                $pageLevel[spl_object_id($element)] = true;
+            }
+        }
         $declarations = CssChecks::scanDeclarations($css);
         $important = array_filter($declarations, static fn (array $row): bool =>
             $row['kind'] === 'style' && CssChecks::splitDeclarationPriority($row['value'])['important']);
@@ -69,8 +90,17 @@ final class AuthoredLayoutCss
             $replacement = preg_replace('/(;?)(\s*)\z/', ' !important$1$2', $raw, 1);
             $css = substr_replace($css, $replacement, $declaration['start'], $declaration['end'] - $declaration['start']);
             $repairs[] = $selector . ': ' . $declaration['property'] . ':' . $declaration['value'] . ' => authored spacing priority';
+            if (in_array($declaration['property'], self::RHYTHM_PROPERTIES, true)
+                && array_intersect(array_keys($pageLevel), $eligible[$selector]) !== []
+            ) {
+                $warnings[] = "file='theme/style.css'; path=" . Warnings::value($selector)
+                    . '; authored=' . Warnings::value($declaration['property'] . ': ' . $declaration['value'])
+                    . '; delivered=the same declaration, promoted to important;'
+                    . ' disposition=an authored rhythm on a page-level band now outranks section-rhythm,'
+                    . " which is the step that otherwise owns that band's block spacing";
+            }
         }
-        return ['css' => $css, 'repairs' => array_reverse($repairs)];
+        return ['css' => $css, 'repairs' => array_reverse($repairs), 'warnings' => array_reverse($warnings)];
     }
 
     /** @return list<int>|false Every branch must select only delivered design layout blocks. */

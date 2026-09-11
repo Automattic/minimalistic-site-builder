@@ -419,7 +419,7 @@ CSS;
         try {
             $layout = AuthoredLayoutCss::reconcile($css, $markup);
         } catch (\Throwable $error) {
-            $layout = ['css' => $css, 'repairs' => []];
+            $layout = ['css' => $css, 'repairs' => [], 'warnings' => []];
             $project->addWarnings($this->id(), [
                 'file=theme/style.css; block_path=design-* layout subjects; authored_value=generated spacing; '
                 . 'delivered_value=pre-reconciliation CSS; disposition=retained because layout ownership could not be checked: '
@@ -427,6 +427,9 @@ CSS;
             ]);
         }
         $css = $layout['css'];
+        if (($layout['warnings'] ?? []) !== []) {
+            $project->addWarnings($this->id(), $layout['warnings']);
+        }
         $project->writeText('logs/authored-layout-css.txt', implode("\n", $layout['repairs']) . "\n");
 
         // Replace only our delimited appendix on resume; preserve later static
