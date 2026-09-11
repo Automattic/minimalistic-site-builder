@@ -43,6 +43,7 @@ final class BuildReport
     private int $imagesGenerated = 0;
     private int $imagesFailed = 0;
     private int $imagesTotal = 0;
+    private int $imagePlaceholders = 0;
 
     private bool $hasPatterns = false;
     private int $sectionPatternsWritten = 0;
@@ -108,12 +109,13 @@ final class BuildReport
     }
 
     /** Record the image-generation tally (only when --with-images ran). */
-    public function setImages(int $generated, int $failed, int $total): void
+    public function setImages(int $generated, int $failed, int $total, int $placeholders = 0): void
     {
         $this->hasImages = true;
         $this->imagesGenerated = $generated;
         $this->imagesFailed = $failed;
         $this->imagesTotal = $total;
+        $this->imagePlaceholders = $placeholders;
     }
 
     /** Record the reusable-pattern tally (only when patterns.json exists). */
@@ -304,7 +306,7 @@ final class BuildReport
             $this->imagesGenerated,
             $this->imagesFailed,
             $this->imagesTotal
-        );
+        ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '');
     }
 
     /** The patterns summary line, or null when no pattern manifest exists. Pure. */

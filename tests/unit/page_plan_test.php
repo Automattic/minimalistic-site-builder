@@ -2024,7 +2024,7 @@ test('a contact page is recognized from slug, title, or purpose — not a contac
     ]));
 });
 
-test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pad', function () {
+test('contact-page emphasis is brief and purpose-led, not the 3-to-4 interior range', function () {
     $page = [
         'slug' => 'contact',
         'title' => 'Contact',
@@ -2032,10 +2032,10 @@ test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pa
         'front' => false,
     ];
     $emphasis = PagePlanStep::emphasisFor($page, true);
-    assert_contains('2 to 4 sections', $emphasis);
+    assert_contains('2 to 3 sections', $emphasis);
     assert_contains('Let visitors reach the team.', $emphasis);
     assert_contains('JP_FORM', $emphasis);
-    assert_true(!str_contains($emphasis, 'Aim for 3 to 6'), 'the interior pad must not apply to contact');
+    assert_true(!str_contains($emphasis, 'Aim for 3 to 4'), 'the interior pad must not apply to contact');
 
     $noForm = PagePlanStep::emphasisFor($page, false);
     assert_true(!str_contains($noForm, 'JP_FORM'));
@@ -2048,10 +2048,10 @@ test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pa
         'front' => false,
     ]);
     assert_contains('Explain sailing programs', $programs);
-    assert_contains('Aim for 3 to 6 sections', $programs);
+    assert_contains('Aim for 3 to 4 sections', $programs);
 });
 
-test('an oversized contact plan is trimmed to 4 sections, keeping form and close', function () {
+test('an oversized contact plan is trimmed to 3 sections, keeping form and close', function () {
     $page = [
         'slug' => 'contact',
         'title' => 'Contact',
@@ -2067,9 +2067,9 @@ test('an oversized contact plan is trimmed to 4 sections, keeping form and close
         ],
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
 
-    assert_eq(4, count($capped['sections']));
+    assert_eq(3, count($capped['sections']));
     assert_eq(['hero', 'form', 'close'], array_values(array_intersect(
         ['hero', 'form', 'close'],
         array_column($capped['sections'], 'slug'),
@@ -2090,7 +2090,7 @@ test('an oversized contact plan is trimmed to 4 sections, keeping form and close
     assert_eq(['bento-grid', 'asymmetric-split', 'bento-grid', 'bento-grid'], $archetypes);
 });
 
-test('capContactPage does not trim a front page whose purpose mentions contact', function () {
+test('capPageSections uses the homepage cap when its purpose mentions contact', function () {
     $sections = [];
     foreach (['hero', 'programs', 'story', 'visit', 'gallery', 'cta', 'press', 'close'] as $i => $slug) {
         $sections[] = plan_section([
@@ -2108,12 +2108,12 @@ test('capContactPage does not trim a front page whose purpose mentions contact',
         'sections' => $sections,
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
-    assert_eq(8, count($capped['sections']));
-    assert_eq([], $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
+    assert_eq(5, count($capped['sections']));
+    assert_contains('trimmed front page to 5', implode(' ', $warnings));
 });
 
-test('a contact page already at or under 4 sections is left alone', function () {
+test('a contact page already at or under 3 sections is left alone', function () {
     $page = [
         'slug' => 'contact',
         'title' => 'Contact',
@@ -2126,7 +2126,7 @@ test('a contact page already at or under 4 sections is left alone', function () 
         ],
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
     assert_eq($page['sections'], $capped['sections']);
     assert_eq([], $warnings);
 });
@@ -2150,7 +2150,7 @@ test('the contact trim never introduces a full-bleed cover band', function () {
         ],
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
     $archetypes = array_column($capped['sections'], 'layout_archetype');
 
     assert_true(
@@ -2191,7 +2191,7 @@ test('an authored full-bleed cover on a contact page survives the trim', functio
         ],
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
     $bySlug = array_column($capped['sections'], 'layout_archetype', 'slug');
 
     assert_true(
@@ -2218,7 +2218,7 @@ test('rewritten seam prose names each neighbor assignment, not just its title', 
         ],
     ];
     $warnings = [];
-    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $capped = PagePlanStep::capPageSections($page, $warnings);
     $sections = $capped['sections'];
     $count = count($sections);
 
@@ -2413,4 +2413,152 @@ test('a repeated list planned as an asymmetric split takes the card grid (frm PR
     $plain = [$page([['hero', 'hero', 'bento-grid'], ['about', 'about', 'asymmetric-split'], ['work', 'projects', 'project-grid-2x2']])];
     assert_eq($plain, PagePlanStep::withListsOffTheSplit($plain, $repairs));
     assert_eq([], $repairs);
+});
+
+
+
+test('BIGR-1001 requests compact page ranges including the hero', function () {
+    $front = PagePlanStep::emphasisFor(['front' => true]);
+    assert_contains('3 to 5 sections', $front);
+    assert_contains('including the hero', $front);
+    assert_true(!str_contains($front, 'at least 3 distinct'));
+    assert_true(!str_contains($front, '5 to 8'));
+    $interior = PagePlanStep::emphasisFor(['slug' => 'services']);
+    assert_contains('3 to 4 sections', $interior);
+    assert_contains('including the hero', $interior);
+    $contact = PagePlanStep::emphasisFor(['slug' => 'contact']);
+    assert_contains('2 to 3 sections', $contact);
+    assert_contains('including the hero', $contact);
+});
+
+test('BIGR-1001 caps each page kind and preserves content at the fixed point', function () {
+    foreach ([['home', true, 5], ['services', false, 4], ['contact', false, 3]] as [$slug, $front, $max]) {
+        $sections = [];
+        foreach (['hero', 'story', 'services', 'gallery', 'form', 'hours', 'close'] as $i => $sectionSlug) {
+            $sections[] = plan_section([
+                'slug' => $sectionSlug,
+                'title' => ucfirst($sectionSlug),
+                'type' => $sectionSlug === 'form' ? 'contact' : 'content',
+                'content_notes' => $sectionSlug === 'form' ? 'Reserve a JP_FORM contact placeholder' : 'Keep these exact authored facts.',
+                'layout_archetype' => ['full-bleed-cover', 'asymmetric-split', 'bento-grid', 'equal-card-grid', 'asymmetric-split', 'bento-grid', 'zigzag-steps'][$i],
+                'background' => $i === 0 && $front ? 'image' : 'base',
+                'role' => $i === 0 ? 'hero' : ($i === 6 ? 'closing' : 'content'),
+            ]);
+        }
+        if (!$front) {
+            $sections[0]['layout_archetype'] = 'bento-grid';
+        }
+        $page = ['slug' => $slug, 'front' => $front, 'sections' => $sections];
+        $warnings = [];
+        $capped = PagePlanStep::capPageSections($page, $warnings);
+        assert_eq($max, count($capped['sections']));
+        assert_eq('hero', $capped['sections'][0]['slug']);
+        assert_eq($sections[0]['layout_archetype'], $capped['sections'][0]['layout_archetype']);
+        assert_eq('close', $capped['sections'][$max - 1]['slug']);
+        assert_eq('closing', $capped['sections'][$max - 1]['role']);
+        if ($slug === 'contact') {
+            assert_eq(['hero', 'form', 'close'], array_column($capped['sections'], 'slug'));
+        } else {
+            assert_eq(array_merge(array_slice(array_column($sections, 'slug'), 0, $max - 1), ['close']), array_column($capped['sections'], 'slug'));
+        }
+        foreach ($capped['sections'] as $section) {
+            $original = array_column($sections, null, 'slug')[$section['slug']];
+            assert_eq($original['content_notes'], $section['content_notes']);
+        }
+        $trail = implode("\n", $warnings);
+        assert_contains("file='pages.json'", $trail);
+        assert_contains('pages[slug=' . $slug . '].sections', $trail);
+        assert_contains('authored=', $trail);
+        assert_contains('delivered=', $trail);
+        assert_contains('disposition=', $trail);
+        assert_contains('dropped', $trail);
+        $warningsAtFixedPoint = $warnings;
+        assert_eq($capped, PagePlanStep::capPageSections($capped, $warnings));
+        assert_eq($warningsAtFixedPoint, $warnings);
+        foreach ([$max - 1, $max] as $count) {
+            $short = $page;
+            $short['sections'] = array_slice($sections, 0, $count);
+            $shortWarnings = [];
+            assert_eq($short, PagePlanStep::capPageSections($short, $shortWarnings));
+            assert_eq([], $shortWarnings);
+        }
+    }
+});
+
+
+test('BIGR-1001 persists capped normal and repaired plans with warnings and no dangling hero action', function () {
+    foreach ([false, true] as $needsRepair) {
+        with_project('builder_section_cap_', function ($project) use ($needsRepair) {
+            $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+            $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+                ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+                ['title' => 'Services', 'slug' => 'services', 'purpose' => 'Our services', 'children' => []],
+                ['title' => 'Contact', 'slug' => 'contact', 'purpose' => 'Contact form', 'children' => []],
+            ]]));
+            seed_test_design_direction($project);
+            $results = [];
+            foreach (['home', 'services', 'contact'] as $slug) {
+                $sections = [];
+                foreach (['hero', 'story', 'offerings', 'gallery', 'form', 'hours', 'close'] as $i => $sectionSlug) {
+                    $sections[] = plan_section([
+                        'slug' => $sectionSlug,
+                        'title' => ucfirst($sectionSlug),
+                        'type' => $sectionSlug === 'form' ? 'contact' : 'content',
+                        'background' => $i === 0 ? 'image' : 'base',
+                        'layout_archetype' => ['asymmetric-split', 'bento-grid', 'equal-card-grid', 'zigzag-steps', 'asymmetric-split', 'bento-grid', 'zigzag-steps'][$i],
+                        'content_notes' => $sectionSlug === 'form' ? 'Reserve JP_FORM contact placeholder' : 'Authored copy points',
+                    ]);
+                }
+                if ($slug === 'home') {
+                    $sections[0]['primary_action'] = ['label' => 'See hours', 'intent' => 'Read opening hours', 'destination' => '#hours'];
+                }
+                $results[$slug] = ['sections' => $sections];
+            }
+            $llm = new FakeLlm();
+            if ($needsRepair) {
+                foreach ($results as $slug => $result) {
+                    $llm->queueJson($result);
+                    $results[$slug]['sections'][1]['vertical_density'] = 'invalid';
+                }
+            }
+            $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+            $step->consume($project, $results);
+            $pages = $project->readJson('pages.json')['pages'];
+            assert_eq([5, 4, 3], array_map(fn ($page) => count($page['sections']), $pages));
+            assert_eq(['hero', 'form', 'close'], array_column($pages[2]['sections'], 'slug'));
+            assert_eq('#close', $pages[0]['sections'][0]['primary_action']['destination'], 'the action is retargeted to a surviving section');
+            $trail = implode("\n", $project->readJson('warnings.json')['page-plan']);
+            foreach (['front page to 5', 'interior page to 4', 'contact page to 3'] as $trim) {
+                assert_contains('trimmed ' . $trim, $trail);
+            }
+            assert_eq($needsRepair ? 1 : 0, $llm->completeJsonBatchCalls, 'capping itself spends no repair request');
+        });
+    }
+});
+
+test('BIGR-1001 caps scoped page plans without overwriting existing sibling artifacts', function () {
+    with_project('builder_scoped_cap_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+        $project->writeJson('siteSpec.json', plan_spec());
+        seed_test_design_direction($project);
+        $project->writeText('pages.json', '{"untouched":"siblings"}');
+        $sections = [];
+        foreach (['hero', 'story', 'menu', 'hours', 'gallery', 'close'] as $i => $slug) {
+            $sections[] = plan_section([
+                'slug' => $slug,
+                'title' => ucfirst($slug),
+                'type' => 'content',
+                'layout_archetype' => ['bento-grid', 'asymmetric-split', 'zigzag-steps', 'bento-grid', 'asymmetric-split', 'zigzag-steps'][$i],
+                'background' => $i === 2 ? 'contrast' : 'base',
+            ]);
+        }
+        $llm = new FakeLlm();
+        $llm->queueJson(['sections' => $sections]);
+        $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+        $pages = $step->runForSlugs($project, ['menu']);
+        assert_eq(1, count($pages));
+        assert_eq(4, count($pages[0]['sections']));
+        assert_eq('{"untouched":"siblings"}', $project->readText('pages.json'));
+        assert_contains('trimmed interior page to 4', implode("\n", $project->readJson('warnings.json')['page-plan']));
+    });
 });
