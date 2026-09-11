@@ -158,6 +158,8 @@ final class PreparedImageBatch
     /** @return array<int,array{filename:string,reason:string}> */
     public function omitted(): array { return $this->omitted; }
 
+    public function projectRoot(): string { return realpath($this->projectRoot) ?: $this->projectRoot; }
+
     public function fingerprint(): string
     {
         return hash('sha256', json_encode($this->inputHashes, JSON_THROW_ON_ERROR));
@@ -202,8 +204,36 @@ final class PreparedImageBatch
         }
         $writer = new NativeStagedFileWriter();
         $results = [];
-        if ($this->requests !== []) {
-            $client->generateBatch($this->requests, function (int $index, array $result) use (&$results, $target, $writer): void {
+        $requests = [];
+        $owners = [];
+        $aliases = [];
+        foreach ($this->requests as $index => $request) {
+            $key = StagedImageClient::requestKey($request, $client->model());
+            if (isset($owners[$key])) {
+                $aliases[$index] = $owners[$key];
+            } else {
+                $owners[$key] = $index;
+                $requests[$index] = $request;
+            }
+        }
+        $persist = function (bool $complete = false) use (&$results, $aliases, $target, $writer, $client): array {
+            foreach ($aliases as $index => $owner) {
+                if (isset($results[$owner])) {
+                    $results[$index] = $results[$owner];
+                }
+            }
+            ksort($results);
+            $manifest = ['fingerprint' => $this->fingerprint(), 'project_root' => $this->projectRoot(),
+                'provider' => StagedImageClient::identity($client), 'model' => $client->model(), 'complete' => $complete,
+                'requests' => $this->requests, 'results' => $results];
+            $destination = $target . '/results.json';
+            $temporary = $writer->stage($destination, json_encode($manifest, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
+            $writer->replace($temporary, $destination);
+            return $manifest;
+        };
+        $persist();
+        if ($requests !== []) {
+            $client->generateBatch($requests, function (int $index, array $result) use (&$results, $target, $writer, $persist): void {
                 if (!isset($this->requests[$index]) || isset($results[$index])) {
                     throw new \LogicException('Image result does not match one prepared request');
                 }
@@ -223,16 +253,12 @@ final class PreparedImageBatch
                 }
                 unset($result['bytes']);
                 $results[$index] = $result;
+                $persist();
             });
         }
         foreach ($this->requests as $index => $_request) {
             $results[$index] ??= ['ok' => false, 'error' => 'Image client omitted a prepared request result'];
         }
-        ksort($results);
-        $manifest = ['fingerprint' => $this->fingerprint(), 'results' => $results];
-        $destination = $target . '/results.json';
-        $temporary = $writer->stage($destination, json_encode($manifest, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
-        $writer->replace($temporary, $destination);
-        return $manifest;
+        return $persist(true);
     }
 }
