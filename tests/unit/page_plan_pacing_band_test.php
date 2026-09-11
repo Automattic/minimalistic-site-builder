@@ -40,36 +40,24 @@ function pacing_plan(int $sections, string $background = 'base'): array
     return $plan;
 }
 
-test('a long page with every section on the page background is rejected', function () {
-    // 271 of 371 audited pages came back exactly like this — and the longer the
-    // page, the likelier it was. "Mostly base" was read as "all base".
-    $warnings = [];
-    $repairs = [];
-    $rejected = false;
-    try {
-        PagePlanStep::normalize(pacing_plan(6), true, null, [], $warnings, 'home', $repairs, true);
-    } catch (\RuntimeException $e) {
-        $rejected = true;
-        assert_contains("all 6 sections use background 'base'", $e->getMessage());
-        assert_contains('at least one', $e->getMessage());
+test('normalization repairs surface budgets and reaches a fixed point', function () {
+    foreach (['base', 'contrast'] as $background) {
+        $warnings = [];
+        $repairs = [];
+        $plan = pacing_plan(4, $background);
+        $out = PagePlanStep::normalize($plan, true, null, [], $warnings, 'home', $repairs, true);
+        $banded = count(array_filter(array_column($out, 'background'), fn ($value) => $value !== 'base'));
+        assert_eq($background === 'base' ? 1 : 2, $banded);
+        assert_contains('pages.json', implode("\n", $warnings));
+        assert_contains('.background', implode("\n", $warnings));
+        $nextWarnings = [];
+        assert_eq($out, PagePlanStep::normalize($out, true, null, [], $nextWarnings, 'home', $repairs, true));
+        assert_eq([], $nextWarnings);
+        foreach ($out as $index => $section) {
+            assert_eq($plan[$index]['content_notes'], $section['content_notes']);
+            assert_eq($plan[$index]['layout_archetype'], $section['layout_archetype']);
+        }
     }
-    assert_true($rejected, 'an all-base 6-section page is a rejection');
-});
-
-test('a long page with more than two bands is rejected', function () {
-    // The other edge of the same audit: more content earned more colors, and
-    // long pages came back as a succession of bands.
-    $warnings = [];
-    $repairs = [];
-    $rejected = false;
-    try {
-        PagePlanStep::normalize(pacing_plan(6, 'contrast'), true, null, [], $warnings, 'home', $repairs, true);
-    } catch (\RuntimeException $e) {
-        $rejected = true;
-        assert_contains('6 of 6 sections sit on a non-base background', $e->getMessage());
-        assert_contains('at most 2', $e->getMessage());
-    }
-    assert_true($rejected, 'a 6-section page with six bands is a rejection');
 });
 
 test('repairVariety demotes a long page down to two bands', function () {
@@ -190,9 +178,9 @@ test('the page-plan prompt states the floor, not only the "mostly base" bias', f
     // plans needing it. "Mostly base" alone is what produced 73% all-base.
     $prompt = (string) file_get_contents(repo_path('prompts/page-plan.md'));
     assert_contains('"Mostly base" is not "all base"', $prompt);
-    assert_contains('5 or more sections MUST carry at least one', $prompt);
+    assert_contains('{{min_banded_sections}} or more sections MUST carry at least one', $prompt);
     assert_contains('every section on "base"', $prompt, 'the final re-check covers it too');
-    assert_contains('AT MOST TWO non-base backgrounds', $prompt);
+    assert_contains('AT MOST {{max_non_base_sections}} non-base backgrounds', $prompt);
     assert_contains('More content does not earn more colors', $prompt);
 });
 

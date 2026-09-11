@@ -12,7 +12,7 @@ function section_unit_input(): array
     return [
         'site_spec'        => '{"name":"UNIT-SPEC-SENTINEL"}',
         'language'         => 'unit-language-sentinel',
-        'theme_json'       => '{"unit-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"unit-theme-sentinel":true}}}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
         'card_style'       => 'flush',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
@@ -186,7 +186,7 @@ test('SectionUnit request preparation does not call the LLM', function () {
     $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
     $input = section_unit_input();
     $input['site_spec'] = ['name' => 'DECODED-SPEC-SENTINEL'];
-    $input['theme_json'] = ['decoded-theme-sentinel' => true];
+    $input['theme_json'] = ['settings' => ['custom' => ['decoded-theme-sentinel' => true]]];
 
     $request = $unit->request($input);
 
@@ -338,7 +338,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
             'action_capabilities' => \Automattic\SiteBuild\ActionCapabilities::prompt(json_decode($input['site_spec'], true)),
-            'theme_json'       => $input['theme_json'],
+            'theme_json' => \Automattic\SiteBuild\MarkupContext::theme(json_decode($input['theme_json'], true)),
             'design_direction' => $input['design_direction'],
         ]), "\r\n"),
         'language'          => $input['language'],
@@ -356,7 +356,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'composition'       => $composition,
         'item_pattern_assignment' => 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.',
         'header_contract'   => $input['header_contract'],
-        'image_instructions' => $renderer->render('image-generation.md', []),
+        'image_instructions' => rtrim($renderer->render('image-markup.md', [])),
         'form_instructions'  => $renderer->render('no-forms.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),
