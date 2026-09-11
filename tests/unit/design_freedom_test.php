@@ -9,7 +9,13 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /** @return list<array<string,mixed>> */
-function freedom_plan(string $background = 'base'): array
+/**
+ * A deliberately repetitive plan. The default six sections is the intentional
+ * sequence the normalize-only tests are about; a test that runs the whole step
+ * passes the page's BIGR-1001 budget instead, so the length cap is not the
+ * subject.
+ */
+function freedom_plan(string $background = 'base', int $count = 6): array
 {
     return array_map(static fn (int $i): array => [
         'slug' => 'chapter-' . $i,
@@ -24,7 +30,7 @@ function freedom_plan(string $background = 'base'): array
         'text_placement' => 'centered',
         'handoff' => 'Continue the same reading surface and spatial rhythm.',
         'primary_action' => null,
-    ], range(1, 6));
+    ], range(1, $count));
 }
 
 test('design freedom preserves intentional repetition, uninterrupted surfaces and spacious sequences', function () {
@@ -82,8 +88,8 @@ test('a page plan persists mixed item idioms despite a different site preference
         'name' => 'Field guide', 'description' => 'Notes from the field',
         'pages' => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Read the guide', 'children' => []]],
     ]);
-    $sections = freedom_plan();
-    $patterns = [null, 'rule-row', 'spec-table', 'tag-cluster', 'rule-row', 'card'];
+    $sections = freedom_plan('base', PagePlanStep::MAX_FRONT_SECTIONS);
+    $patterns = [null, 'rule-row', 'spec-table', 'tag-cluster', 'card'];
     foreach ($patterns as $i => $pattern) {
         $sections[$i]['item_pattern'] = $pattern;
     }
@@ -93,7 +99,7 @@ test('a page plan persists mixed item idioms despite a different site preference
     $out = $project->readJson('pages.json')['pages'][0]['sections'];
     assert_eq($patterns, array_column($out, 'item_pattern'));
     assert_eq(array_column($sections, 'content_notes'), array_column($out, 'content_notes'));
-    assert_eq(array_fill(0, 6, 'spacious'), array_column($out, 'vertical_density'));
+    assert_eq(array_fill(0, PagePlanStep::MAX_FRONT_SECTIONS, 'spacious'), array_column($out, 'vertical_density'));
     assert_eq(1, count($llm->calls), 'valid aesthetic choices cost no repair call');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -156,8 +162,8 @@ test('scoped HTML-first fallback planning also preserves per-section item choice
             ['title' => 'Catalog', 'slug' => 'catalog', 'purpose' => 'Browse the entries', 'children' => []],
         ],
     ]);
-    $sections = freedom_plan();
-    $patterns = ['rule-row', 'spec-table', 'card', null, 'tag-cluster', 'rule-row'];
+    $sections = freedom_plan('base', PagePlanStep::MAX_INTERIOR_SECTIONS);
+    $patterns = ['rule-row', 'spec-table', 'card', null];
     foreach ($patterns as $i => $pattern) {
         $sections[$i]['item_pattern'] = $pattern;
     }
@@ -188,4 +194,65 @@ test('hero caption allowance removes only extra or overlong labels and reaches a
         assert_eq($result['markup'], $again['markup']);
         assert_eq([], $again['warnings']);
     }
+});
+
+test('a page with no surface pacing is recorded, never repaired (frm PR-3ba)', function () {
+    // MIN_BANDED_SECTIONS is gone on purpose: a quota produces pages that look
+    // assembled. The measurement behind it is not — 271 of 371 audited pages
+    // came back with every section on the page background, and the rate rose
+    // with page length. The plan ships as written; warnings.json takes the row.
+    $page = static fn (array $backgrounds, string $slug = 'catalog', array $extra = []): array => $extra + [
+        'slug' => $slug,
+        'sections' => array_map(
+            static fn (string $background, int $i): array => plan_section([
+                'slug' => 'section-' . $i,
+                'title' => 'Section ' . $i,
+                'type' => $i === 0 ? 'hero' : 'content',
+                'layout_archetype' => 'asymmetric-split',
+                'background' => $background,
+            ]),
+            $backgrounds,
+            array_keys($backgrounds),
+        ),
+    ];
+
+    $rows = PagePlanStep::uniformSurfaceWarnings($page(['base', 'base', 'base', 'base']));
+    assert_eq(1, count($rows), 'a page of real length with no band is recorded once');
+    assert_contains('pages[slug=catalog].sections[].background', $rows[0]);
+    assert_contains('delivered as planned', $rows[0]);
+    assert_contains('no surface pacing', $rows[0]);
+});
+
+test('a banded page, a short page and a contact page are not recorded (frm PR-3ba)', function () {
+    // One band off the page background is all the row asks for. A short page
+    // is left alone, where one uniform ground is a fine answer, and a contact
+    // page is exempt for the reason it always was.
+    $page = static fn (array $backgrounds, string $slug = 'catalog', array $extra = []): array => $extra + [
+        'slug' => $slug,
+        'sections' => array_map(
+            static fn (string $background, int $i): array => plan_section([
+                'slug' => 'section-' . $i,
+                'title' => 'Section ' . $i,
+                'type' => $i === 0 ? 'hero' : 'content',
+                'layout_archetype' => 'asymmetric-split',
+                'background' => $background,
+            ]),
+            $backgrounds,
+            array_keys($backgrounds),
+        ),
+    ];
+
+    assert_eq([], PagePlanStep::uniformSurfaceWarnings($page(['base', 'base', 'tinted', 'base'])), 'one tinted band is pacing');
+    assert_eq([], PagePlanStep::uniformSurfaceWarnings($page(['image', 'base', 'base', 'base'])), 'so is an image opening');
+    assert_eq([], PagePlanStep::uniformSurfaceWarnings($page(['base', 'base', 'contrast', 'base'])), 'so is a contrast band');
+    assert_eq([], PagePlanStep::uniformSurfaceWarnings($page(['base', 'base', 'base'])), 'a short page is left alone');
+    assert_eq(
+        [],
+        PagePlanStep::uniformSurfaceWarnings($page(
+            ['base', 'base', 'base', 'base'],
+            'contact',
+            ['purpose' => 'Let visitors reach the team.'],
+        )),
+        'a contact page is exempt',
+    );
 });

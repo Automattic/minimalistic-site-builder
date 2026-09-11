@@ -658,6 +658,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         foreach ($out as $i => $page) {
             if (is_array($page)) {
                 $out[$i] = self::capPageSections($page, $warnings);
+                array_push($warnings, ...self::uniformSurfaceWarnings($out[$i]));
             }
         }
 
@@ -812,7 +813,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
             }
             $page['sections'] = $sections;
-            $out[] = self::capPageSections($page, $warnings);
+            $capped = self::capPageSections($page, $warnings);
+            array_push($warnings, ...self::uniformSurfaceWarnings($capped));
+            $out[] = $capped;
         }
         $project->addWarnings($this->id(), $warnings);
         return $out;
@@ -1848,6 +1851,49 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param list<string> $warnings
      * @return array<string,mixed>
      */
+    /**
+     * Record a page of real length that never leaves the page background.
+     *
+     * This branch removed `MIN_BANDED_SECTIONS`, the floor that used to force
+     * one band onto such a page, and that removal is deliberate: a quota
+     * produces pages that look assembled, and the plan prompt already asks
+     * for "mostly base with 1-2 contrast or image bands placed for pacing".
+     *
+     * What the floor also carried was a measurement. Audited plans kept the
+     * "mostly" and dropped the rest — 271 of 371 pages came back with every
+     * section on the page background, and the rate rose WITH length: 59% of
+     * 5-section pages, 81% of 6-section, and 42 of 42 seven-section pages.
+     * Nothing repairs that now, so nothing should also mean nothing sees it.
+     *
+     * Rung 4, then: the page ships exactly as planned, and warnings.json
+     * carries a row a cohort audit can count. A short page is left alone,
+     * where one uniform ground is a fine answer, and a contact page is exempt
+     * for the same reason it always was.
+     *
+     * @param array<string,mixed> $page
+     * @return list<string>
+     */
+    public static function uniformSurfaceWarnings(array $page): array
+    {
+        $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
+        if (count($sections) < 4 || self::isContactLikePage($page)) {
+            return [];
+        }
+        $backgrounds = array_map(
+            static fn (array $section): string => trim((string) ($section['background'] ?? '')),
+            $sections,
+        );
+        if (array_filter($backgrounds, static fn (string $b): bool => $b !== '' && $b !== 'base') !== []) {
+            return [];
+        }
+        $pageSlug = (string) ($page['slug'] ?? '');
+
+        return ["file='pages.json'; path=\"pages[slug={$pageSlug}].sections[].background\"; authored=base"
+            . ' on all ' . count($sections) . ' sections; delivered=base on all ' . count($sections)
+            . ' sections; disposition=delivered as planned; a page of this length carries no contrast,'
+            . ' tinted or image band, so it has no surface pacing'];
+    }
+
     public static function capPageSections(array $page, array &$warnings = []): array
     {
         $front = !empty($page['front']);
@@ -1877,7 +1923,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $kept,
         );
         $layoutWarnings = [];
-        $kept = self::repairLayoutCompatibility($kept, false, null, $layoutWarnings, $pageSlug);
+        // $front, not false: a front page may legitimately open on a cover,
+        // and telling the repair otherwise demotes the hero it was given.
+        $kept = self::repairLayoutCompatibility($kept, $front, null, $layoutWarnings, $pageSlug);
         $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $layoutWarnings, $pageSlug);
         array_push($warnings, ...$layoutWarnings);
         // Last, so the seam prose names the archetypes that actually ship.
