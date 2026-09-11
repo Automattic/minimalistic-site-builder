@@ -68,7 +68,9 @@ test('section specifics keep complete requests within a bounded instruction budg
         $input['section']['layout_archetype'] = $archetype;
         foreach (['none', 'minimal', 'calm', 'energetic', 'dramatic'] as $profile) {
             $input['motion_profile'] = $profile;
-            $budget = in_array($profile, ['none', 'minimal'], true) ? 48500 : 53500;
+            // Includes section-label guidance alongside the expanded motion recipes.
+            // Fixture maxima: 49,279 bytes for minimal motion, 54,798 for animated.
+            $budget = in_array($profile, ['none', 'minimal'], true) ? 50000 : 55000;
             $bytes = strlen(section_unit_request_text($unit->request($input)));
             assert_true($bytes < $budget, "$archetype/$profile request is $bytes bytes; budget is $budget including fixture context");
         }

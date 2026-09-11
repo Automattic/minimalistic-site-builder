@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\SectionLabel;
 
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
@@ -197,6 +198,14 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::widenOrphanProjectTile($markup, $this->key($input), $archetype, $repairs);
         $markup = GeneratedMarkup::defaultCoverDim($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::ownProjectTileInk($markup, $this->key($input), $archetype, $repairs);
+        $label = SectionLabel::normalize(
+            $markup,
+            is_string($input['section_label'] ?? null) ? $input['section_label'] : null,
+            $this->key($input),
+            (bool) ($input['is_opening'] ?? false),
+        );
+        $markup = $label['markup'];
+        array_push($warnings, ...$label['warnings']);
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markLongMarquee($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::markFigures(

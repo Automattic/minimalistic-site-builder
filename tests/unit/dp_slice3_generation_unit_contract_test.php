@@ -212,14 +212,14 @@ function dp3_contract_with_mode(?string $mode, callable $callback): void
     }
 }
 
-test('TG3 page mode default matches the immutable Slice-2 request and artifact golden', function () {
+test('TG3 page mode matches the golden with BIGR-1001 section budgets', function () {
     dp3_contract_with_mode(null, function (): void {
         [$project, $llm, $tmp, $golden] = dp3_contract_fixture();
         try {
             foreach (['snapshot_commit', 'snapshot_tree'] as $provenanceKey) {
                 assert_true(
                     preg_match('/\A[0-9a-f]{40}\z/D', (string) ($golden[$provenanceKey] ?? '')) === 1,
-                    "golden records immutable Slice-2 {$provenanceKey} provenance",
+                    "golden records the base Slice-2 {$provenanceKey} provenance",
                 );
             }
             dp3_contract_queue_page($llm, $golden);

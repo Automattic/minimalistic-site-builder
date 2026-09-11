@@ -65,6 +65,7 @@ test('cover-contrast graph requires generate-images even when scaffold assets ex
         $cover,
     ], seeds: array_merge($scaffolded, [
         'images.json',
+        'pages.json',
         'siteSpec.json',
         'designDirection.json',
         'plugin/images.json',
