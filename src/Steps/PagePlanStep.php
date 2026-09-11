@@ -1149,8 +1149,19 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private function plannedPages(Project $project, array $pages, array $results): array
     {
         $siteSpec = $project->readJson('siteSpec.json');
-        $sitePages = self::flattenPages($siteSpec);
-        $actionContext = self::primaryActionContext($siteSpec, $sitePages);
+        $sitePages = array_column(self::flattenPages($siteSpec), null, 'slug');
+        $savedPages = $project->exists('pages.json') ? $project->readJson('pages.json')['pages'] ?? [] : [];
+        foreach ($savedPages as $savedPage) {
+            $slug = is_array($savedPage) ? ($savedPage['slug'] ?? '') : '';
+            if (isset($sitePages[$slug]) && is_array($savedPage['sections'] ?? null)) {
+                $sitePages[$slug]['sections'] = $savedPage['sections'];
+            }
+        }
+        $actionContext = self::withPlannedSectionAnchors(
+            self::primaryActionContext($siteSpec, array_values($sitePages)),
+            array_values($sitePages),
+            array_replace($sitePages, $results),
+        );
         $allowOffsetGrid = self::allowOffsetGridFor($project);
         $warnings = [];
         $repairs = [];

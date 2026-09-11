@@ -55,6 +55,7 @@ final class ActionCapabilities
     /** Return a truthful label, or null when the action has no usable destination. */
     public static function label(string $label, string $destination, array $context, string $currentPath = '/'): ?string
     {
+        $destination = trim($destination);
         if ($destination === '' || $destination === '#') {
             return null;
         }
@@ -124,7 +125,7 @@ final class ActionCapabilities
             } else {
                 $anchorOffset = $match[0][1];
                 $tag = MarkupScan::wrapperTag($inner, $anchorOffset);
-                $destination = html_entity_decode((string) (MarkupScan::tagAttribute($tag ?? '', 'href')[0] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $destination = trim(html_entity_decode((string) (MarkupScan::tagAttribute($tag ?? '', 'href')[0] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
                 $close = stripos($inner, '</a>', $anchorOffset + strlen($tag ?? ''));
                 if ($tag === null || $close === false) {
                     $warnings[] = "file={$file}; block=blocks[{$index}]; authored=malformed action; delivered=unchanged; disposition=repair skipped";

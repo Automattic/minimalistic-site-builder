@@ -164,3 +164,38 @@ test('the pattern action check retains valid links and removes only dead actions
     assert_contains('theme/patterns/contact.php', $result['warnings'][0]);
     assert_eq(['markup' => $result['markup'], 'warnings' => []], ActionCapabilities::repairMarkup($result['markup'], [], 'theme/patterns/contact.php', deadOnly: true));
 });
+
+
+test('a scoped plan retains known sibling anchors', function () {
+    with_project('builder_scoped_anchor_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A restaurant.']);
+        $project->writeJson('siteSpec.json', ['name' => 'Tbilisi', 'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome.'],
+            ['slug' => 'visit', 'title' => 'Visit', 'purpose' => 'Contact details.'],
+        ]]);
+        $project->writeJson('pages.json', ['pages' => [['slug' => 'visit', 'path' => '/visit/',
+            'title' => 'Visit', 'sections' => [['slug' => 'contact', 'title' => 'Contact details']],
+        ]]]);
+        $saved = $project->readText('pages.json');
+        seed_test_design_direction($project);
+        $llm = new \Automattic\SiteBuild\Tests\FakeLlm();
+        $llm->queueJson(['sections' => [
+            plan_section(['slug' => 'hero', 'primary_action' => ['label' => 'Make a Reservation', 'intent' => 'Book a table.', 'destination' => '/visit#contact']]),
+            plan_section(['slug' => 'food', 'layout_archetype' => 'feature-row-hairlines']),
+            plan_section(['slug' => 'details', 'layout_archetype' => 'asymmetric-split']),
+        ]]);
+        $step = new PagePlanStep($llm, new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+        $pages = $step->runForSlugs($project, ['home']);
+        assert_eq('Contact details', $pages[0]['sections'][0]['primary_action']['label']);
+        assert_eq('/visit#contact', $pages[0]['sections'][0]['primary_action']['destination']);
+        assert_eq($saved, $project->readText('pages.json'));
+    });
+});
+
+test('whitespace cannot hide a dead action destination', function () {
+    foreach (['   ', ' # '] as $destination) {
+        $result = ActionCapabilities::repairMarkup(capability_button('See the hours', $destination), [], 'theme/patterns/contact.php', deadOnly: true);
+        assert_eq('', $result['markup']);
+        assert_eq(1, count($result['warnings']));
+    }
+});
