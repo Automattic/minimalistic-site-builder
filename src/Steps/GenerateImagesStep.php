@@ -72,6 +72,9 @@ final class GenerateImagesStep implements Step
     /** The opaque square derived from the keyed mark, for `site_icon` only. */
     public const SITE_ICON_FILE = 'site-icon.png';
 
+    public const MAX_QA_IMAGES = 10;
+    public const MAX_QA_BYTES = 16 * 1024 * 1024;
+
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
         . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
@@ -1033,14 +1036,46 @@ final class GenerateImagesStep implements Step
         string $imageGrade,
         string $imageCrop,
     ): void {
-        $active = [];
+        $group = [];
+        $bytes = 0;
         foreach ($indices as $i) {
             $spec = $specs[$i];
-            if (($spec['status'] ?? '') === 'completed' && ImageQa::applies($spec)
-                && $project->exists('theme/assets/' . $spec['filename'])) {
-                $active[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
+            $file = 'theme/assets/' . $spec['filename'];
+            if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec) || !$project->exists($file)) {
+                continue;
             }
+            $size = filesize($project->path($file));
+            if ($size === false) {
+                throw new \RuntimeException('Could not read the image size: ' . $file);
+            }
+            if ($size > self::MAX_QA_BYTES) {
+                $project->addWarnings($this->id(), ['file=' . Warnings::value($file)
+                    . '; block=' . Warnings::value(implode(', ', $spec['sources'] ?? []))
+                    . '; authored image bytes=' . $size . '; delivered=original image; disposition=QA skipped because the image exceeds the payload limit']);
+                continue;
+            }
+            if ($group !== [] && (count($group) >= self::MAX_QA_IMAGES || $bytes + $size > self::MAX_QA_BYTES)) {
+                $this->inspectGroup($project, $specs, $group, $siteContext, $imageGrade, $imageCrop);
+                $group = [];
+                $bytes = 0;
+            }
+            $group[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
+            $bytes += $size;
         }
+        if ($group !== []) {
+            $this->inspectGroup($project, $specs, $group, $siteContext, $imageGrade, $imageCrop);
+        }
+    }
+
+    /** Finish each bounded group before the next group loads image bytes. */
+    private function inspectGroup(
+        Project $project,
+        array &$specs,
+        array $active,
+        string $siteContext,
+        string $imageGrade,
+        string $imageCrop,
+    ): void {
         while ($active !== []) {
             $verdicts = $this->inspectBatch($project, array_intersect_key($specs, $active));
             $regenerations = [];
@@ -1099,7 +1134,32 @@ final class GenerateImagesStep implements Step
     private function inspectBatch(Project $project, array $specs): array
     {
         $verdicts = [];
-        foreach (array_chunk($specs, 10, true) as $chunk) {
+        $chunks = [];
+        $chunk = [];
+        $bytes = 0;
+        foreach ($specs as $i => $spec) {
+            $filename = (string) $spec['filename'];
+            $size = filesize($project->path('theme/assets/' . $filename));
+            if ($size === false) {
+                throw new \RuntimeException('Could not read the image size: ' . $filename);
+            }
+            if ($size > self::MAX_QA_BYTES) {
+                $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                    (string) ($spec['subject'] ?? ''), ['QA payload exceeds the byte limit'], 'QA skipped; original image retained')]);
+                continue;
+            }
+            if ($chunk !== [] && (count($chunk) >= self::MAX_QA_IMAGES || $bytes + $size > self::MAX_QA_BYTES)) {
+                $chunks[] = $chunk;
+                $chunk = [];
+                $bytes = 0;
+            }
+            $chunk[$i] = $spec;
+            $bytes += $size;
+        }
+        if ($chunk !== []) {
+            $chunks[] = $chunk;
+        }
+        foreach ($chunks as $chunk) {
             $requests = [];
             foreach ($chunk as $i => $spec) {
                 $filename = (string) $spec['filename'];
