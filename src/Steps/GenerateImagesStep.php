@@ -652,11 +652,8 @@ final class GenerateImagesStep implements Step
                 screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
-            // Wide images are the full-bleed ones (heroes, banners) — render
-            // those at 2K so they stay sharp past ~1366px. Transparent
-            // decoratives render small on the page and stay at 1K whatever
-            // their ratio.
-            'sample_image_size' => GeminiImage::sampleImageSize($ratio, $mime === 'image/png'),
+            // Small slots stay at 1K when the crop system selects a wide ratio.
+            'sample_image_size' => GeminiImage::sampleImageSizeForSlot($spec, $ratio, $mime === 'image/png'),
             'asset' => (string) ($spec['filename'] ?? ''),
             'mime'              => $mime,
         ];
