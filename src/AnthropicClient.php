@@ -914,7 +914,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 $wait = $delays[$attempt];
                 $attempt++;
                 Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
-                sleep($wait);
+                ImageTransportScheduler::pause($wait);
             }
         }
     }
@@ -954,11 +954,28 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             },
         ]);
 
-        curl_exec($ch);
-        $errno  = curl_errno($ch);
-        $error  = curl_error($ch);
-        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        if (ImageTransportScheduler::current() !== null) {
+            do {
+                $transfer = (new CurlMultiPool())->run([0 => $body], fn () => $ch,
+                    static fn ($key, $handle, $status): array => [
+                        'ok' => true, 'errno' => curl_errno($handle), 'error' => curl_error($handle),
+                        'status' => $status, 'time' => (float) curl_getinfo($handle, CURLINFO_TOTAL_TIME),
+                    ], self::MAX_CONCURRENCY, lane: 'anthropic')[0];
+                if (!empty($transfer['held'])) {
+                    ImageTransportScheduler::pause(2);
+                }
+            } while (!empty($transfer['held']));
+            $errno = $transfer['errno'] ?? CURLE_FAILED_INIT;
+            $error = $transfer['error'] ?? 'The shared pool could not start this request';
+            $status = $transfer['status'] ?? 0;
+            $time = $transfer['time'] ?? 0.0;
+        } else {
+            curl_exec($ch);
+            $errno  = curl_errno($ch);
+            $error  = curl_error($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        }
         curl_close($ch);
 
         // Connection-level failures (DNS, connect, timeout, stall, dropped

@@ -7,24 +7,29 @@ final class ImageTransportScheduler
 {
     private static ?self $active = null;
     private array $tasks = [];
+    private array $ownedFibers = [];
     private array $jobs = [];
     private array $handles = [];
     private array $laneCounts = [];
     private array $laneHold = [];
     private int $nextJob = 0;
     private int $imageBytes = 0;
+    private bool $inPoll = false;
     private ?\CurlMultiHandle $multi = null;
 
     public static function current(): ?self { return self::$active; }
 
     public function spawn(callable $task): void
     {
-        $this->tasks[] = ['fiber' => new \Fiber($task), 'wake' => 0.0];
+        $fiber = new \Fiber($task);
+        $this->ownedFibers[spl_object_id($fiber)] = true;
+        $this->tasks[] = ['fiber' => $fiber, 'wake' => 0.0];
     }
 
     public static function pause(float $seconds = 0): void
     {
-        if (self::$active !== null && \Fiber::getCurrent() !== null) {
+        $fiber = \Fiber::getCurrent();
+        if (self::$active !== null && $fiber !== null && isset(self::$active->ownedFibers[spl_object_id($fiber)])) {
             \Fiber::suspend(microtime(true) + max(0, $seconds));
         } elseif (self::$active !== null) {
             $until = microtime(true) + max(0, $seconds);
@@ -39,6 +44,9 @@ final class ImageTransportScheduler
 
     public function reserveImageBytes(int $bytes): void
     {
+        if ($bytes < 0 || $bytes > Steps\GenerateImagesStep::MAX_QA_BYTES) {
+            throw new \InvalidArgumentException('Image payload exceeds the scheduler byte budget');
+        }
         while ($this->imageBytes + $bytes > Steps\GenerateImagesStep::MAX_QA_BYTES) {
             self::pause();
         }
@@ -69,6 +77,11 @@ final class ImageTransportScheduler
         if ($this->multi === null) {
             return;
         }
+        if ($this->inPoll) {
+            throw new \LogicException('A transport callback cannot start a nested scheduler poll');
+        }
+        $this->inPoll = true;
+        try {
         foreach ($this->tasks as $index => &$state) {
             if ($state['wake'] > microtime(true)) {
                 continue;
@@ -76,11 +89,14 @@ final class ImageTransportScheduler
             $fiber = $state['fiber'];
             $state['wake'] = (float) ($fiber->isStarted() ? $fiber->resume() : $fiber->start());
             if ($fiber->isTerminated()) {
-                unset($this->tasks[$index]);
+                unset($this->tasks[$index], $this->ownedFibers[spl_object_id($fiber)]);
             }
         }
         unset($state);
         $this->pump();
+        } finally {
+            $this->inPoll = false;
+        }
     }
 
     public function join(): void
@@ -113,6 +129,11 @@ final class ImageTransportScheduler
         $this->handles = [];
         $this->jobs = [];
         $this->tasks = [];
+        $this->ownedFibers = [];
+        $this->laneCounts = [];
+        $this->laneHold = [];
+        $this->imageBytes = 0;
+        $this->nextJob = 0;
         curl_multi_close($this->multi);
         $this->multi = null;
         self::$active = null;
