@@ -21,15 +21,16 @@ final class RollingPool
      * @param callable():array<array-key,mixed> $await
      * @return array<array-key,mixed> results keyed and ordered as $items
      */
-    public static function run(array $items, callable $start, callable $await, int $cap): array
+    public static function run(array $items, callable $start, callable $await, int $cap, ?callable $canExpand = null): array
     {
         $cap = max(1, $cap);
+        $expanded = $canExpand === null || $canExpand();
         $pending = array_keys($items);
         $inFlight = [];
         $results = [];
 
-        $launch = function () use (&$pending, &$inFlight, $items, $start, $cap): void {
-            while ($pending !== [] && count($inFlight) < $cap) {
+        $launch = function () use (&$pending, &$inFlight, $items, $start, $cap, &$expanded): void {
+            while ($pending !== [] && count($inFlight) < ($expanded ? $cap : 1)) {
                 $key = array_shift($pending);
                 $inFlight[$key] = true;
                 $start($key, $items[$key]);
@@ -39,7 +40,9 @@ final class RollingPool
         $launch();
         while ($inFlight !== []) {
             $completed = $await();
-            if ($completed === []) {
+            $wasExpanded = $expanded;
+            $expanded = $expanded || ($canExpand !== null && $canExpand());
+            if ($completed === [] && !(!$wasExpanded && $expanded)) {
                 throw new \RuntimeException('rolling pool await returned no transfer completions');
             }
             foreach ($completed as $key => $result) {

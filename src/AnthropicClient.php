@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionLlm
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionLlm, PrefixPrimingLlm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -206,6 +206,23 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             fn (array $subset): array => $this->responseBatch($subset, true),
             defaultMaxTokens: $this->defaultMaxTokens,
         );
+    }
+
+    private bool $primeBatch = false;
+
+    public function canPrimeBatch(array $requests): bool
+    {
+        return true;
+    }
+
+    public function completePrimedBatch(array $requests): TextBatchResult
+    {
+        $this->primeBatch = true;
+        try {
+            return $this->completeBatch($requests);
+        } finally {
+            $this->primeBatch = false;
+        }
     }
 
     public function completeBatch(array $requests): TextBatchResult
@@ -655,8 +672,13 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     private function streamMulti(array $bodies): array
     {
         $raw = [];
+        $gate = $this->primeBatch && PromptCacheGate::applies($bodies) ? new PromptCacheGate() : null;
+        if ($gate !== null) {
+            $bodies = PromptCacheGate::order($bodies);
+        }
+        $firstKey = array_key_first($bodies);
 
-        $buildHandle = function (string|int $key, array $body) use (&$raw): \CurlHandle {
+        $buildHandle = function (string|int $key, array $body) use (&$raw, $gate, $firstKey): \CurlHandle {
             $raw[$key] = '';
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
@@ -671,8 +693,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 CURLOPT_TIMEOUT       => 600,
                 CURLOPT_LOW_SPEED_LIMIT => 1,
                 CURLOPT_LOW_SPEED_TIME  => 90,
-                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key) {
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $gate, $firstKey) {
                     $raw[$key] .= $chunk;
+                    if ($gate !== null && $key === $firstKey) {
+                        $gate->observe($raw[$key]);
+                    }
                     return strlen($chunk);
                 },
             ]);
@@ -681,7 +706,8 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
 
         // interpretStream marks severed streams and never-responded transfers
         // (status 0, the pool's CURLM-failure fallback) transient.
-        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw): array {
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, $gate): array {
+            $gate?->release();
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
@@ -693,7 +719,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             return $outcome;
         };
 
-        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, self::MAX_CONCURRENCY);
+        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, self::MAX_CONCURRENCY, $gate === null ? null : fn (): bool => $gate->ready());
     }
 
     /**
