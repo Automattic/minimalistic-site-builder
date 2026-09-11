@@ -26,7 +26,7 @@ namespace Automattic\SiteBuild;
  * intact. Only a genuinely mixed batch is serialized across transports, and it
  * still comes back keyed and ordered exactly as it went in.
  */
-final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm
+final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
 {
     /** Transport that most recently served a single completion. */
     private ?Llm $lastUsed = null;
@@ -218,6 +218,32 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBa
     }
 
     /** @param array<array-key,array<string,mixed>> $requests */
+    public function canPrimeBatch(array $requests): bool
+    {
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $transport = $this->transports[$name];
+            if (!$transport instanceof PrefixPrimingLlm || !$transport->canPrimeBatch($group)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public function completePrimedBatch(array $requests): TextBatchResult
+    {
+        $texts = [];
+        $degradations = [];
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $transport = $this->transports[$name];
+            $result = $transport instanceof PrefixPrimingLlm
+                ? $transport->completePrimedBatch($group)
+                : $transport->completeBatch($group);
+            $texts += $result->texts;
+            $degradations += $result->notes;
+        }
+        return new TextBatchResult($this->reorderLike($requests, $texts, 'completePrimedBatch'), $degradations);
+    }
+
     public function completeBatch(array $requests): TextBatchResult
     {
         $texts = [];
