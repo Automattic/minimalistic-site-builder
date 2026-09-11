@@ -67,7 +67,7 @@ final class ImageCrop
      * crop. Viewport-spanning images stay wide for every system; panoramic
      * makes those bands ultrawide. Mixed preserves the authored slot ratio.
      */
-    public static function generationRatio(mixed $raw, string $authored, string $pageContext = ''): string
+    public static function generationRatio(mixed $raw, string $authored, string $pageContext = '', ?string $slot = null): string
     {
         $current = GeminiImage::aspectRatio($authored);
         $crop = self::explicit($raw);
@@ -75,7 +75,7 @@ final class ImageCrop
             return $current;
         }
 
-        if (self::fullFrameSlot($current, $pageContext)) {
+        if ($slot === 'cover' || ($slot === null && self::fullFrameSlot($current, $pageContext))) {
             return $crop === 'panoramic' ? '21:9' : '16:9';
         }
 
@@ -94,9 +94,8 @@ final class ImageCrop
     /**
      * Whether a slot spans the viewport: an authored ultrawide ratio, or a
      * page context that names a full-bleed, edge-to-edge or background
-     * placement. Any context that names a background counts — the documented
-     * examples include "background of a call-to-action band", which no role
-     * word alone would classify as full-frame. Shared by the ratio choice
+     * placement. Only a page placement makes a background full-frame. Scene background
+     * details do not describe the page slot. Shared by the ratio choice
      * above and by ImageQa, which inspects only these images.
      *
      * @param string $ratio the authored ratio as GeminiImage::aspectRatio() spells it
@@ -104,7 +103,7 @@ final class ImageCrop
     public static function fullFrameSlot(string $ratio, string $pageContext): bool
     {
         return $ratio === '21:9' || preg_match(
-            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+cover|background)\b/iu',
+            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+cover|background\s+(?:of|for)\s+(?:a\s+|the\s+)?(?:hero|call-to-action|section|band)|(?:hero|section|page|cover)\s+background)\b/iu',
             $pageContext,
         ) === 1;
     }

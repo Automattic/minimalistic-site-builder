@@ -27,7 +27,7 @@ final class PreparedImageBatch
     {
         // This artifact establishes the minimum phase. HTML-first hosts must also finish fix-pages.
         $project->readJson('plugin/pages.json');
-        $specs = $project->readJson('images.json');
+        $specs = ImageSlot::annotate($project, $project->readJson('images.json'));
         $plan = $project->readJson('pages.json');
         $siteSpec = $project->readJson('siteSpec.json');
         $kind = DesignDirectionStep::imageKindFor($project);

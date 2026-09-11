@@ -114,7 +114,7 @@ test('initial generation delivers homepage and interior heroes, local placeholde
             $step = new GenerateImagesStep($client, $llm);
             $step->run($project);
             assert_eq(4, count($client->calls), 'homepage images, about hero, and shared footer only');
-            assert_eq(0, count($llm->imageCalls), 'deferred images never spend a vision call');
+            assert_eq(2, count($llm->imageCalls), 'only the planned heroes receive QA');
             $specs = array_column($project->readJson('images.json'), null, 'filename');
             foreach (['front.jpg', 'shared.jpg', 'about.jpg', 'footer.jpg'] as $filename) {
                 assert_eq('completed', $specs[$filename]['status'], $filename);
