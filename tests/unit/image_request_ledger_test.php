@@ -49,8 +49,8 @@ test('image attempt records include failures, size, asset, times and usage witho
     $ch = curl_init();
     $body = GeminiImage::buildBody('private prompt', ['sample_image_size' => '2K']);
     $raw = '{"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30},"private":"image bytes"}';
-    $method->invoke($client, $ch, $body, $raw, 'filtered', 'hero.jpg');
-    $method->invoke($client, $ch, $body, $raw, null, 'hero.jpg');
+    $method->invoke($client, $ch, $body, $raw, 'filtered', 'hero.jpg', null, $dir);
+    $method->invoke($client, $ch, $body, $raw, null, 'hero.jpg', null, $dir);
     assert_eq(2, $client->requestCount());
     assert_eq(1, $client->imageUsageTotals()['failed_attempts']);
     assert_eq(60, $client->imageUsageTotals()['total_tokens']);

@@ -86,3 +86,66 @@ test('section heading repair retains a quoted greater-than sign in the wrapper',
     assert_contains($tag . '<!-- wp:heading -->', $out);
     assert_contains('<h2 class="wp-block-heading">Our dishes</h2>', $out);
 });
+
+function saved_readability_input(): array
+{
+    $input = readability_input();
+    $input['theme_json']['settings']['typography']['fontSizes'][] = ['slug' => 'caption', 'size' => '0.75rem'];
+    $input['theme_json']['settings']['typography']['fontSizes'][] = ['slug' => 'heading', 'size' => '2.449rem'];
+    $input['theme_json']['styles']['elements']['h3']['typography']['fontSize'] = 'var:preset|font-size|heading';
+    return $input;
+}
+
+test('the saved menu paragraph uses body scale and retains short captions', function () {
+    $raw = file_get_contents(__DIR__ . '/../fixtures/tbilisi13-markup/menu-caption.html');
+    $short = '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Seasonal menu.</p><!-- /wp:paragraph -->';
+    $repairs = $warnings = [];
+    $out = SectionReadabilityContract::enforce($raw . $short, saved_readability_input(), 'page-menu--hero', $repairs, $warnings);
+    assert_eq(strip_tags($raw . $short), strip_tags($out));
+    assert_contains($short, $out);
+    assert_contains('has-body-font-size', $out);
+    assert_contains('authored="caption"; delivered="body"', implode("\n", $warnings));
+    $nextRepairs = $nextWarnings = [];
+    assert_eq($out, SectionReadabilityContract::enforce($out, saved_readability_input(), 'page-menu--hero', $nextRepairs, $nextWarnings));
+    assert_eq([], $nextWarnings);
+});
+
+test('the saved hero promotes peer headings and preserves their text and size', function () {
+    $raw = file_get_contents(__DIR__ . '/../fixtures/tbilisi13-markup/about-hero.html');
+    $input = saved_readability_input(); $input['section']['role'] = 'hero';
+    $repairs = $warnings = [];
+    $out = SectionReadabilityContract::enforce($raw, $input, 'page-about--hero', $repairs, $warnings);
+    assert_eq(strip_tags($raw), strip_tags($out));
+    assert_eq(3, substr_count($out, '<h2 '));
+    assert_eq(0, substr_count($out, '<h3 '));
+    assert_eq(3, substr_count($out, 'has-heading-font-size'));
+    $before = \Automattic\SiteBuild\BlockMarkup::parse($raw);
+    $after = \Automattic\SiteBuild\BlockMarkup::parse($out);
+    foreach ($before->indices() as $i) {
+        if ($before->name($i) === 'heading' && ($before->attrs($i)['level'] ?? 2) === 3) {
+            assert_eq(2, $after->attrs($i)['level']);
+            assert_eq('heading', $after->attrs($i)['fontSize']);
+        } else {
+            assert_eq($before->ownHtml($i), $after->ownHtml($i));
+            assert_eq($before->attrs($i), $after->attrs($i));
+        }
+    }
+    assert_eq([], $warnings);
+    $nextRepairs = $nextWarnings = [];
+    assert_eq($out, SectionReadabilityContract::enforce($out, $input, 'page-about--hero', $nextRepairs, $nextWarnings));
+    assert_eq([], $nextRepairs);
+});
+
+test('hero hierarchy repair preserves ambiguous size boundaries and existing heading trees', function () {
+    $input = readability_input(); $input['section']['role'] = 'hero';
+    $raw = '<!-- wp:heading {"level":1} --><h1>Title</h1><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":3} --><h3>Item</h3><!-- /wp:heading -->';
+    $repairs = $warnings = [];
+    assert_eq($raw, SectionReadabilityContract::enforce($raw, $input, 'page-about--hero', $repairs, $warnings));
+    assert_contains('authored=h3 below h1; delivered=unchanged', implode("\n", $warnings));
+    $input = saved_readability_input(); $input['section']['role'] = 'hero';
+    $nested = $raw . '<!-- wp:heading {"level":4} --><h4>Nested detail</h4><!-- /wp:heading -->';
+    $repairs = $warnings = [];
+    assert_eq($nested, SectionReadabilityContract::enforce($nested, $input, 'page-about--hero', $repairs, $warnings));
+    assert_eq([], $repairs);
+});

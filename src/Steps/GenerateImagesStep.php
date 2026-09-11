@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CooperativeTransport;
+use Automattic\SiteBuild\ImageTransportScheduler;
 use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\UiMockupImage;
@@ -427,60 +429,97 @@ final class GenerateImagesStep implements Step
             // pass below instead of marking it failed outright. Everything
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
-            $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs
-            ): void {
-                $i = $indices[$pos];
-                $filename = (string) $specs[$i]['filename'];
+            $overlap = $this->inspectImages && $this->llm instanceof VisionBatchLlm
+                && $this->llm instanceof CooperativeTransport
+                && $this->images instanceof CooperativeTransport
+                && $this->images->supportsCooperativeRequests()
+                && $this->llm->supportsCooperativeRequests($this->repairModel === null ? [] : ['model' => $this->repairModel]);
+            $ready = [];
+            $queued = [];
+            $done = false;
+            $enqueue = function (int $i) use ($overlap, &$ready, &$queued, &$specs): void {
+                if ($overlap && !isset($queued[$i]) && ($specs[$i]['status'] ?? '') === 'completed' && ImageQa::applies($specs[$i])) {
+                    $ready[] = $i;
+                    $queued[$i] = true;
+                }
+            };
+            $produce = function () use ($project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop,
+                &$resolved, &$repairs, $siteContext, $enqueue, &$done): void {
+                $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
+                    $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs, $enqueue
+                ): void {
+                    $i = $indices[$pos];
+                    $filename = (string) $specs[$i]['filename'];
 
-                if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
-                    $error = (string) ($result['error'] ?? 'safety-filtered');
-                    Narrator::write("    FILTERED {$filename}: {$error}\n");
-                    ImageLogger::log($filename, $this->requestLog(
-                        $specs[$i],
+                    if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
+                        $error = (string) ($result['error'] ?? 'safety-filtered');
+                        Narrator::write("    FILTERED {$filename}: {$error}\n");
+                        ImageLogger::log($filename, $this->requestLog(
+                            $specs[$i],
+                            $batchSpecs[$pos],
+                            $imageGrade,
+                            $imageCrop,
+                        ), [], $error);
+                        $repairs[$i] = $error;
+                        return;
+                    }
+
+                    $this->finish(
+                        $project,
+                        $specs,
+                        $i,
                         $batchSpecs[$pos],
+                        $result,
+                        $resolved,
                         $imageGrade,
                         $imageCrop,
-                    ), [], $error);
-                    $repairs[$i] = $error;
-                    return;
+                    );
+                    $project->writeJsonAtomic('images.json', $specs);
+                    $enqueue($i);
+                });
+
+                if ($repairs !== []) {
+                    $this->repairFiltered(
+                        $project,
+                        $specs,
+                        $repairs,
+                        $siteContext,
+                        $imageGrade,
+                        $imageCrop,
+                        $resolved,
+                    );
                 }
 
-                $this->finish(
-                    $project,
-                    $specs,
-                    $i,
-                    $batchSpecs[$pos],
-                    $result,
-                    $resolved,
-                    $imageGrade,
-                    $imageCrop,
-                );
-                $project->writeJsonAtomic('images.json', $specs);
-            });
-
-            if ($repairs !== []) {
-                $this->repairFiltered(
-                    $project,
-                    $specs,
-                    $repairs,
-                    $siteContext,
-                    $imageGrade,
-                    $imageCrop,
-                    $resolved,
-                );
-            }
-
-            if ($this->inspectImages && $this->llm instanceof VisionLlm) {
-                $this->inspectDelivered(
-                    $project,
-                    $specs,
-                    $indices,
-                    $siteContext,
-                    $imageGrade,
-                    $imageCrop,
-                );
-                $project->writeJsonAtomic('images.json', $specs);
+                foreach ($indices as $i) {
+                    $enqueue($i);
+                }
+                $done = true;
+            };
+            if ($overlap) {
+                $scheduler = ImageTransportScheduler::current() ?? new ImageTransportScheduler();
+                $scheduler->run(function () use ($scheduler, $produce, &$ready, &$done, $project, &$specs,
+                    $siteContext, $imageGrade, $imageCrop): void {
+                    $scheduler->spawn($produce);
+                    for ($worker = 0; $worker < self::MAX_QA_IMAGES; $worker++) {
+                        $scheduler->spawn(function () use (&$ready, &$done, $project, &$specs, $siteContext, $imageGrade, $imageCrop): void {
+                            while (!$done || $ready !== []) {
+                                if ($ready === []) {
+                                    ImageTransportScheduler::pause();
+                                    continue;
+                                }
+                                $i = array_shift($ready);
+                                $this->inspectDelivered($project, $specs, [$i], $siteContext, $imageGrade, $imageCrop);
+                                $project->writeJsonAtomic('images.json', $specs);
+                            }
+                        });
+                    }
+                });
+            } else {
+                $produce();
+                if ($this->inspectImages && $this->llm instanceof VisionLlm) {
+                    $this->inspectDelivered($project, $specs, $indices, $siteContext, $imageGrade, $imageCrop);
+                    $project->writeJsonAtomic('images.json', $specs);
+                }
             }
             $this->deliverReused($project, $specs, $aliases, $resolved);
         }
@@ -752,7 +791,8 @@ final class GenerateImagesStep implements Step
         string $imageCrop = '',
         ?string $subject = null,
     ): array {
-        $ratio = ImageCrop::generationRatio(
+        $isSiteLogo = ($spec['role'] ?? '') === 'site-logo';
+        $ratio = $isSiteLogo ? '1:1' : ImageCrop::generationRatio(
             $imageCrop,
             (string) ($spec['aspectRatio'] ?? 'landscape'),
             (string) ($spec['pageContext'] ?? ''),
@@ -770,7 +810,7 @@ final class GenerateImagesStep implements Step
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
-                imageCrop: $imageCrop,
+                imageCrop: $isSiteLogo ? '' : $imageCrop,
                 imageKind: ($spec['role'] ?? '') === 'site-logo' ? 'photo' : (string) ($spec['image_kind'] ?? ''),
                 screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
@@ -1137,46 +1177,57 @@ final class GenerateImagesStep implements Step
             $chunks[] = $chunk;
         }
         foreach ($chunks as $chunk) {
-            $requests = [];
-            foreach ($chunk as $i => $spec) {
-                $filename = (string) $spec['filename'];
-                try {
-                    $prompt = $this->renderer->render('image-qa.md', [
-                        'subject' => (string) ($spec['subject'] ?? ''),
-                        'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
-                        'text_rule' => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
-                    ]);
-                } catch (\Throwable $e) {
-                    Narrator::write("    Image check {$filename} unavailable: {$e->getMessage()}\n");
-                    continue;
-                }
-                $requests[$i] = [
-                    'prompt' => $prompt,
-                    'image_bytes' => $project->readText('theme/assets/' . $filename),
-                    'mime' => GeminiImage::mimeForFilename($filename),
-                    'max_tokens' => 300,
-                    'log_label' => 'image-qa-' . $filename,
-                ] + ($this->repairModel !== null ? ['model' => $this->repairModel] : []);
+            $scheduler = ImageTransportScheduler::current();
+            $reserved = 0;
+            foreach ($chunk as $spec) {
+                $reserved += (int) filesize($project->path('theme/assets/' . $spec['filename']));
             }
-            $answers = [];
-            if ($this->llm instanceof VisionBatchLlm) {
-                try {
-                    $answers = $this->llm->completeImageBatch($requests);
-                } catch (\Throwable $e) {
-                    Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
-                }
-            } elseif ($this->llm instanceof VisionLlm) {
-                foreach ($requests as $i => $req) {
+            $scheduler?->reserveImageBytes($reserved);
+            try {
+                $requests = [];
+                foreach ($chunk as $i => $spec) {
+                    $filename = (string) $spec['filename'];
                     try {
-                        $answers[$i] = $this->llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
-                            array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                        $prompt = $this->renderer->render('image-qa.md', [
+                            'subject' => (string) ($spec['subject'] ?? ''),
+                            'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
+                            'text_rule' => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
+                        ]);
                     } catch (\Throwable $e) {
-                        Narrator::write("    Image check {$req['log_label']} unavailable: {$e->getMessage()}\n");
+                        Narrator::write("    Image check {$filename} unavailable: {$e->getMessage()}\n");
+                        continue;
+                    }
+                    $requests[$i] = [
+                        'prompt' => $prompt,
+                        'image_bytes' => $project->readText('theme/assets/' . $filename),
+                        'mime' => GeminiImage::mimeForFilename($filename),
+                        'max_tokens' => 300,
+                        'log_label' => 'image-qa-' . $filename,
+                    ] + ($this->repairModel !== null ? ['model' => $this->repairModel] : []);
+                }
+                $answers = [];
+                if ($this->llm instanceof VisionBatchLlm) {
+                    try {
+                        $answers = $this->llm->completeImageBatch($requests);
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
+                    }
+                } elseif ($this->llm instanceof VisionLlm) {
+                    foreach ($requests as $i => $req) {
+                        try {
+                            $answers[$i] = $this->llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
+                                array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                        } catch (\Throwable $e) {
+                            Narrator::write("    Image check {$req['log_label']} unavailable: {$e->getMessage()}\n");
+                        }
                     }
                 }
-            }
-            foreach ($requests as $i => $_) {
-                $verdicts[$i] = isset($answers[$i]) ? ImageQa::verdict($answers[$i]) : null;
+                foreach ($requests as $i => $_) {
+                    $verdicts[$i] = isset($answers[$i]) ? ImageQa::verdict($answers[$i]) : null;
+                }
+            } finally {
+                unset($requests);
+                $scheduler?->releaseImageBytes($reserved);
             }
         }
         return $verdicts;

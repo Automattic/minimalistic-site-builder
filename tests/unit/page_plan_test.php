@@ -734,18 +734,16 @@ test('PagePlanStep::normalize does not report adjacency between invalid archetyp
     }
 });
 
-test('PagePlanStep::normalize rejects an interior page opening with a full-bleed cover', function () {
-    try {
-        PagePlanStep::normalize([
-            plan_section(), // full-bleed-cover first
-            plan_section(['slug' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
-        ], front: false);
-        assert_true(false, 'expected the interior plan to be rejected');
-    } catch (RuntimeException $e) {
-        assert_contains('INTERIOR page', $e->getMessage());
-        assert_contains('full-bleed-cover', $e->getMessage());
-        assert_contains('COMPACT', $e->getMessage());
-    }
+test('PagePlanStep::normalize gives an interior cover a compact composition', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['image_count' => 1]),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
+    ], false, null, [], $warnings, 'contact');
+    assert_eq('asymmetric-split', $sections[0]['layout_archetype']);
+    assert_eq('image', $sections[0]['background']);
+    assert_eq(1, $sections[0]['image_count']);
+    assert_contains("pages[slug='contact'].sections[0].layout_archetype", implode("\n", $warnings));
 });
 
 test('PagePlanStep::normalize allows a full-bleed cover opening on the front page and deeper in interior pages', function () {
@@ -1502,7 +1500,7 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan enforces the compact interior opening through repair and mechanical fallback', function () {
+test('page-plan enforces the compact interior opening without a model repair', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A tavern']);
@@ -1513,14 +1511,9 @@ test('page-plan enforces the compact interior opening through repair and mechani
     ]]));
 
     $llm = new FakeLlm();
-    // Home may open with a cover…
+    // The homepage keeps its cover.
     $llm->queueJson(['sections' => [plan_section()]]);
-    // …the interior page may not…
-    $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'visit-hero']),
-        plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-    ]]);
-    // …and the repair insists on the cover, so the mechanical fallback demotes it.
+    // The interior page uses a compact composition.
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'visit-hero']),
         plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
@@ -1535,8 +1528,8 @@ test('page-plan enforces the compact interior opening through repair and mechani
         $plan['pages'][1]['sections'][0]['layout_archetype'] !== 'full-bleed-cover',
         'interior opening demoted to a compact archetype'
     );
-    assert_eq(3, count($llm->calls));
-    assert_contains('INTERIOR page', $llm->calls[2]['prompt']);
+    assert_eq(2, count($llm->calls));
+    assert_eq(0, $llm->remaining());
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

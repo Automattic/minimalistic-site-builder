@@ -120,3 +120,29 @@ test('card surface repair uses the explicit theme text color', function () {
         assert_eq('contrast', \Automattic\SiteBuild\BlockMarkup::parse($out)->attrs(0)['backgroundColor']);
     }
 });
+
+test('saved text-only borderless groups lose card markers with all text and siblings intact', function () {
+    foreach (['home-visit-contact' => 3, 'about-hero' => 3, 'visit-location-and-hours' => 3, 'contact-contact-details' => 2] as $file => $count) {
+        $raw = file_get_contents(__DIR__ . '/../fixtures/tbilisi13-markup/' . $file . '.html');
+        $sibling = '<!-- wp:paragraph --><p>Keep this sibling unchanged.</p><!-- /wp:paragraph -->';
+        $repairs = $warnings = [];
+        assert_eq($count, count(CardStyleContract::enforce($raw, 'borderless', $file)['warnings']));
+        $out = CardPreparation::enforce($raw . $sibling, 'borderless', $file, $repairs, $warnings);
+        assert_eq([], CardStyleContract::enforce($out, 'borderless', $file)['warnings']);
+        assert_eq(strip_tags($raw . $sibling), strip_tags($out));
+        assert_contains($sibling, $out);
+        assert_true(!str_contains($out, 'card-style--borderless'));
+        assert_contains("file='theme/parts/{$file}.html'; block=", implode("\n", $warnings));
+        assert_contains('authored=["card-style--borderless"]; delivered=removed', implode("\n", $warnings));
+        $nextRepairs = $nextWarnings = [];
+        assert_eq($out, CardPreparation::enforce($out, 'borderless', $file, $nextRepairs, $nextWarnings));
+        assert_eq([], $nextWarnings);
+    }
+});
+
+test('a borderless image card retains its image hooks and bytes', function () {
+    $raw = str_replace(['card-style--flush', ' card-flush'], ['card-style--borderless', ''], preparation_card(true));
+    $repairs = $warnings = [];
+    assert_eq($raw, CardPreparation::enforce($raw, 'borderless', 'image-card', $repairs, $warnings));
+    assert_eq([], $warnings);
+});

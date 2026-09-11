@@ -1472,8 +1472,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * position rather than trusted to model output. Art-direction fields
      * (layout_archetype, background, vertical_density, text_placement, handoff) are strict:
      * unknown values, a missing handoff, adjacent duplicate archetypes, too
-     * many card grids, or an interior page opening at homepage-cover scale
-     * are collected and thrown together in ONE message, so the single repair
+     * many card grids are collected in one message, so the single repair
      * call sees every violation at once. One pairing is coerced instead of
      * rejected: a non-opening 'full-bleed-cover' section is forced onto the
      * 'image' background with a value-loss warning, because that archetype
@@ -1715,18 +1714,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $out = self::restrictOffsetGrid($out, $allowOffsetGrid, $front, $warnings, $pageSlug);
-        $out = self::reconcileMediaAssignments($out, $frontProjection !== null, $warnings, $pageSlug, $allowOffsetGrid);
-
-        // An interior page that opens with a full-viewport cover is a second
-        // homepage, not an inner page (the prompt demands a COMPACT opening).
-        // The escape hatch for a deliberately image-led opening is explicit:
-        // background "image" on any compact archetype renders a full-bleed
-        // image band without homepage-hero scale.
-        if (!$front && ($out[0]['layout_archetype'] ?? '') === 'full-bleed-cover') {
-            $errors[] = "page-plan: the FIRST section '{$out[0]['slug']}' of this INTERIOR page uses "
-                . "layout_archetype 'full-bleed-cover' — interior pages open with a COMPACT hero, not a second "
-                . 'homepage hero; pick a compact archetype (use background "image" if the opening should be image-led)';
+        if (!$front) {
+            $out = self::withCompactInteriorHero($out, $warnings, $pageSlug);
         }
+        $out = self::reconcileMediaAssignments($out, $frontProjection !== null, $warnings, $pageSlug, $allowOffsetGrid);
 
         // Repair surface budgets before a model request. Preserve structural images and the assigned hero.
         if ($errors === []) {
@@ -1745,6 +1736,47 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
+    }
+
+    /** Preserve the interior hero content in a compact composition. */
+    private static function withCompactInteriorHero(array $sections, array &$warnings, string $pageSlug): array
+    {
+        if (($sections[0]['layout_archetype'] ?? '') !== 'full-bleed-cover') {
+            return $sections;
+        }
+
+        $count = (int) $sections[0]['image_count'];
+        $delivered = 'asymmetric-split';
+        $bestScore = PHP_INT_MAX;
+        foreach (['asymmetric-split', 'equal-card-grid', 'bento-grid'] as $candidate) {
+            if (SectionComposition::metadata($candidate)['max_images'] < $count) {
+                continue;
+            }
+            $trial = $sections;
+            $trial[0]['layout_archetype'] = $candidate;
+            $score = self::layoutErrorCount($trial);
+            if ($score < $bestScore) {
+                $delivered = $candidate;
+                $bestScore = $score;
+            }
+        }
+
+        $sections[0]['layout_archetype'] = $delivered;
+        $sections[0]['content_notes'] = trim((string) ($sections[0]['content_notes'] ?? ''))
+            . " Interior hero correction: use the compact {$delivered} recipe instead of the earlier full-bleed-cover layout."
+            . " Preserve all text and all {$count} planned images with their original subjects."
+            . ' Keep the image background as a compact band. Omit the earlier full-viewport height.';
+        $sections[0]['handoff'] = self::withSeamCorrection($sections[0]['handoff'] ?? '',
+            "this interior hero now uses compact {$delivered}; preserve its background and its next section");
+        $path = self::sectionPath($pageSlug, 0);
+        $warnings[] = self::valueLossWarning($path . '.layout_archetype', 'full-bleed-cover', $delivered,
+            'replaced the interior hero layout with a compact composition; preserved all text, image subjects, and sibling sections');
+        if (strtolower((string) $sections[0]['type']) === 'full-bleed-cover') {
+            $warnings[] = self::valueLossWarning($path . '.type', $sections[0]['type'], 'hero',
+                'replaced the obsolete layout name with the section role');
+            $sections[0]['type'] = 'hero';
+        }
+        return $sections;
     }
 
     /**
@@ -2421,6 +2453,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
                 . '. Honor it. A contact page is brief — ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
                 . ' sections total including the hero, never more. The shared header and footer do not count. '
+                . 'Use a compact first section. Never use full-bleed-cover for the first section.'
+                . ' Keep an image-led opener on the image background with a compact archetype. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
                 . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'

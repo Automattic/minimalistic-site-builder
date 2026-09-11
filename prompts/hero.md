@@ -70,3 +70,4 @@ Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
 {{block_markup_output_contract}}
 
 Use the `body` preset for a paragraph longer than 120 characters. Keep `lead` for a short introduction.
+Use h2 for peer headings below the hero h1. Keep their assigned font-size preset.

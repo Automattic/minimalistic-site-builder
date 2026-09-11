@@ -542,7 +542,7 @@ final class GeminiImage
     ): array
     {
         $sleeper ??= static function (int $seconds): void {
-            sleep($seconds);
+            ImageTransportScheduler::pause($seconds);
         };
         $results = [];
         $succeeded = 0;

@@ -46,6 +46,7 @@ final class BuildReport
     private int $imagePlaceholders = 0;
 
     private ?array $imageRequests = null;
+    private int $preparedImageReuse = 0;
     private int $localImages = 0;
     private int $imagesReused = 0;
 
@@ -128,6 +129,9 @@ final class BuildReport
         $this->imageRequests = $requests;
         $this->localImages = $localImages;
     }
+
+    /** Record raw results consumed without a new provider request. */
+    public function setPreparedImageReuse(int $count): void { $this->preparedImageReuse = $count; }
 
     /** Record separate assets that share an equivalent provider request. */
     public function setImageReuse(int $reused): void
@@ -419,6 +423,7 @@ final class BuildReport
                 'placeholders' => $this->imagePlaceholders,
                 'local_renders' => $this->localImages,
                 'provider_requests' => $this->imageRequests,
+                'prepared_results_consumed' => $this->preparedImageReuse,
             ] : null,
             'images_reused' => $this->imagesReused,
             'steps'         => array_map(

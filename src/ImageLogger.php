@@ -32,14 +32,20 @@ final class ImageLogger
     /** Append one provider attempt. Keep image bytes and credentials out of the record. */
     public static function attempt(array $record): void
     {
-        if (self::$disabled || self::$dir === null) {
+        self::attemptIn(self::$dir, $record);
+    }
+
+    /** Keep a batch ledger in its original directory while other image tasks run. */
+    public static function attemptIn(?string $directory, array $record): void
+    {
+        if (self::$disabled || $directory === null) {
             return;
         }
         try {
-            if (!is_dir(self::$dir) && !@mkdir(self::$dir, 0777, true) && !is_dir(self::$dir)) {
+            if (!is_dir($directory) && !@mkdir($directory, 0777, true) && !is_dir($directory)) {
                 return;
             }
-            @file_put_contents(self::$dir . '/attempts.jsonl',
+            @file_put_contents($directory . '/attempts.jsonl',
                 json_encode($record, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n", FILE_APPEND | LOCK_EX);
         } catch (\Throwable) {
             // A log failure must not abort a build.
