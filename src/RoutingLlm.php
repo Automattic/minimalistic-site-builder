@@ -26,7 +26,7 @@ namespace Automattic\SiteBuild;
  * intact. Only a genuinely mixed batch is serialized across transports, and it
  * still comes back keyed and ordered exactly as it went in.
  */
-final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLlm
+final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm, CooperativeTransport
 {
     /** Transport that most recently served a single completion. */
     private ?Llm $lastUsed = null;
@@ -67,6 +67,12 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLl
      * the transport that would ACTUALLY serve it rather than a nominal default
      * the request never reaches.
      */
+    public function supportsCooperativeRequests(array $opts = []): bool
+    {
+        $transport = $this->transports[$this->transportFor($opts['model'] ?? null)];
+        return $transport instanceof CooperativeTransport && $transport->supportsCooperativeRequests($opts);
+    }
+
     public function transportFor(?string $model): string
     {
         $key = strtolower(trim((string) $model));
@@ -155,6 +161,34 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLl
         return $llm->completeWithImage($prompt, $imageBytes, $mime, $opts);
     }
 
+    /** @inheritDoc */
+    public function completeImageBatch(array $requests): array
+    {
+        $answers = array_fill_keys(array_keys($requests), null);
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $llm = $this->transports[$name];
+            if ($llm instanceof VisionBatchLlm) {
+                try {
+                    $answers = array_replace($answers, $llm->completeImageBatch($group));
+                } catch (\Throwable $e) {
+                    Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
+                }
+            } elseif ($llm instanceof VisionLlm) {
+                foreach ($group as $key => $req) {
+                    try {
+                        $answers[$key] = $llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
+                            array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image check {$key} unavailable: {$e->getMessage()}\n");
+                    }
+                }
+            } else {
+                Narrator::write("    Image checks unavailable: {$name} cannot carry an image.\n");
+            }
+        }
+        return $answers;
+    }
+
     /**
      * @param array<array-key,array<string,mixed>> $requests
      * @return array<array-key,array<mixed>>
@@ -190,6 +224,32 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLl
     }
 
     /** @param array<array-key,array<string,mixed>> $requests */
+    public function canPrimeBatch(array $requests): bool
+    {
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $transport = $this->transports[$name];
+            if (!$transport instanceof PrefixPrimingLlm || !$transport->canPrimeBatch($group)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public function completePrimedBatch(array $requests): TextBatchResult
+    {
+        $texts = [];
+        $degradations = [];
+        foreach ($this->groupByTransport($requests) as $name => $group) {
+            $transport = $this->transports[$name];
+            $result = $transport instanceof PrefixPrimingLlm
+                ? $transport->completePrimedBatch($group)
+                : $transport->completeBatch($group);
+            $texts += $result->texts;
+            $degradations += $result->notes;
+        }
+        return new TextBatchResult($this->reorderLike($requests, $texts, 'completePrimedBatch'), $degradations);
+    }
+
     public function completeBatch(array $requests): TextBatchResult
     {
         $texts = [];

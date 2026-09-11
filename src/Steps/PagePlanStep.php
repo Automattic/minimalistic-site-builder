@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ActionCapabilities;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -307,6 +308,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'type'             => ['type' => 'string'],
             'purpose'          => ['type' => 'string'],
             'content_notes'    => ['type' => 'string'],
+            'image_count'      => ['type' => 'integer', 'enum' => range(0, 12)],
             'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
@@ -326,9 +328,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         'additionalProperties' => false,
                         'required'             => ['label', 'intent', 'destination'],
                         'properties'           => [
-                            'label'       => ['type' => 'string', 'minLength' => 1, 'maxLength' => 80],
-                            'intent'      => ['type' => 'string', 'minLength' => 1],
-                            'destination' => ['type' => 'string', 'minLength' => 1],
+                            'label'       => ['type' => 'string', 'description' => 'Use 1 to 80 characters.'],
+                            'intent'      => ['type' => 'string', 'description' => 'Use a non-empty intent.'],
+                            'destination' => ['type' => 'string', 'description' => 'Use a non-empty destination.'],
                         ],
                     ],
                 ],
@@ -441,11 +443,15 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $designDirection = DesignDirectionStep::readFor($project);
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
+            'min_banded_sections' => (string) self::MIN_BANDED_SECTIONS,
+            'max_non_base_sections' => (string) self::MAX_NON_BASE_SECTIONS,
             'site_spec'        => SiteSpecStep::promptText($project),
+            'action_capabilities' => ActionCapabilities::prompt($project->readJson('siteSpec.json')),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => $designDirection,
             'item_pattern'     => DesignDirectionStep::itemPatternFor($project),
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
+            'plan_budgets'     => self::planBudgets(),
             // One footer part renders below every page here, and these requests
             // fan out concurrently blind to each other — so this is the only
             // point where the MODEL can be steered off it. The deterministic
@@ -456,11 +462,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ];
 
         $requests = [];
+        $prefix = $this->renderer->render('page-plan.md', $shared);
         $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
             $front = (bool) $page['front'];
             $requests[$page['slug']] = $this->withOptions([
-                'prompt' => $this->renderer->render('page-plan.md', $shared + [
+                'cached_prefixes' => [$prefix],
+                'prompt' => $this->renderer->render('page-plan-brief.md', [
                     'page_title'             => (string) $page['title'],
                     'page_slug'              => (string) $page['slug'],
                     'page_purpose'           => (string) $page['purpose'],
@@ -468,7 +476,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                         $page,
                         (bool) ($meta['form_placeholders'] ?? false),
                     ),
-                    'plan_budgets'           => self::planBudgets(),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -773,6 +780,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // path has produced its final page/section set. Recheck the sole
         // eligible action now and null it atomically when its target vanished.
         $out = self::validatePrimaryActionAnchors($out, $warnings);
+        $out = self::reconcileActionCapabilities(
+            $out, $siteSpec, $warnings, (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false),
+        );
 
         $project->writeText('logs/' . self::REPORT_FILE, $successfulRepairs === []
             ? "No semantics-preserving page-plan repairs were needed.\n"
@@ -924,7 +934,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     }
                     continue;
                 }
-                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)) {
+                if (in_array($archetype, ['bento-grid', 'pricing-tiers'], true)
+                    || ($archetype === 'equal-card-grid' && (int) ($section['image_count'] ?? 0) > 0)
+                ) {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = ItemPattern::DEFAULT;
                     if ($explicit !== ItemPattern::DEFAULT) {
                         if ($explicit !== null) {
@@ -1139,7 +1151,19 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private function plannedPages(Project $project, array $pages, array $results): array
     {
         $siteSpec = $project->readJson('siteSpec.json');
-        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $sitePages = array_column(self::flattenPages($siteSpec), null, 'slug');
+        $savedPages = $project->exists('pages.json') ? $project->readJson('pages.json')['pages'] ?? [] : [];
+        foreach ($savedPages as $savedPage) {
+            $slug = is_array($savedPage) ? ($savedPage['slug'] ?? '') : '';
+            if (isset($sitePages[$slug]) && is_array($savedPage['sections'] ?? null)) {
+                $sitePages[$slug]['sections'] = $savedPage['sections'];
+            }
+        }
+        $actionContext = self::withPlannedSectionAnchors(
+            self::primaryActionContext($siteSpec, array_values($sitePages)),
+            array_values($sitePages),
+            array_replace($sitePages, $results),
+        );
         $allowOffsetGrid = self::allowOffsetGridFor($project);
         $warnings = [];
         $repairs = [];
@@ -1183,6 +1207,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out,
             DesignDirectionStep::itemPatternFor($project),
             $repairs,
+        );
+        $contextPages = array_replace(array_column($sitePages, null, 'slug'), array_column($out, null, 'slug'));
+        $out = self::reconcileActionCapabilities(
+            $out, $siteSpec, $warnings, (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false),
+            array_values($contextPages),
         );
         $project->addWarnings($this->id(), $warnings);
         return $out;
@@ -1250,6 +1279,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $requests[$slug] = $this->withOptions([
                 'prompt'      => (string) $prompts[$slug]['prompt']
                     . self::repairSuffix($rejection['plan'], $rejection['errors']),
+                'cached_prefixes' => $prompts[$slug]['cached_prefixes'],
                 'log_label'   => $this->id() . "-{$slug}-repair",
                 'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
             ]);
@@ -1442,8 +1472,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * position rather than trusted to model output. Art-direction fields
      * (layout_archetype, background, vertical_density, text_placement, handoff) are strict:
      * unknown values, a missing handoff, adjacent duplicate archetypes, too
-     * many card grids, or an interior page opening at homepage-cover scale
-     * are collected and thrown together in ONE message, so the single repair
+     * many card grids are collected in one message, so the single repair
      * call sees every violation at once. One pairing is coerced instead of
      * rejected: a non-opening 'full-bleed-cover' section is forced onto the
      * 'image' background with a value-loss warning, because that archetype
@@ -1604,6 +1633,22 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $sectionPath,
             );
 
+            if (($section['primary_action'] ?? null) !== null && $primaryAction === null) {
+                $section['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                    . ' Action correction: omit the earlier unsupported action. Follow ACTION CAPABILITIES.';
+            }
+
+            $authoredImageCount = $section['image_count'] ?? 0;
+            $imageCount = is_numeric($authoredImageCount) ? max(0, min(12, (int) $authoredImageCount)) : 0;
+            if (!is_numeric($authoredImageCount) || (float) $authoredImageCount !== (float) $imageCount) {
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, count($out)) . '.image_count',
+                    $authoredImageCount,
+                    $imageCount,
+                    'replaced an image count outside the supported integer range 0..12',
+                );
+            }
+
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -1611,6 +1656,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
+                'image_count'      => $imageCount,
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
@@ -1668,24 +1714,226 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $out = self::restrictOffsetGrid($out, $allowOffsetGrid, $front, $warnings, $pageSlug);
+        if (!$front) {
+            $out = self::withCompactInteriorHero($out, $warnings, $pageSlug);
+        }
+        $out = self::reconcileMediaAssignments($out, $frontProjection !== null, $warnings, $pageSlug, $allowOffsetGrid);
 
-        // An interior page that opens with a full-viewport cover is a second
-        // homepage, not an inner page (the prompt demands a COMPACT opening).
-        // The escape hatch for a deliberately image-led opening is explicit:
-        // background "image" on any compact archetype renders a full-bleed
-        // image band without homepage-hero scale.
-        if (!$front && ($out[0]['layout_archetype'] ?? '') === 'full-bleed-cover') {
-            $errors[] = "page-plan: the FIRST section '{$out[0]['slug']}' of this INTERIOR page uses "
-                . "layout_archetype 'full-bleed-cover' — interior pages open with a COMPACT hero, not a second "
-                . 'homepage hero; pick a compact archetype (use background "image" if the opening should be image-led)';
+        // Repair surface budgets before a model request. Preserve structural images and the assigned hero.
+        if ($errors === []) {
+            $out = self::withSurfaceRestraint($out, $pageSlug, $warnings, $front && $frontProjection !== null);
+            $out = self::withPacingBand($out, $pageSlug, $warnings);
         }
 
-        // Report every violation at once so the single repair call can fix them all.
-        $errors = array_merge($errors, self::varietyErrors($out));
+        $checkLayouts = true;
+        if ($errors === []) {
+            $out = self::withCompatibleLayoutVariety($out, $front && $frontProjection !== null, $warnings, $pageSlug, $allowOffsetGrid);
+            $checkLayouts = self::layoutErrorCount($out) === 0;
+        }
+        // A media constraint can require repeated layouts. Retain the content.
+        $errors = array_merge($errors, self::varietyErrors($out, $checkLayouts));
         if ($errors !== []) {
             throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
+    }
+
+    /** Preserve the interior hero content in a compact composition. */
+    private static function withCompactInteriorHero(array $sections, array &$warnings, string $pageSlug): array
+    {
+        if (($sections[0]['layout_archetype'] ?? '') !== 'full-bleed-cover') {
+            return $sections;
+        }
+
+        $count = (int) $sections[0]['image_count'];
+        $delivered = 'asymmetric-split';
+        $bestScore = PHP_INT_MAX;
+        foreach (['asymmetric-split', 'equal-card-grid', 'bento-grid'] as $candidate) {
+            if (!self::archetypeSupportsImageCount($candidate, $count)) {
+                continue;
+            }
+            $trial = $sections;
+            $trial[0]['layout_archetype'] = $candidate;
+            $score = self::layoutErrorCount($trial);
+            if ($score < $bestScore) {
+                $delivered = $candidate;
+                $bestScore = $score;
+            }
+        }
+
+        $sections[0]['layout_archetype'] = $delivered;
+        $sections[0]['content_notes'] = trim((string) ($sections[0]['content_notes'] ?? ''))
+            . " Interior hero correction: use the compact {$delivered} recipe instead of the earlier full-bleed-cover layout."
+            . " Preserve all text and all {$count} planned images with their original subjects."
+            . ' Keep the image background as a compact band. Omit the earlier full-viewport height.';
+        $sections[0]['handoff'] = self::withSeamCorrection($sections[0]['handoff'] ?? '',
+            "this interior hero now uses compact {$delivered}; preserve its background and its next section");
+        $path = self::sectionPath($pageSlug, 0);
+        $warnings[] = self::valueLossWarning($path . '.layout_archetype', 'full-bleed-cover', $delivered,
+            'replaced the interior hero layout with a compact composition; preserved all text, image subjects, and sibling sections');
+        if (strtolower((string) $sections[0]['type']) === 'full-bleed-cover') {
+            $warnings[] = self::valueLossWarning($path . '.type', $sections[0]['type'], 'hero',
+                'replaced the obsolete layout name with the section role');
+            $sections[0]['type'] = 'hero';
+        }
+        return $sections;
+    }
+
+    /**
+     * Preserve image requirements before the section model selects markup.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function reconcileMediaAssignments(
+        array $sections,
+        bool $frontHeroLocked = false,
+        array &$warnings = [],
+        string $pageSlug = '',
+        bool $allowOffsetGrid = true,
+    ): array {
+        foreach ($sections as $index => $section) {
+            $count = (int) ($section['image_count'] ?? 0);
+            $authored = (string) ($section['layout_archetype'] ?? '');
+            if (!SectionComposition::isKnown($authored)
+                || ($frontHeroLocked && $index === 0)
+                || self::archetypeSupportsImageCount($authored, $count)
+            ) {
+                continue;
+            }
+            $candidates = [];
+            foreach (['equal-card-grid', 'bento-grid', 'offset-grid', 'asymmetric-split'] as $candidate) {
+                if (!self::archetypeEligible($candidate, $allowOffsetGrid)
+                    || !self::archetypeSupportsImageCount($candidate, $count)
+                ) {
+                    continue;
+                }
+                $candidates[] = $candidate;
+                if ($candidate !== ($sections[$index - 1]['layout_archetype'] ?? null)
+                    && $candidate !== ($sections[$index + 1]['layout_archetype'] ?? null)
+                ) {
+                    break;
+                }
+            }
+            $delivered = end($candidates);
+            if ($delivered === false) {
+                continue;
+            }
+            $sections[$index]['layout_archetype'] = $delivered;
+            $sections[$index]['content_notes'] = trim((string) ($section['content_notes'] ?? '')
+                . " Build correction: preserve all {$count} requested images and their subjects."
+                . " Use the {$delivered} recipe. This assignment replaces the earlier {$authored} structure."
+                . ($count > 0 ? ' Use image cards instead of text-only rows or ruled tables.' : ' Keep the section without images.'));
+            $sections[$index]['handoff'] = self::withSeamCorrection(
+                $section['handoff'] ?? '',
+                "this section now uses {$delivered} to preserve its {$count} images",
+            );
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($pageSlug, (int) $index) . '.layout_archetype',
+                $authored,
+                $delivered,
+                "replaced an incompatible composition to preserve {$count} requested images",
+            );
+        }
+        return $sections;
+    }
+
+    /** Change only layout assignments. Preserve each section and its image count. */
+    private static function withCompatibleLayoutVariety(
+        array $sections,
+        bool $lockedHero,
+        array &$warnings,
+        string $pageSlug,
+        bool $allowOffsetGrid,
+    ): array {
+        $original = $sections;
+        $score = self::layoutErrorCount($sections);
+        $bound = count($sections) * 2;
+        for ($pass = 0; $score > 0 && $pass < $bound; $pass++) {
+            $best = null;
+            $bestScore = $score;
+            foreach ($sections as $index => $section) {
+                if ($lockedHero && $index === 0) {
+                    continue;
+                }
+                foreach (self::ARCHETYPES as $candidate) {
+                    if ($candidate === 'full-bleed-cover'
+                        || !self::archetypeEligible($candidate, $allowOffsetGrid)
+                        || !self::archetypeSupportsImageCount($candidate, (int) ($section['image_count'] ?? 0))
+                    ) {
+                        continue;
+                    }
+                    $trial = $sections;
+                    $trial[$index]['layout_archetype'] = $candidate;
+                    $trialScore = self::layoutErrorCount($trial);
+                    if ($trialScore < $bestScore) {
+                        $best = $trial;
+                        $bestScore = $trialScore;
+                    }
+                }
+            }
+            if ($best === null) {
+                break;
+            }
+            $sections = $best;
+            $score = $bestScore;
+        }
+        foreach ($sections as $index => $section) {
+            $authored = $original[$index]['layout_archetype'];
+            $delivered = $section['layout_archetype'];
+            if ($authored === $delivered) {
+                continue;
+            }
+            $sections[$index]['handoff'] = self::withSeamCorrection($section['handoff'] ?? '',
+                "this section now uses {$delivered}; preserve all content and planned images");
+            $sections[$index]['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                . " Layout correction: use {$delivered}. Preserve all content and planned images.";
+            $warnings[] = self::valueLossWarning(self::sectionPath($pageSlug, $index) . '.layout_archetype',
+                $authored, $delivered, 'changed only the layout to meet page limits and preserve the image count');
+        }
+        if ($score > 0) {
+            $warnings[] = self::valueLossWarning(self::sectionPath($pageSlug, 0) . '.layout_archetype',
+                array_column($original, 'layout_archetype'), array_column($sections, 'layout_archetype'),
+                'retained repeated layouts after bounded repair to preserve all sections and planned images');
+        }
+        return $sections;
+    }
+
+    /** Keep every layout choice within both image bounds. */
+    private static function archetypeSupportsImageCount(string $archetype, int $count): bool
+    {
+        $metadata = SectionComposition::metadata($archetype);
+        return $metadata['min_images'] <= $count && $count <= $metadata['max_images'];
+    }
+
+    /** Exclude layouts that cannot preserve the section's image count. */
+    private static function incompatibleImageArchetypes(array $section): array
+    {
+        $count = max(0, min(12, (int) ($section['image_count'] ?? 0)));
+        return array_values(array_filter(
+            self::ARCHETYPES,
+            static fn (string $archetype): bool => !self::archetypeSupportsImageCount($archetype, $count),
+        ));
+    }
+
+    /** Count layout conflicts independently of content and surface rules. */
+    private static function layoutErrorCount(array $sections): int
+    {
+        $score = 0;
+        $counts = [];
+        foreach ($sections as $index => $section) {
+            $layout = $section['layout_archetype'];
+            $counts[$layout] = ($counts[$layout] ?? 0) + 1;
+            if ($index > 0 && $layout === $sections[$index - 1]['layout_archetype']) {
+                $score++;
+            }
+        }
+        foreach ($counts as $layout => $count) {
+            $limit = $layout === 'equal-card-grid' ? self::MAX_EQUAL_CARD_GRIDS : self::archetypeCap(count($sections));
+            $score += max(0, $count - $limit);
+        }
+        return $score;
     }
 
     /**
@@ -1809,28 +2057,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $reason = 'destination must be non-empty plain text';
         }
         if ($reason === '' && !self::initialDestinationIsKnown($destination, $context)) {
-            // An invented absolute URL (observed: https://atlasfield.io/trial
-            // on a fabricated domain) must never ship — but deleting the
-            // conversion CTA over it is rung 3 when rung 1 exists. Rewrite it
-            // to an anchor named after the URL's last path segment; the later
-            // anchor validation resolves it to a real planned section or
-            // retargets it to the page's closing anchor.
-            if (preg_match('#^https?://#i', $destination) === 1) {
-                $segment = strtolower(trim((string) parse_url($destination, PHP_URL_PATH), '/'));
-                $segment = (string) preg_replace('/[^a-z0-9-]+/', '-', basename($segment));
-                $anchor = '#' . (trim($segment, '-') !== '' ? trim($segment, '-') : 'cta');
-                $warnings[] = self::valueLossWarning(
-                    $path . '.destination',
-                    "'{$destination}'",
-                    "'{$anchor}'",
-                    'invented external URL rewritten to a local anchor for the closing-section retarget '
-                        . 'instead of removing the action',
-                    valuesAlreadyRendered: true,
-                );
-                $destination = $anchor;
-            } else {
-                $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
-            }
+            $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
         }
 
         if ($reason !== '') {
@@ -1932,6 +2159,42 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
+        return $pages;
+    }
+
+    /** Reconcile labels after every page and section destination is final. */
+    public static function reconcileActionCapabilities(array $pages, array $siteSpec, array &$warnings = [], bool $formPlaceholders = false, ?array $contextPages = null): array
+    {
+        // A host form needs its actual markup. The CTA step checks its destination after sections exist.
+        if ($formPlaceholders) {
+            return $pages;
+        }
+        $context = ActionCapabilities::context($siteSpec, $contextPages ?? $pages);
+        foreach ($pages as $pageIndex => $page) {
+            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+                $action = $section['primary_action'] ?? null;
+                if (!is_array($action)) {
+                    continue;
+                }
+                $label = ActionCapabilities::label($action['label'], $action['destination'], $context, (string) ($page['path'] ?? '/'));
+                if ($label === $action['label']) {
+                    continue;
+                }
+                $delivered = $label === null ? null : array_replace($action, [
+                    'label' => $label, 'intent' => 'Open the section or page: ' . $label . '.',
+                ]);
+                $pages[$pageIndex]['sections'][$sectionIndex]['primary_action'] = $delivered;
+                $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                    . ($label === null ? ' Action correction: omit the earlier unsupported action.'
+                        : ' Action correction: use the exact label "' . $label . '" for this content link. Omit the earlier transaction promise.');
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath((string) ($page['slug'] ?? ''), (int) $sectionIndex) . '.primary_action',
+                    $action,
+                    $delivered,
+                    'corrected an action promise that its destination cannot deliver',
+                );
+            }
+        }
         return $pages;
     }
 
@@ -2207,6 +2470,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
                 . '. Honor it. A contact page is brief — ' . self::MIN_CONTACT_SECTIONS . ' to ' . self::MAX_CONTACT_SECTIONS
                 . ' sections total including the hero, never more. The shared header and footer do not count. '
+                . 'Use a compact first section. Never use full-bleed-cover for the first section.'
+                . ' Keep an image-led opener on the image background with a compact archetype. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '
                 . 'with hours/address and a short next step folded into those sections when useful. Do NOT add story, programs, galleries, '
                 . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
@@ -3180,13 +3445,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         );
         $authoredArchetypes = $archetypes;
 
-        $pick = function (int $i, string ...$exclude) use (&$archetypes, $allowOffsetGrid): string {
+        $pick = function (int $i, string ...$exclude) use (&$archetypes, $sections, $allowOffsetGrid): string {
             // A mechanical guess never lands on 'full-bleed-cover'. The
             // archetype walks first in the catalog, but normalize() forces it
             // onto the 'image' background (BIGR-955), so introducing one here
             // would demand an image band the plan never budgeted — the same
             // reason repairFields() and pickLevelRow() exclude it.
-            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, 'full-bleed-cover', ...$exclude);
+            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, 'full-bleed-cover',
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
         };
 
         foreach ($archetypes as $i => $archetype) {
@@ -3199,7 +3465,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
-            $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
+            $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i,
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
         }
 
         // Interior-opening pass: normalize() rejects an interior page whose
@@ -3249,7 +3516,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
-            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used, ...$exclude);
+            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used,
+                ...array_merge($exclude, self::incompatibleImageArchetypes($sections[$i])));
             if ($replacement === $archetype) {
                 // Nothing eligible left. normalize() still reports it, so the
                 // model repair loop gets the last word rather than the build
@@ -3284,6 +3552,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     );
                 }
             }
+        }
+
+        if (self::layoutErrorCount($sections) > 0) {
+            $warnings[] = self::valueLossWarning(self::sectionPath($pageSlug, 0) . '.layout_archetype',
+                $authoredArchetypes, $archetypes,
+                'retained repeated layouts after bounded repair to preserve all sections and planned images');
         }
 
         $sections = self::withPacingBand($sections, $pageSlug, $warnings);
@@ -3496,7 +3770,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
      */
-    private static function varietyErrors(array $sections): array
+    private static function varietyErrors(array $sections, bool $checkLayouts = true): array
     {
         $errors = [];
         foreach ($sections as $i => $section) {
@@ -3504,7 +3778,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $prev = $sections[$i - 1];
-            if ($section['layout_archetype'] === $prev['layout_archetype']
+            if ($checkLayouts && $section['layout_archetype'] === $prev['layout_archetype']
                 && in_array($section['layout_archetype'], self::ARCHETYPES, true)
             ) {
                 $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
@@ -3517,7 +3791,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $grids = count(array_filter($sections, fn (array $s) => $s['layout_archetype'] === 'equal-card-grid'));
-        if ($grids > self::MAX_EQUAL_CARD_GRIDS) {
+        if ($checkLayouts && $grids > self::MAX_EQUAL_CARD_GRIDS) {
             $errors[] = "page-plan: 'equal-card-grid' is used {$grids} times — use it at most "
                 . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
         }
@@ -3536,7 +3810,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
         foreach ($counts as $archetype => $used) {
-            if ($used > $cap) {
+            if ($checkLayouts && $used > $cap) {
                 $errors[] = "page-plan: layout_archetype '{$archetype}' is used {$used} times across "
                     . count($sections) . " sections — no archetype may carry more than {$cap} of them; "
                     . 'give the excess sections different compositions';

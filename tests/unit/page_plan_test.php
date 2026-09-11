@@ -4,11 +4,17 @@ declare(strict_types=1);
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+
+function plan_request_text(array $request): string
+{
+    return implode('', $request['cached_prefixes'] ?? $request['opts']['cached_prefixes'] ?? []) . $request['prompt'];
+}
 
 test('page-plan excludes a retired spec mood on resume and preserves the user brief and footer rule', function () {
     with_project('builder_plan_resume_', function ($project) {
@@ -23,11 +29,11 @@ test('page-plan excludes a retired spec mood on resume and preserves the user br
 
         assert_eq(3, count($requests));
         foreach ($requests as $request) {
-            assert_true(!str_contains($request['prompt'], 'visual_vibe'));
-            assert_true(!str_contains($request['prompt'], 'sophisticated'));
-            assert_contains('Demo', $request['prompt']);
-            assert_contains('Use a warm and rustic style.', $request['prompt']);
-            assert_contains($footerRule, $request['prompt']);
+            assert_true(!str_contains(plan_request_text($request), 'visual_vibe'));
+            assert_true(!str_contains(plan_request_text($request), 'sophisticated'));
+            assert_contains('Demo', plan_request_text($request));
+            assert_contains('Use a warm and rustic style.', plan_request_text($request));
+            assert_contains($footerRule, plan_request_text($request));
         }
     });
 });
@@ -42,10 +48,14 @@ test('page-plan excludes a retired spec mood on resume and preserves the user br
 /** A valid planned section; override fields per test. */
 function plan_section(array $overrides = []): array
 {
+    $archetype = $overrides['layout_archetype'] ?? 'full-bleed-cover';
+    $imageCount = is_string($archetype) && SectionComposition::isKnown($archetype)
+        ? SectionComposition::metadata($archetype)['min_images'] : 0;
     return array_merge([
         'slug'             => 'hero',
         'title'            => 'Hero',
         'type'             => 'hero',
+        'image_count'      => $imageCount,
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
         'vertical_density' => 'standard',
@@ -95,6 +105,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         'type',
         'purpose',
         'content_notes',
+        'image_count',
         'layout_archetype',
         'background',
         'vertical_density',
@@ -107,7 +118,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     assert_eq($fields, $item['required']);
     assert_eq(false, $item['additionalProperties']);
     assert_eq($fields, array_keys($item['properties']));
-    foreach (array_diff($fields, ['item_pattern', 'primary_action']) as $field) {
+    foreach (array_diff($fields, ['item_pattern', 'primary_action', 'image_count']) as $field) {
         assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
     }
     assert_eq(['null', 'string'], array_column($item['properties']['item_pattern']['anyOf'], 'type'));
@@ -681,14 +692,14 @@ test('PagePlanStep::normalize rejects spacious density for content-dense section
     assert_eq('spacious', $shortCta[0]['vertical_density'], 'short editorial CTA may deliberately breathe');
 });
 
-test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function () {
-    assert_throws(function () {
-        PagePlanStep::normalize([
+test('PagePlanStep::normalize repairs adjacent duplicate archetypes', function () {
+    $sections = PagePlanStep::normalize([
             plan_section(),
             plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
             plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid', 'background' => 'tinted']),
         ]);
-    }, 'adjacent');
+    assert_eq(3, count($sections));
+    assert_true($sections[1]['layout_archetype'] !== $sections[2]['layout_archetype']);
 });
 
 test('PagePlanStep::normalize allows a repeated archetype when not adjacent', function () {
@@ -728,18 +739,16 @@ test('PagePlanStep::normalize does not report adjacency between invalid archetyp
     }
 });
 
-test('PagePlanStep::normalize rejects an interior page opening with a full-bleed cover', function () {
-    try {
-        PagePlanStep::normalize([
-            plan_section(), // full-bleed-cover first
-            plan_section(['slug' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
-        ], front: false);
-        assert_true(false, 'expected the interior plan to be rejected');
-    } catch (RuntimeException $e) {
-        assert_contains('INTERIOR page', $e->getMessage());
-        assert_contains('full-bleed-cover', $e->getMessage());
-        assert_contains('COMPACT', $e->getMessage());
-    }
+test('PagePlanStep::normalize gives an interior cover a compact composition', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['image_count' => 1]),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
+    ], false, null, [], $warnings, 'contact');
+    assert_eq('asymmetric-split', $sections[0]['layout_archetype']);
+    assert_eq('image', $sections[0]['background']);
+    assert_eq(1, $sections[0]['image_count']);
+    assert_contains("pages[slug='contact'].sections[0].layout_archetype", implode("\n", $warnings));
 });
 
 test('PagePlanStep::normalize allows a full-bleed cover opening on the front page and deeper in interior pages', function () {
@@ -834,16 +843,16 @@ test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed
     assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
 });
 
-test('PagePlanStep::normalize caps equal-card-grid at twice per page', function () {
-    assert_throws(function () {
-        PagePlanStep::normalize([
+test('PagePlanStep::normalize caps equal-card-grid without a model request', function () {
+    $sections = PagePlanStep::normalize([
             plan_section(['layout_archetype' => 'equal-card-grid']),
             plan_section(['slug' => 'a', 'role' => 'content', 'layout_archetype' => 'bento-grid']),
             plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'equal-card-grid']),
             plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
             plan_section(['slug' => 'd', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid']),
         ]);
-    }, 'equal-card-grid');
+    assert_eq(5, count($sections));
+    assert_true(count(array_filter($sections, fn ($section) => $section['layout_archetype'] === 'equal-card-grid')) <= 2);
 });
 
 test('PagePlanStep::repairVariety reassigns the later section of each adjacent duplicate pair', function () {
@@ -987,27 +996,27 @@ test('page-plan fans out one request per page with per-page context', function (
     $reqs = (new PagePlanStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_eq(['home', 'menu', 'breads'], array_keys($reqs));
-    assert_contains('in es-AR', $reqs['home']['prompt']);
-    assert_contains('front page', $reqs['home']['prompt']);          // front emphasis
-    assert_contains('interior page', $reqs['menu']['prompt']);       // interior emphasis
-    assert_contains('"Menu"', $reqs['menu']['prompt']);              // its own title
-    assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
-    assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
-    assert_contains('`type` is an open-ended semantic label, always in English', $reqs['home']['prompt']);
-    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', $reqs['home']['prompt']);
-    assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
-    assert_contains('examples:', $reqs['home']['prompt']);
-    assert_contains('Never plan a footer or site-chrome section', $reqs['home']['prompt']);
-    assert_contains('appends it after this page\'s LAST section', $reqs['home']['prompt']);
-    assert_contains('cinematic-safe-zone', $reqs['home']['prompt'], 'front plan sees exactly its blueprint');
+    assert_contains('in es-AR', plan_request_text($reqs['home']));
+    assert_contains('front page', plan_request_text($reqs['home']));          // front emphasis
+    assert_contains('interior page', plan_request_text($reqs['menu']));       // interior emphasis
+    assert_contains('"Menu"', plan_request_text($reqs['menu']));              // its own title
+    assert_contains('What we bake', plan_request_text($reqs['menu']));        // its own purpose
+    assert_contains('/menu/breads/', plan_request_text($reqs['menu']));       // site pages list
+    assert_contains('`type` is an open-ended semantic label, always in English', plan_request_text($reqs['home']));
+    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', plan_request_text($reqs['home']));
+    assert_contains('builder derives each section\'s structural role', plan_request_text($reqs['home']));
+    assert_contains('examples:', plan_request_text($reqs['home']));
+    assert_contains('Never plan a footer or site-chrome section', plan_request_text($reqs['home']));
+    assert_contains('appends it after this page\'s LAST section', plan_request_text($reqs['home']));
+    assert_contains('cinematic-safe-zone', plan_request_text($reqs['home']), 'front plan sees exactly its blueprint');
     assert_true(
-        !str_contains($reqs['menu']['prompt'], 'cinematic-safe-zone'),
+        !str_contains(plan_request_text($reqs['menu']), 'cinematic-safe-zone'),
         'interior page plan receives no front-page blueprint variable',
     );
-    assert_contains('`primary_action` is REQUIRED on every section', $reqs['home']['prompt']);
-    assert_contains('Return `primary_action`: null on EVERY section', $reqs['menu']['prompt']);
-    assert_true(!str_contains($reqs['home']['prompt'], '"role"'), 'role is absent from the requested JSON shape');
-    assert_true(!str_contains($reqs['home']['prompt'], '"type": "one of:'), 'semantic types are examples, not a closed list');
+    assert_contains('`primary_action` is REQUIRED on every section', plan_request_text($reqs['home']));
+    assert_contains('Return `primary_action`: null on EVERY section', plan_request_text($reqs['menu']));
+    assert_true(!str_contains(plan_request_text($reqs['home']), '"role"'), 'role is absent from the requested JSON shape');
+    assert_true(!str_contains(plan_request_text($reqs['home']), '"type": "one of:'), 'semantic types are examples, not a closed list');
 
     $expectedSchema = ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()];
     foreach ($reqs as $req) {
@@ -1090,7 +1099,7 @@ test('page-plan writes pages.json with sections per page', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan sends an over-budget page through repair, then demotes mechanically', function () {
+test('page-plan repairs a surface budget before another model request', function () {
     $tmp = sys_get_temp_dir() . '/builder_pp_surface_restraint_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
@@ -1120,17 +1129,13 @@ test('page-plan sends an over-budget page through repair, then demotes mechanica
     }
 
     $llm = new FakeLlm();
-    // Six bands on six sections is rejected, and the repair keeps them all.
-    $llm->queueJson(['sections' => $sections]);
     $llm->queueJson(['sections' => $sections]);
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq(2, count($llm->calls), 'one plan, one repair, then the mechanical backstop');
-    assert_contains(
-        'sit on a non-base background',
-        $llm->calls[1]['prompt'],
-        'the model is told which rule it broke before the build demotes anything',
-    );
+    assert_eq(1, count($llm->calls), 'surface repair needs no model request');
+    assert_contains('4 or more sections', plan_request_text($llm->calls[0]));
+    assert_contains('AT MOST 2 non-base backgrounds', plan_request_text($llm->calls[0]));
+    assert_contains('authored=', implode("\n", $project->readJson('warnings.json')['page-plan']));
 
     $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
     $backgrounds = array_column($delivered, 'background');
@@ -1213,11 +1218,8 @@ test('page-plan removes a generated footer before recomputing variety and roles'
         array_column($sections, 'layout_archetype'),
         'variety is validated against the surviving adjacency'
     );
-    assert_eq(2, count($llm->calls), 'the filtered adjacency receives one semantic repair');
-    assert_true(
-        !str_contains($llm->calls[1]['prompt'], '"slug": "footer-info"'),
-        'the repair prompt cannot ask the model to restore removed site chrome'
-    );
+    assert_eq(1, count($llm->calls), 'code repairs the filtered adjacency');
+    assert_true(!in_array('footer-info', array_column($sections, 'slug'), true));
 
     $warnings = $project->readJson('warnings.json')['page-plan'] ?? [];
     $joined = implode("\n", $warnings);
@@ -1275,7 +1277,7 @@ test('page-plan stamps roles after a repair even when model role annotations sta
     // Its role annotations are deliberately wrong and must not create another
     // validation failure.
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'welcome', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'welcome', 'handoff' => '', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'story', 'role' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'contrast']),
         plan_section(['slug' => 'visit', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
@@ -1315,7 +1317,7 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     $llm->queueJson(['sections' => [plan_section()]]);
     // …menu plan violates the adjacency rule…
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     // …and the repair call returns a fixed menu plan (compact opening — menu
@@ -1364,11 +1366,11 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     // the three pages need a repair.
     $llm->queueJson(['sections' => [plan_section()]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'm1', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'm1', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'm2', 'layout_archetype' => 'bento-grid', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a1', 'handoff' => '', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
         plan_section(['slug' => 'a2', 'layout_archetype' => 'equal-card-grid', 'background' => 'contrast']),
     ]]);
     // Both repairs come back fixed, in page order.
@@ -1471,7 +1473,7 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     $llm = new FakeLlm();
     // The plan has adjacent duplicates…
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
+        plan_section(['slug' => 'credibility-block', 'handoff' => '', 'layout_archetype' => 'bento-grid', 'background' => 'base']),
         plan_section(['slug' => 'closing-cta', 'role' => 'closing', 'layout_archetype' => 'full-bleed-cover', 'background' => 'contrast']),
     ]]);
     // …and the repair fumbles it by keeping the following section on the
@@ -1503,7 +1505,7 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan enforces the compact interior opening through repair and mechanical fallback', function () {
+test('page-plan enforces the compact interior opening without a model repair', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A tavern']);
@@ -1514,14 +1516,9 @@ test('page-plan enforces the compact interior opening through repair and mechani
     ]]));
 
     $llm = new FakeLlm();
-    // Home may open with a cover…
+    // The homepage keeps its cover.
     $llm->queueJson(['sections' => [plan_section()]]);
-    // …the interior page may not…
-    $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'visit-hero']),
-        plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-    ]]);
-    // …and the repair insists on the cover, so the mechanical fallback demotes it.
+    // The interior page uses a compact composition.
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'visit-hero']),
         plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
@@ -1536,8 +1533,8 @@ test('page-plan enforces the compact interior opening through repair and mechani
         $plan['pages'][1]['sections'][0]['layout_archetype'] !== 'full-bleed-cover',
         'interior opening demoted to a compact archetype'
     );
-    assert_eq(3, count($llm->calls));
-    assert_contains('INTERIOR page', $llm->calls[2]['prompt']);
+    assert_eq(2, count($llm->calls));
+    assert_eq(0, $llm->remaining());
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -1980,34 +1977,19 @@ test('PagePlanStep first-pass validation keeps anchor-shaped destinations for th
     assert_eq([], $warnings);
 });
 
-test('PagePlanStep rewrites an invented external CTA URL to an anchor for the retarget pass', function () {
-    // Regression: atlas14's plan authored https://atlasfield.io/trial (a
-    // fabricated domain) and the whole "Start Free Trial" CTA was deleted.
+test('PagePlanStep removes an invented external CTA destination', function () {
     $context = PagePlanStep::primaryActionContext([], [['slug' => 'home', 'path' => '/']]);
     $warnings = [];
-    $kept = PagePlanStep::normalizePrimaryAction(
-        ['label' => 'Start Free Trial', 'intent' => 'Convert.', 'destination' => 'https://atlasfield.io/trial'],
+    $action = PagePlanStep::normalizePrimaryAction(
+        ['label' => 'Start Free Trial', 'intent' => 'Start a trial.', 'destination' => 'https://atlasfield.io/trial'],
         true,
         $context,
         $warnings,
     );
-    assert_true(is_array($kept), 'the CTA survives');
-    assert_eq('#trial', $kept['destination'], 'external URL becomes a local anchor');
+    assert_eq(null, $action);
     assert_eq(1, count($warnings));
-    assert_contains('invented external URL', $warnings[0]);
-
-    // Downstream, the unknown anchor retargets to the closing section.
-    $pages = [[
-        'slug' => 'home', 'path' => '/', 'front' => true,
-        'sections' => [
-            array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $kept]),
-            array_merge(plan_section(['slug' => 'features', 'title' => 'Features']), ['role' => 'content', 'layout_archetype' => 'bento-grid']),
-            array_merge(plan_section(['slug' => 'signup', 'title' => 'Signup']), ['role' => 'closing', 'layout_archetype' => 'asymmetric-split']),
-        ],
-    ]];
-    $anchorWarnings = [];
-    $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $anchorWarnings);
-    assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
+    assert_contains('https://atlasfield.io/trial', $warnings[0]);
+    assert_contains('removed invalid primary action', $warnings[0]);
 });
 
 test('normalize rejects every CTA fragment form that names no planned section (BIGR-800)', function () {
@@ -2771,5 +2753,34 @@ test('BIGR-1001 caps scoped page plans without overwriting existing sibling arti
         assert_eq(4, count($pages[0]['sections']));
         assert_eq('{"untouched":"siblings"}', $project->readText('pages.json'));
         assert_contains('trimmed interior page to 4', implode("\n", $project->readJson('warnings.json')['page-plan']));
+    });
+});
+
+test('page plans share all common context and retain it on repair', function () {
+    with_project('builder_plan_cache_', function ($project) {
+        $project->writeJson('siteSpec.json', plan_spec());
+        $project->writeJson('meta.json', ['prompt' => 'Keep the bakery menu.']);
+        seed_test_design_direction($project);
+        $llm = new FakeLlm();
+        $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+        $requests = $step->requests($project);
+        $prefix = $requests['home']['cached_prefixes'];
+        assert_eq(1, count($prefix));
+        assert_contains('Keep the bakery menu.', $prefix[0]);
+        assert_contains('Layout archetypes', $prefix[0]);
+        foreach ($requests as $request) {
+            assert_eq($prefix, $request['cached_prefixes']);
+            assert_true(!str_contains($request['prompt'], 'Layout archetypes'));
+            $body = Automattic\SiteBuild\AnthropicClient::bodyFor($request, 'model', 1000);
+            assert_eq($prefix[0], $body['messages'][0]['content'][0]['text']);
+            assert_true(isset($body['messages'][0]['content'][0]['cache_control']));
+            assert_eq($request['prompt'], $body['messages'][0]['content'][1]['text']);
+        }
+        $llm->queueJson(['sections' => []]);
+        $repair = new ReflectionMethod(PagePlanStep::class, 'repairAll');
+        $repair->invoke($step, $project, ['menu' => ['plan' => ['sections' => []], 'errors' => 'No sections.']]);
+        assert_eq($prefix, $llm->calls[0]['opts']['cached_prefixes']);
+        assert_contains($requests['menu']['prompt'], $llm->calls[0]['prompt']);
+        assert_contains('No sections.', $llm->calls[0]['prompt']);
     });
 });

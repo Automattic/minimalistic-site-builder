@@ -15,6 +15,7 @@ namespace Automattic\SiteBuild;
  */
 final class CtaStyleMarkup
 {
+    public const COVER_CONTRAST_CLASS = 'cover-contrast-transparent-button';
     private const VARIATIONS = ['is-style-outline', 'is-style-fill'];
     private const FULL_WIDTH_CLASS = 'wp-block-button__width-100';
     private const CUSTOM_WIDTH_CLASS = 'has-custom-width';
@@ -52,7 +53,24 @@ final class CtaStyleMarkup
             $attrs = $doc->attrs($i) ?? [];
             $path = $paths[$i] ?? (string) $i;
             $changed = false;
+            $coverContrast = self::isCoverContrastRepair($doc, $i, $attrs, $style);
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!$coverContrast && (in_array(self::COVER_CONTRAST_CLASS, $classes, true)
+                    || self::ownHtmlHasClassToken($doc, $i, self::COVER_CONTRAST_CLASS))) {
+                $classes = array_values(array_diff($classes, [self::COVER_CONTRAST_CLASS]));
+                if ($classes === []) {
+                    unset($attrs['className']);
+                } else {
+                    $attrs['className'] = implode(' ', $classes);
+                }
+                $doc->removeClassTokenInOwnHtml($i, self::COVER_CONTRAST_CLASS);
+                self::record($changes, $path, 'className', self::COVER_CONTRAST_CLASS, null, $style);
+                $changed = true;
+            }
             foreach (['backgroundColor', 'textColor', 'gradient'] as $property) {
+                if ($property === 'textColor' && $coverContrast) {
+                    continue;
+                }
                 if (!array_key_exists($property, $attrs)) {
                     continue;
                 }
@@ -233,6 +251,9 @@ final class CtaStyleMarkup
                 // No local construction remains, so stale generic classes must
                 // not be rescued into className by the following serializer.
                 foreach (['has-background', 'has-text-color', 'has-background-gradient'] as $token) {
+                    if ($token === 'has-text-color' && $coverContrast) {
+                        continue;
+                    }
                     $doc->removeClassTokenInOwnHtml($i, $token);
                 }
                 $doc->setAttrs($i, $attrs);
@@ -240,6 +261,23 @@ final class CtaStyleMarkup
         }
 
         return ['markup' => $doc->render(), 'changes' => $changes];
+    }
+
+    /** Preserve only palette ink that the post-image cover check owns. */
+    private static function isCoverContrastRepair(BlockMarkup $doc, int $i, array $attrs, string $style): bool
+    {
+        $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array($style, ['underline', 'ghost-arrow'], true)
+            || !in_array($attrs['textColor'] ?? null, ['base', 'contrast'], true)
+            || !in_array(self::COVER_CONTRAST_CLASS, $classes, true)) {
+            return false;
+        }
+        for ($parent = $doc->parent($i); $parent !== null; $parent = $doc->parent($parent)) {
+            if ($doc->name($parent) === 'cover') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param array<mixed> $style @param list<array<mixed>> $changes */

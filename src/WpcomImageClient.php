@@ -17,8 +17,10 @@ namespace Automattic\SiteBuild;
  * is scoped to Google Vertex, and telex uses the same endpoint for theme images.
  * See PROGRESS.md (Phase 0) for why Claude cannot go through the proxy.
  */
-final class WpcomImageClient implements ImageClient
+final class WpcomImageClient implements ImageClient, ImageUsageReporting, CooperativeTransport
 {
+    public function supportsCooperativeRequests(array $opts = []): bool { return true; }
+
     private const ENDPOINT_TPL =
         'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:generateContent';
 
@@ -29,7 +31,7 @@ final class WpcomImageClient implements ImageClient
      */
     private const MAX_CONCURRENCY = 10;
 
-    private int $requests = 0;
+    private ?ImageRequestLedger $ledger = null;
 
     /**
      * @param array<int,int> $retryDelays seconds to wait before retries 1..N of
@@ -48,7 +50,13 @@ final class WpcomImageClient implements ImageClient
     /** How many image requests this client has made. */
     public function requestCount(): int
     {
-        return $this->requests;
+        return $this->imageUsageTotals()['attempts'];
+    }
+
+    /** @inheritDoc */
+    public function imageUsageTotals(): array
+    {
+        return ($this->ledger ??= new ImageRequestLedger())->totals();
     }
 
     /** The image model this client generates with (used for request logging). */
@@ -61,7 +69,6 @@ final class WpcomImageClient implements ImageClient
     {
         $image = $this->requestWithRetry(GeminiImage::buildBody($prompt, $opts));
         $bytes = $this->encodeForMime($image, ($opts['mime'] ?? null) ?: 'image/jpeg');
-        $this->requests++;
         return $bytes;
     }
 
@@ -86,6 +93,7 @@ final class WpcomImageClient implements ImageClient
         // the final format; the MIME map remains available to verify every
         // response and drive the local fallback if the proxy ignores it.
         [$bodies, $mimes] = $this->batchRequests($specs);
+        $logDirectory = ImageLogger::dir();
 
         // With a caller callback, success bytes leave the pipeline the moment
         // a transfer is classified (success is always final): the transport
@@ -99,7 +107,7 @@ final class WpcomImageClient implements ImageClient
             };
         $out = GeminiImage::retryBatch(
             $bodies,
-            fn (array $subset): array => $this->multiRequest($subset, $mimes, $onBytes),
+            fn (array $subset): array => $this->multiRequest($subset, $mimes, $onBytes, $specs, $logDirectory),
             $this->retryDelays,
             static function (int $count, int $attempt, int $wait): void {
                 Narrator::write("    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
@@ -111,7 +119,6 @@ final class WpcomImageClient implements ImageClient
                     }
                 },
         );
-        $this->requests += $out['succeeded'];
         return $out['results'];
     }
 
@@ -153,7 +160,7 @@ final class WpcomImageClient implements ImageClient
      * Run a set of generateContent requests through the shared curl_multi
      * rolling pool — at most MAX_CONCURRENCY in flight, the freed slot
      * refilled the moment any transfer completes — and classify each
-     * transfer. Pure transport — no retry, no request counting. The pool's
+     * transfer. Each completed transfer records its usage. The pool's
      * 429-hold and refused-add handling (see CurlMultiPool) return
      * transient/held outcomes that GeminiImage::retryBatch re-sends after its
      * backoff without charging its budget.
@@ -168,13 +175,15 @@ final class WpcomImageClient implements ImageClient
      * @param callable(int,string):void|null $onBytes immediate delivery for each success
      * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}>
      */
-    private function multiRequest(array $bodies, array $requestedMimes, ?callable $onBytes = null): array
+    private function multiRequest(array $bodies, array $requestedMimes, ?callable $onBytes = null, array $specs = [], ?string $logDirectory = null): array
     {
-        $classify = function (string|int $i, \CurlHandle $ch, int $httpStatus) use ($requestedMimes, $onBytes): array {
+        $classify = function (string|int $i, \CurlHandle $ch, int $httpStatus) use ($requestedMimes, $onBytes, $specs, $bodies, $logDirectory): array {
+            $completed = microtime(true);
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
 
+            $failure = null;
             try {
                 self::throwOnTransportError($errno, $error);
                 if ($errno === 0 && $httpStatus === 0) {
@@ -185,14 +194,19 @@ final class WpcomImageClient implements ImageClient
                 $image = GeminiImage::interpret($raw, $httpStatus);
                 $bytes = $this->encodeForMime($image, $requestedMimes[$i] ?? 'image/jpeg');
             } catch (ImageFilteredException $e) {
+                $failure = $e->getMessage();
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
                 // can repair the prompt once the retries run out.
                 return ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
             } catch (TransientApiException $e) {
+                $failure = $e->getMessage();
                 return ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
             } catch (\RuntimeException $e) {
+                $failure = $e->getMessage();
                 return ['ok' => false, 'transient' => false, 'error' => $e->getMessage()];
+            } finally {
+                $this->recordAttempt($ch, $bodies[$i], $raw, $failure, (string) ($specs[$i]['asset'] ?? $i), $completed, $logDirectory);
             }
 
             // Delivery belongs to the caller, not the transport classifier:
@@ -210,6 +224,8 @@ final class WpcomImageClient implements ImageClient
             fn (string|int $i, array $body): \CurlHandle => $this->buildHandle($body),
             $classify,
             self::MAX_CONCURRENCY,
+            lane: 'images',
+            onCancel: $this->cancellationRecorder($bodies, $specs, $logDirectory),
         );
     }
 
@@ -254,15 +270,56 @@ final class WpcomImageClient implements ImageClient
      */
     private function request(array $body): array
     {
+        $logDirectory = ImageLogger::dir();
         $ch = $this->buildHandle($body);
         $raw    = curl_exec($ch);
+        $completed = microtime(true);
         $errno  = curl_errno($ch);
         $error  = curl_error($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $failure = null;
+        try {
+            self::throwOnTransportError($errno, $error);
+            return GeminiImage::interpret((string) $raw, (int) $status);
+        } catch (\Throwable $e) {
+            $failure = $e->getMessage();
+            throw $e;
+        } finally {
+            $this->recordAttempt($ch, $body, (string) $raw, $failure, null, $completed, $logDirectory);
+            curl_close($ch);
+        }
+    }
 
-        self::throwOnTransportError($errno, $error);
-        return GeminiImage::interpret((string) $raw, (int) $status);
+    /** Record an interrupted provider attempt without asset delivery. */
+    private function cancellationRecorder(array $bodies, array $specs, ?string $directory): \Closure
+    {
+        return function (string|int $index, \CurlHandle $handle) use ($bodies, $specs, $directory): void {
+            $this->recordAttempt($handle, $bodies[$index], (string) curl_multi_getcontent($handle),
+                'Raw image transfer stopped before completion', (string) ($specs[$index]['asset'] ?? $index),
+                microtime(true), $directory);
+        };
+    }
+
+    /** Record transfer time and provider usage before the handle closes. */
+    private function recordAttempt(\CurlHandle $ch, array $body, string $raw, ?string $error, ?string $asset, ?float $completed = null, ?string $logDirectory = null): void
+    {
+        $seconds = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        $first = (float) curl_getinfo($ch, CURLINFO_STARTTRANSFER_TIME);
+        $completed ??= microtime(true);
+        $record = [
+            'asset' => $asset, 'model' => $this->model,
+            'sample_image_size' => $body['generationConfig']['imageConfig']['imageSize'] ?? null,
+            'aspect_ratio' => $body['generationConfig']['imageConfig']['aspectRatio'] ?? null,
+            'started_at' => $completed - $seconds,
+            'first_response_at' => $first > 0 ? $completed - $seconds + $first : null,
+            'completed_at' => $completed,
+            'seconds' => $seconds, 'first_response_seconds' => $first > 0 ? $first : null,
+            'http_status' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+            'ok' => $error === null, 'error' => $error,
+            'usage' => ImageRequestLedger::usage($raw),
+        ];
+        ($this->ledger ??= new ImageRequestLedger())->record($record);
+        ImageLogger::attemptIn($logDirectory, $record);
     }
 
     /**

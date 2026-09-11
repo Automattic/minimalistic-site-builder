@@ -64,7 +64,7 @@ function hero_unit_contract_input(
     return [
         'site_spec' => ['name' => 'HERO-SPEC-SENTINEL'],
         'language' => 'hero-language-sentinel',
-        'theme_json' => ['version' => 3, 'hero-theme-sentinel' => true],
+        'theme_json' => ['version' => 3, 'settings' => ['custom' => ['hero-theme-sentinel' => true]]],
         'design_direction' => 'HERO-DIRECTION-SENTINEL',
         'outline' => "1. HERO-OUTLINE-SENTINEL (hero) [#hero]\n2. Work (content) [#work]",
         'site_pages' => '- "Home" — / (front page): HERO-PAGES-SENTINEL',
@@ -482,6 +482,17 @@ test('HeroUnit restores an identifiable paraphrased primary-action label exactly
     assert_eq($first->markup, $second->markup);
     assert_eq([], $second->repairs);
     assert_eq([], $second->warnings);
+});
+
+test('HeroUnit gives supplied facts priority after the complete hero brief', function () {
+    $request = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(hero_unit_contract_input());
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strpos($request['prompt'], 'HERO-NOTES-SENTINEL'));
+    assert_contains('Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts.', $request['prompt']);
+    assert_contains('Do not promise absent details on another page', $request['prompt']);
+    assert_contains('Preserve the assigned anchor, layout, image count, image subjects, and valid links.', $request['prompt']);
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strrpos($request['prompt'], 'HERO-SECTION-TITLE-SENTINEL'));
+    assert_true(str_ends_with($request['prompt'], 'Omit unsupported fields and empty placeholders from headings and copy.'));
 });
 
 test('HeroUnit enforces the uniform copy-and-action budget without disturbing the cleaned hero', function () {

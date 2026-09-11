@@ -181,8 +181,6 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
-                $models['design-direction-judge'],
-                $temps['design-direction-judge'] ?? 0.0,
             ),
             new DesignPreviewStep(
                 $llm,
@@ -312,8 +310,6 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
-                $models['design-direction-judge'],
-                $temps['design-direction-judge'] ?? 0.0,
             ),
             // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
@@ -472,7 +468,7 @@ final class StepComposition
             new ThemeScreenshotStep(),
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
-            new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+            new CoverContrastStep($blockFixer ?? BlockFixers::default(), htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
             // Cover contrast can rewrite assembled page markup after the graph.
             // Refresh pattern winners from those final bytes, then re-validate
             // the delivered theme (the in-graph ValidateThemeStep ran before

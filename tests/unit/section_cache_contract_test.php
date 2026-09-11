@@ -23,7 +23,7 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
     return [
         'site_spec'        => '{"name":"CACHE-SPEC-SENTINEL"}',
         'language'         => 'cache-language-sentinel',
-        'theme_json'       => '{"cache-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"cache-theme-sentinel":true}}}',
         'design_direction' => 'CACHE-DIRECTION-SENTINEL',
         'card_style'       => 'flush',
         'outline'          => "1. Hero (hero) [#hero]\n2. About (about) [#about]",
@@ -182,10 +182,10 @@ test('section prompt freezes site, build, page, and brief layer boundaries', fun
     [$page, $brief] = explode($briefMarker, $afterPage, 2);
 
     assert_eq('{{site_context}}', trim($site));
+    assert_contains('{{image_instructions}}', $page);
     foreach ([
         '{{language}}',
         '{{card_style}}',
-        '{{image_instructions}}',
         '{{block_markup_output_contract}}',
         '{{motion_instructions}}',
         '{{card_instructions}}',
@@ -297,7 +297,7 @@ test('the site layer is the same bytes whether a step read JSON as text or as an
     $renderer = new PromptRenderer(repo_path('prompts'));
     $llm = new FakeLlm();
     $spec = ['name' => 'CACHE-SPEC-SENTINEL', 'slug' => 'cache-spec'];
-    $theme = ['cache-theme-sentinel' => true, 'settings' => ['layout' => ['contentSize' => '40rem']]];
+    $theme = ['settings' => ['custom' => ['cache-theme-sentinel' => true], 'layout' => ['contentSize' => '40rem']]];
 
     // Exactly what writeJson() puts on disk, so this is readText() vs readJson()
     // of one file: SectionsStep takes the text, TransformSiteStep the array.

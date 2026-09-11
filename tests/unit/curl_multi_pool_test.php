@@ -3,6 +3,19 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\CurlMultiPool;
 
+test('the pool start callback excludes refused and held requests', function () {
+    $pool = new FakeCurlMultiPool([['limited']], ['limited' => 429]);
+    $pool->refuseAdds = ['refused'];
+    $started = [];
+    $results = $pool->run(['refused' => [], 'limited' => [], 'held' => []],
+        fn ($key) => $pool->register($key, curl_init('http://localhost/unused')),
+        fn () => ['ok' => false], 1,
+        onStart: static function ($key) use (&$started): void { $started[] = $key; });
+    assert_eq(['limited'], $started);
+    assert_eq(true, $results['held']['held']);
+    assert_eq(false, $results['refused']['ok']);
+});
+
 test('CurlMultiPool completes real local transfers without deprecations and releases its handles', function () {
     $references = [];
     $build = static function (string|int $key) use (&$references): \CurlHandle {
@@ -277,4 +290,45 @@ test('CurlMultiPool rejects a completion for an unregistered curl handle', funct
 
     $e = assert_throws(fn () => $pool->run(['a' => 1], $buildHandle, $classify, 1));
     assert_contains('unregistered curl handle', $e->getMessage(), 'an unknown handle is a loud failure');
+});
+
+test('CurlMultiPool starts siblings before the first transfer completes when the cache becomes ready', function () {
+    $gate = new Automattic\SiteBuild\PromptCacheGate();
+    $pool = new class($gate) extends FakeCurlMultiPool {
+        public int $round = 0;
+        public function __construct(private Automattic\SiteBuild\PromptCacheGate $gate) {
+            parent::__construct([[], ['a', 'b', 'c']]);
+        }
+        protected function multiExec(CurlMultiHandle $multi, ?int &$running): int {
+            $this->round++;
+            if ($this->round === 1) { $this->gate->release(); }
+            return parent::multiExec($multi, $running);
+        }
+    };
+    $starts = [];
+    $build = function ($key) use ($pool, &$starts): CurlHandle {
+        $starts[$key] = $pool->round;
+        return $pool->register($key, curl_init('http://localhost/unused'));
+    };
+    $results = $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build,
+        fn ($key) => ['ok' => true], 3, fn ($key) => $key === 'a' || $gate->ready());
+    assert_eq(['a' => 0, 'b' => 1, 'c' => 1], $starts);
+    assert_eq(3, count($results));
+});
+
+test('CurlMultiPool releases the gate when the deadline passes during handle preparation', function () {
+    $gate = new Automattic\SiteBuild\PromptCacheGate();
+    $events = [];
+    $pool = new FakeCurlMultiPool([['b', 'c'], ['a']]);
+    $build = function ($key) use ($pool, $gate, &$events): CurlHandle {
+        $events[] = 'start:' . $key;
+        $gate->release();
+        return $pool->register($key, curl_init('http://localhost/unused'));
+    };
+    $classify = function ($key) use (&$events): array {
+        $events[] = 'complete:' . $key;
+        return ['ok' => true];
+    };
+    $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build, $classify, 3, fn ($key) => $key === 'a' || $gate->ready());
+    assert_eq(['start:a', 'start:b', 'start:c', 'complete:b', 'complete:c', 'complete:a'], $events);
 });

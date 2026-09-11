@@ -10,7 +10,8 @@ namespace Automattic\SiteBuild;
  * defensive decoding still helps with providers/models that ignore it and with
  * historical prompt-only calls. Repairs here are deliberately conservative:
  * unwrap one outer Markdown fence, escape paired quotes the model left
- * unescaped in string values, and remove trailing commas only after the quote
+ * unescaped in string values, escape literal line breaks and tabs in values,
+ * and remove trailing commas only after the quote
  * pass has established the JSON grammar. Structurally ambiguous input is left
  * for model-driven recovery rather than guessed at locally.
  */
@@ -363,7 +364,19 @@ final class JsonDecoder
             }
             if ($ch !== '"') {
                 if (ord($ch) < 0x20) {
-                    return null;
+                    $escape = match ($ch) {
+                        "\n" => '\\n',
+                        "\r" => '\\r',
+                        "\t" => '\\t',
+                        default => null,
+                    };
+                    if ($escape === null) {
+                        return null;
+                    }
+                    $out .= $escape;
+                    $offset++;
+                    $changed = true;
+                    continue;
                 }
                 $out .= $ch;
                 $offset++;

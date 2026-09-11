@@ -139,6 +139,30 @@ final class GeminiImage
         return in_array(trim($aspectRatio), ['16:9', '21:9'], true) ? '2K' : '1K';
     }
 
+    /** Select resolution from the display slot as well as its generated ratio. */
+    public static function sampleImageSizeForSlot(array $spec, string $ratio, bool $transparent = false): string
+    {
+        $size = self::sampleImageSize($ratio, $transparent);
+        if ($size === '1K') {
+            return $size;
+        }
+        if (isset($spec['image_slot'])) {
+            return $spec['image_slot'] === 'card' ? '1K' : $size;
+        }
+        $context = (string) ($spec['pageContext'] ?? '');
+        $filename = basename((string) ($spec['filename'] ?? ''));
+        $hero = preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1
+            || preg_match('/\bhero\b/iu', $context) === 1;
+        $widthContext = preg_replace('/\bedge[- ]to[- ]edge\b/iu', '', $context) ?? $context;
+        $wide = ImageCrop::fullFrameSlot('1:1', $widthContext);
+        if ($hero || $wide) {
+            return $size;
+        }
+        // Adjacent footer tiles can share edges without spanning the viewport.
+        $small = preg_match('/\b(?:narrow|compact|small|card|tile|thumb(?:nail)?)\b/iu', $context) === 1;
+        return $small ? '1K' : $size;
+    }
+
     /**
      * The output MIME type an asset filename calls for. `.png` assets are the
      * transparent-background ones (decorative flourishes, ornaments, logo
@@ -518,7 +542,7 @@ final class GeminiImage
     ): array
     {
         $sleeper ??= static function (int $seconds): void {
-            sleep($seconds);
+            ImageTransportScheduler::pause($seconds);
         };
         $results = [];
         $succeeded = 0;

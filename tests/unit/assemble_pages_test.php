@@ -52,6 +52,47 @@ function assemble_fixture(): array
     return [$project, $tmp];
 }
 
+test('assemble-pages removes request metadata from alt text after image collection', function () {
+    [$project, $tmp] = assemble_fixture();
+    try {
+        $image = '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/bread.jpg" alt="AI_IMAGE: A round loaf | content card | photo | square"/></figure><!-- /wp:image -->';
+        $specs = [['filename' => 'bread.jpg', 'src' => 'theme:./assets/bread.jpg', 'subject' => 'A round loaf', 'pageContext' => 'content card', 'style' => 'photo', 'aspectRatio' => 'square']];
+        $project->writeText('theme/parts/page-home--hero.html', $image);
+        $project->writeText('theme/parts/footer.html', $image);
+        $project->writeJson('images.json', $specs);
+        $specBytes = $project->readText('images.json');
+        (new AssemblePagesStep())->run($project);
+        assert_contains('alt="A round loaf"', $project->readText('plugin/pages/home.html'));
+        assert_contains('alt="A round loaf"', $project->readText('theme/parts/footer.html'));
+        assert_eq($specBytes, $project->readText('images.json'));
+        assert_eq('bread.jpg', $project->readJson('plugin/images.json')['images'][0]['filename']);
+        assert_contains('removed image request metadata', $project->readText('logs/assemble-pages.log'));
+        assert_contains('<h2>Breads</h2>', $project->readText('plugin/pages/menu.html'));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('assemble-pages records an empty image description and preserves sibling content', function () {
+    [$project, $tmp] = assemble_fixture();
+    try {
+        $image = '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/unknown.jpg" alt="AI_IMAGE: | content card | photo | square"/></figure><!-- /wp:image -->';
+        $project->writeText('theme/parts/page-home--hero.html', $image);
+        $sibling = $project->readText('theme/parts/page-home--about.html');
+        (new AssemblePagesStep())->run($project);
+        $content = $project->readText('plugin/pages/home.html');
+        assert_contains('src="theme:./assets/unknown.jpg" alt=""', $content);
+        assert_contains(trim($sibling), $content);
+        $warnings = implode("\n", $project->readJson('warnings.json')['assemble-pages']);
+        foreach (['plugin/pages/home.html', 'img[0].alt', 'authored=', 'delivered=', 'disposition=', 'no subject was available'] as $term) {
+            assert_contains($term, $warnings);
+        }
+        assert_eq(['markup' => $content, 'repairs' => []], \Automattic\SiteBuild\ImageAltText::clean($content));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 test('assemble-pages inlines fixed parts into plugin pages in plan order', function () {
     [$project, $tmp] = assemble_fixture();
 

@@ -500,16 +500,29 @@ $runExtraStep = static function (Step $step) use ($announce, $project, $recordCo
 // that threw — the per-step rows only print on completion, so without it the
 // error would appear under the LAST COMPLETED step and point at the wrong one.
 $currentStep = null;
+$earlyImages = $withImages ? new \Automattic\SiteBuild\EarlyImageBuild(
+    $project, $imageClient, $pipeline->stepIds(), StepComposition::htmlFirstSelected(),
+) : null;
 $wallStart = microtime(true);
 try {
-    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use ($recordCompleted) {
+    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use ($recordCompleted, $earlyImages) {
         $recordCompleted($step, $secs);
-    }, function (Step $step) use (&$currentStep, $announce): void {
+        $earlyImages?->afterStep($step->id());
+    }, function (Step $step) use (&$currentStep, $announce, $earlyImages): void {
         $currentStep = $step->id();
+        $earlyImages?->beforeStep($step->id());
         $announce($step);
     }, $from);
 } catch (Throwable $e) {
     Narrator::write('✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
+    try {
+        $earlyImages?->finishRaw();
+    } catch (Throwable $stageError) {
+        Narrator::write("Raw image stage stopped: {$stageError->getMessage()}\n");
+    }
+    if ($earlyImages?->directory() !== null) {
+        Narrator::write("Raw image results and attempt logs remain in {$earlyImages->directory()}\n");
+    }
     exit(1);
 }
 
@@ -520,8 +533,15 @@ if ($withImages) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
-    foreach (StepComposition::postImages(make_generate_images_step($llm, $imageClient)) as $step) {
-        $runExtraStep($step);
+    $postImagesCompleted = false;
+    try {
+        $applicationImages = $earlyImages->applicationClient();
+        foreach (StepComposition::postImages(make_generate_images_step($llm, $applicationImages)) as $step) {
+            $runExtraStep($step);
+        }
+        $postImagesCompleted = true;
+    } finally {
+        $earlyImages->finishRaw(publish: true, cleanup: $postImagesCompleted);
     }
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
@@ -537,6 +557,14 @@ if ($withImages) {
         };
     }
     $report->setImages($generated, $failed, count($specs), $placeholders);
+    $localImages = count(array_filter($specs, static fn (array $spec): bool => ($spec['renderer'] ?? '') === 'native-ui'));
+    $report->setImageRequests(
+        $imageClient instanceof \Automattic\SiteBuild\ImageUsageReporting ? $imageClient->imageUsageTotals() : null,
+        $localImages,
+    );
+    $report->setPreparedImageReuse($applicationImages->reusedResults());
+    $report->setImageReuse(count(array_filter($specs, static fn (array $spec): bool =>
+        ($spec['status'] ?? '') === 'completed' && isset($spec['reused_from']))));
 }
 
 if ($project->exists('patterns.json')) {

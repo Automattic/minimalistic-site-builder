@@ -1,0 +1,201 @@
+<?php
+declare(strict_types=1);
+
+use Automattic\SiteBuild\ActionCapabilities;
+use Automattic\SiteBuild\Steps\CtaBudgetStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
+
+function action_capability_pages(): array
+{
+    return [[
+        'slug' => 'home', 'path' => '/', 'title' => 'Home', 'front' => true,
+        'sections' => [
+            ['slug' => 'hero', 'title' => 'Atlas Field', 'role' => 'hero', 'content_notes' => 'Start a free trial.',
+                'primary_action' => ['label' => 'Start free trial', 'intent' => 'Create an account.', 'destination' => '#features']],
+            ['slug' => 'features', 'title' => 'Features', 'role' => 'content', 'primary_action' => null],
+            ['slug' => 'contact', 'title' => 'Contact', 'role' => 'closing', 'primary_action' => null],
+        ],
+    ]];
+}
+
+function capability_button(string $label, ?string $href): string
+{
+    return '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link"'
+        . ($href === null ? '' : ' href="' . $href . '"') . '>' . $label . '</a></div><!-- /wp:button -->';
+}
+
+test('a local content link cannot promise a free trial', function () {
+    $pages = action_capability_pages();
+    $warnings = [];
+    $out = PagePlanStep::reconcileActionCapabilities($pages, [], $warnings);
+    assert_eq('Features', $out[0]['sections'][0]['primary_action']['label']);
+    assert_eq('#features', $out[0]['sections'][0]['primary_action']['destination']);
+    assert_contains('Omit the earlier transaction promise', $out[0]['sections'][0]['content_notes']);
+    assert_eq($pages[0]['sections'][1], $out[0]['sections'][1]);
+    assert_eq($pages[0]['sections'][2], $out[0]['sections'][2]);
+    assert_contains('pages.json', $warnings[0]);
+    assert_contains('Start free trial', $warnings[0]);
+    assert_contains('Features', $warnings[0]);
+    $nextWarnings = [];
+    assert_eq($out, PagePlanStep::reconcileActionCapabilities($out, [], $nextWarnings));
+    assert_eq([], $nextWarnings);
+});
+
+test('action repair removes only a dead catalogue button and corrects a trial label', function () {
+    $sibling = '<!-- wp:paragraph --><p>The studio uses recycled glass.</p><!-- /wp:paragraph -->';
+    $markup = $sibling . capability_button('Request catalogue', null) . $sibling
+        . capability_button('Start free trial', '/#features') . $sibling;
+    $context = ActionCapabilities::context([], action_capability_pages());
+    $result = ActionCapabilities::repairMarkup($markup, $context, 'theme/parts/page-home--contact.html');
+    assert_eq($sibling . $sibling . capability_button('Features', '/#features') . $sibling, $result['markup']);
+    assert_eq(2, count($result['warnings']));
+    assert_contains('delivered=removed', $result['warnings'][0]);
+    assert_contains('blocks[', $result['warnings'][0]);
+    assert_contains('Request catalogue', $result['warnings'][0]);
+    assert_eq(['markup' => $result['markup'], 'warnings' => []], ActionCapabilities::repairMarkup($result['markup'], $context, 'theme/parts/page-home--contact.html'));
+});
+
+test('verified contact routes and real host forms retain transaction labels', function () {
+    $context = ActionCapabilities::context(['email' => 'trade@example.com', 'trial_url' => 'https://app.example.com/trial'], action_capability_pages());
+    assert_eq('Request catalogue', ActionCapabilities::label('Request catalogue', 'mailto:trade@example.com', $context));
+    assert_eq('Start free trial', ActionCapabilities::label('Start free trial', 'https://app.example.com/trial', $context));
+    $context['form_destinations']['/#contact'] = true;
+    assert_eq('Request catalogue', ActionCapabilities::label('Request catalogue', '#contact', $context));
+    assert_eq('See trial features', ActionCapabilities::label('See trial features', '#features', $context));
+    assert_eq(null, ActionCapabilities::label('Reserve now', 'https://invented.example/book', $context));
+    $context['primary_cta'] = 'Comenzar gratis';
+    $context['cta_type'] = 'free trial signup';
+    assert_eq('Features', ActionCapabilities::label('Comenzar gratis', '#features', $context));
+});
+
+test('the CTA step checks the header hero footer and closing section', function () {
+    with_project('builder_action_capability_', function ($project) {
+        $project->writeJson('siteSpec.json', ['primary_cta' => 'Start free trial', 'cta_type' => 'free trial signup']);
+        $project->writeJson('meta.json', []);
+        $project->writeJson('pages.json', ['pages' => action_capability_pages()]);
+        foreach (['header', 'footer', 'page-home--hero', 'page-home--features'] as $part) {
+            $project->writeText('theme/parts/' . $part . '.html', capability_button('Start free trial', '/#features'));
+        }
+        $project->writeText('theme/parts/page-home--contact.html', capability_button('Request catalogue', null));
+        $step = new CtaBudgetStep();
+        $step->run($project);
+        foreach (['header', 'footer', 'page-home--hero', 'page-home--features'] as $part) {
+            $markup = $project->readText('theme/parts/' . $part . '.html');
+            assert_contains('Features</a>', $markup);
+            assert_true(!str_contains($markup, 'Start free trial'));
+        }
+        assert_eq('', $project->readText('theme/parts/page-home--contact.html'));
+        assert_eq(5, count($project->readJson('warnings.json')['cta-budget']));
+        $before = $project->readText('theme/parts/header.html');
+        $step->run($project);
+        assert_eq($before, $project->readText('theme/parts/header.html'));
+    });
+});
+
+test('a content action label has plain text within the primary-action limit', function () {
+    $pages = action_capability_pages();
+    $pages[0]['sections'][1]['title'] = '<span class="emph">' . str_repeat('Useful details ', 10) . '</span>';
+    $context = ActionCapabilities::context([], $pages);
+    $label = ActionCapabilities::label('Start free trial', '#features', $context);
+    assert_true(is_string($label));
+    assert_true(!str_contains($label, '<'));
+    assert_true(mb_strlen($label) <= 80);
+});
+
+
+test('equivalent internal routes retain content and form actions', function () {
+    $pages = [['slug' => 'visit', 'path' => '/visit/', 'title' => 'Visit', 'sections' => [
+        ['slug' => 'contact', 'title' => 'Contact details'],
+    ]]];
+    $context = ActionCapabilities::context([], $pages);
+    foreach (['/visit', '/visit/', '/visit?source=menu'] as $url) {
+        assert_eq('Visit', ActionCapabilities::label('Reserve a table', $url, $context));
+    }
+    foreach (['/visit#contact', '/visit/#contact', '#contact'] as $url) {
+        assert_eq('Contact details', ActionCapabilities::label('Make a Reservation', $url, $context, '/visit/'));
+    }
+    $context['form_destinations']['/visit/#contact'] = true;
+    assert_eq('Make a Reservation', ActionCapabilities::label('Make a Reservation', '/visit#contact', $context));
+    assert_eq(null, ActionCapabilities::label('Make a Reservation', '//elsewhere.example/visit', $context));
+    assert_eq(null, ActionCapabilities::label('Make a Reservation', 'https://elsewhere.example/visit', $context));
+    assert_eq('Read reservation details', ActionCapabilities::label('Read reservation details', '/visit', $context));
+});
+
+test('a transaction title cannot hide another unsupported transaction', function () {
+    $pages = action_capability_pages();
+    $pages[0]['sections'][1]['title'] = 'Make a Reservation';
+    $context = ActionCapabilities::context([], $pages);
+    assert_eq(null, ActionCapabilities::label('Reserve a table', '#features', $context));
+    $context['contact_destinations']['https://booking.example/reserve'] = true;
+    assert_eq('Make a Reservation', ActionCapabilities::label('Make a Reservation', 'https://booking.example/reserve', $context));
+});
+
+test('the scoped homepage uses the full action contract without changing siblings', function () {
+    with_project('builder_scoped_action_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A restaurant.']);
+        $project->writeJson('siteSpec.json', ['name' => 'Tbilisi', 'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome.'],
+            ['slug' => 'visit', 'title' => 'Visit', 'purpose' => 'Contact details.'],
+        ]]);
+        $project->writeText('pages.json', '{"pages":[]}');
+        seed_test_design_direction($project);
+        $llm = new \Automattic\SiteBuild\Tests\FakeLlm();
+        $llm->queueJson(['sections' => [
+            plan_section(['slug' => 'hero', 'primary_action' => ['label' => 'Make a Reservation', 'intent' => 'Book a table.', 'destination' => '/visit']]),
+            plan_section(['slug' => 'food', 'layout_archetype' => 'feature-row-hairlines']),
+            plan_section(['slug' => 'details', 'layout_archetype' => 'asymmetric-split']),
+        ]]);
+        $step = new PagePlanStep($llm, new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+        $pages = $step->runForSlugs($project, ['home']);
+        assert_eq('Visit', $pages[0]['sections'][0]['primary_action']['label']);
+        assert_eq('{"pages":[]}', $project->readText('pages.json'));
+        assert_contains('Make a Reservation', implode(' ', $project->readJson('warnings.json')['page-plan']));
+    });
+});
+
+test('the pattern action check retains valid links and removes only dead actions', function () {
+    $sibling = '<!-- wp:paragraph --><p>Keep this text.</p><!-- /wp:paragraph -->';
+    $valid = capability_button('Make a Reservation', 'https://booking.example/reserve');
+    $markup = $sibling . capability_button('See contact details', '#') . $valid . $sibling;
+    $result = ActionCapabilities::repairMarkup($markup, [], 'theme/patterns/contact.php', deadOnly: true);
+    assert_eq($sibling . $valid . $sibling, $result['markup']);
+    assert_eq(1, count($result['warnings']));
+    assert_contains('delivered=removed', $result['warnings'][0]);
+    assert_contains('theme/patterns/contact.php', $result['warnings'][0]);
+    assert_eq(['markup' => $result['markup'], 'warnings' => []], ActionCapabilities::repairMarkup($result['markup'], [], 'theme/patterns/contact.php', deadOnly: true));
+});
+
+
+test('a scoped plan retains known sibling anchors', function () {
+    with_project('builder_scoped_anchor_', function ($project) {
+        $project->writeJson('meta.json', ['prompt' => 'A restaurant.']);
+        $project->writeJson('siteSpec.json', ['name' => 'Tbilisi', 'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome.'],
+            ['slug' => 'visit', 'title' => 'Visit', 'purpose' => 'Contact details.'],
+        ]]);
+        $project->writeJson('pages.json', ['pages' => [['slug' => 'visit', 'path' => '/visit/',
+            'title' => 'Visit', 'sections' => [['slug' => 'contact', 'title' => 'Contact details']],
+        ]]]);
+        $saved = $project->readText('pages.json');
+        seed_test_design_direction($project);
+        $llm = new \Automattic\SiteBuild\Tests\FakeLlm();
+        $llm->queueJson(['sections' => [
+            plan_section(['slug' => 'hero', 'primary_action' => ['label' => 'Make a Reservation', 'intent' => 'Book a table.', 'destination' => '/visit#contact']]),
+            plan_section(['slug' => 'food', 'layout_archetype' => 'feature-row-hairlines']),
+            plan_section(['slug' => 'details', 'layout_archetype' => 'asymmetric-split']),
+        ]]);
+        $step = new PagePlanStep($llm, new \Automattic\SiteBuild\PromptRenderer(repo_path('prompts')));
+        $pages = $step->runForSlugs($project, ['home']);
+        assert_eq('Contact details', $pages[0]['sections'][0]['primary_action']['label']);
+        assert_eq('/visit#contact', $pages[0]['sections'][0]['primary_action']['destination']);
+        assert_eq($saved, $project->readText('pages.json'));
+    });
+});
+
+test('whitespace cannot hide a dead action destination', function () {
+    foreach (['   ', ' # '] as $destination) {
+        $result = ActionCapabilities::repairMarkup(capability_button('See the hours', $destination), [], 'theme/patterns/contact.php', deadOnly: true);
+        assert_eq('', $result['markup']);
+        assert_eq(1, count($result['warnings']));
+    }
+});

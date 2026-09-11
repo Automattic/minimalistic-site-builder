@@ -70,10 +70,9 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // random and expanded by the design-direction call below. Runs after
     // site-spec, before the concurrent group.
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
-    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     // design-direction (json) — the expanded direction, read by
     // theme-json/page-plan/sections.
-    $llm->queueJson(['direction' => [
+    $llm->queueJson(['winner' => 0, 'why' => 'The concept fits the subject.', 'direction' => [
         'title' => 'Hearth & Grain',
         'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.',
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],

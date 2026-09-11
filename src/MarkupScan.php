@@ -42,12 +42,20 @@ final class MarkupScan
     /** @return array{string,int}|null attribute value and its byte offset inside the tag */
     public static function tagAttribute(string $tagHtml, string $name): ?array
     {
-        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
-            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
-        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
+        preg_match_all('/[\x20\t\r\n\f]+([^\s=\/>]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/',
+            $tagHtml, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+        foreach ($matches as $match) {
+            if (strtolower($match[1][0]) !== strtolower($name)) {
+                continue;
+            }
+            foreach ([2, 3] as $quoted) {
+                if (($match[$quoted][1] ?? -1) >= 0) {
+                    return $match[$quoted];
+                }
+            }
             return null;
         }
-        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
+        return null;
     }
 
     /** Convert a rendered preset variable back to block-attribute syntax. */

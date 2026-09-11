@@ -19,7 +19,7 @@ function template_part_unit_input(): array
     return [
         'site_spec'        => '{"name":"PART-SPEC-SENTINEL"}',
         'language'         => 'part-language-sentinel',
-        'theme_json'       => '{"part-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"part-theme-sentinel":true}}}',
         'design_direction' => 'PART-DIRECTION-SENTINEL',
         'outline'          => '1. PART-OUTLINE-SENTINEL (hero)',
         'site_pages'       => '- "Home" — / (front page): PART-PAGES-SENTINEL',
@@ -496,6 +496,15 @@ test('HeaderUnit repairs grid identity pairs but does not move taglines across p
     assert_eq(1, count($separateResult->warnings));
     assert_contains('different structural parents', $separateResult->warnings[0]);
     assert_contains('has-accent-background-color', $separateResult->markup);
+});
+
+test('FooterUnit gives supplied operational facts priority after the complete brief', function () {
+    $request = (new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(template_part_unit_input());
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strrpos($request['prompt'], 'PART-FINAL-SECTION-SENTINEL'));
+    assert_contains('Do not infer daily service, approximate hours, walk-in policies, or schedule changes.', $request['prompt']);
+    assert_contains('including the copyright and credit lines', $request['prompt']);
+    assert_true(str_ends_with($request['prompt'], 'Preserve the site identity, valid links, required legal and copyright text, and assigned layout.'));
 });
 
 test('FooterUnit generates a constrained footer from self-contained input', function () {
