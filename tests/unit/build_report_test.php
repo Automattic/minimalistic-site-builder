@@ -82,6 +82,9 @@ test('build-report omits the images line until an image step is recorded', funct
 
     $r->setImages(6, 1, 7);
     assert_eq('Images: 6 generated, 1 failed (7 total)', $r->imagesLine());
+
+    $r->setImages(4, 0, 6, 2);
+    assert_eq('Images: 4 generated, 0 failed (6 total), 2 local placeholders', $r->imagesLine());
 });
 
 test('build-report renders a full document with header, table, totals and images', function () {
