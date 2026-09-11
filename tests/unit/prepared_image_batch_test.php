@@ -124,6 +124,7 @@ test('image preparation requires the page assembly artifact', function () {
 test('image preparation keeps chrome and CSS references after assembly', function () {
     with_project('builder_prepared_chrome_', function ($project) {
         prepared_image_fixture($project);
+        $project->writeText('theme/templates/page.html', '<!-- wp:template-part {"slug":"footer"} /-->');
         $project->writeText('theme/parts/footer.html', '<div style="background-image:url(theme:./assets/removed.jpg)"></div>');
         assert_eq([0, 1, 3], array_keys(PreparedImageBatch::fromProject($project)->requests()));
     });
@@ -163,5 +164,35 @@ test('a host predicate excludes local images from provider requests', function (
         assert_eq(2, count($seenKinds));
         assert_true($seenKinds[0] !== '');
         assert_true($batch->isCurrent($project));
+    });
+});
+
+test('an orphan source part cannot restore an image removed from the final page', function () {
+    with_project('builder_prepared_orphan_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('plugin/pages/home.html', '<p>The final page has no photograph.</p>');
+        $project->writeText('theme/parts/page-home--old.html', '<img src="theme:./assets/removed.jpg">');
+        $project->writeText('plugin/pages/orphan.html', '<img src="theme:./assets/hero.jpg">');
+        $batch = PreparedImageBatch::fromProject($project);
+        assert_eq([3], array_keys($batch->requests()));
+        assert_eq('unreferenced', $batch->omitted()[0]['reason']);
+        assert_eq('unreferenced', $batch->omitted()[1]['reason']);
+        $project->writeText('theme/parts/page-home--old.html', '<img src="theme:./assets/hero.jpg">');
+        assert_true($batch->isCurrent($project), 'orphan source changes cannot change the final image inputs');
+    });
+});
+
+test('image preparation follows recursive template parts and terminates cycles', function () {
+    with_project('builder_prepared_part_tree_', function ($project) {
+        prepared_image_fixture($project);
+        $project->writeText('theme/templates/page.html', '<!-- wp:template-part {"slug":"header"} /-->');
+        $project->writeText('theme/parts/header.html', '<!-- wp:template-part {"slug":"brand"} /-->');
+        $project->writeText('theme/parts/brand.html', '<img src="theme:./assets/removed.jpg"><!-- wp:template-part {"slug":"header"} /-->');
+        $batch = PreparedImageBatch::fromProject($project);
+        assert_eq([0, 1, 3], array_keys($batch->requests()));
+        assert_true($batch->isCurrent($project));
+        $project->writeText('theme/parts/brand.html', '<p>The mark is text.</p>');
+        assert_true(!$batch->isCurrent($project));
+        assert_eq('unreferenced', PreparedImageBatch::fromProject($project)->omitted()[1]['reason']);
     });
 });
