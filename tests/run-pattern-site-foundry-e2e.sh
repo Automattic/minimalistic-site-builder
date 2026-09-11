@@ -5,13 +5,18 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 site_foundry_root=${SITE_FOUNDRY_ROOT:-"$(dirname "$repo_root")/site-foundry"}
 proof_dir=${MSB_PATTERN_PROOF_DIR:-/tmp/msb-pattern-proof-initial}
 keep_running=0
+headed=0
 
-if [[ ${1:-} == "--keep-running" ]]; then
-	keep_running=1
-elif [[ $# -gt 0 ]]; then
-	printf 'Usage: %s [--keep-running]\n' "$0"
-	exit 2
-fi
+for arg in "$@"; do
+	case "$arg" in
+		--keep-running) keep_running=1 ;;
+		--headed) headed=1 ;;
+		*) printf 'Usage: %s [--keep-running] [--headed]\n' "$0"; exit 2 ;;
+	esac
+done
+
+evidence_dir=${SITE_FOUNDRY_EVIDENCE_DIR:-$(mktemp -d /tmp/msb-site-foundry-e2e.XXXXXX)}
+mkdir -p "$evidence_dir"
 
 if [[ ! -f "$site_foundry_root/site-foundry.php" ]]; then
 	printf 'Site Foundry checkout not found: %s\nSet SITE_FOUNDRY_ROOT to its checkout.\n' "$site_foundry_root"
@@ -27,21 +32,21 @@ if [[ ! -f "$site_foundry_root/vendor/autoload.php" ]]; then
 fi
 
 override="$site_foundry_root/.wp-env.override.json"
-if [[ ! -f "$override" ]] || ! php -r '
-    $config = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
-    $mappings = $config["mappings"] ?? [];
-    exit(
-        ($mappings["wp-content/msb-pattern-proof"] ?? null) === $argv[2]
-        && ($mappings["wp-content/msb-pattern-tests"] ?? null) === $argv[3]
-        ? 0 : 1
-    );
-' "$override" "$proof_dir" "$repo_root/tests"; then
-	printf '%s\n' \
-		"$override must map:" \
-		"  wp-content/msb-pattern-proof => $proof_dir" \
-		"  wp-content/msb-pattern-tests => $repo_root/tests"
-	exit 1
-fi
+php -r '
+    $path = $argv[1];
+    $config = is_file($path)
+        ? json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR)
+        : [];
+    $config["plugins"] = ["."];
+    $config["config"]["SITE_FOUNDRY_LOCAL_PATTERN_BUNDLE"] = "/var/www/html/wp-content/msb-pattern-proof";
+    $config["mappings"]["wp-content/msb-pattern-proof"] = $argv[2];
+    $config["mappings"]["wp-content/msb-pattern-tests"] = $argv[3];
+    $json = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+    $tmp = $path . ".tmp";
+    if (file_put_contents($tmp, $json) === false || !rename($tmp, $path)) {
+        throw new RuntimeException("Could not update " . $path);
+    }
+' "$override" "$proof_dir" "$repo_root/tests"
 
 started=0
 cleanup() {
@@ -58,34 +63,31 @@ php "$repo_root/tests/pattern-proof.php" "$proof_dir"
 node "$repo_root/tests/integration/pattern-content-oracle.js" "$proof_dir/pattern-output.json"
 
 cd "$site_foundry_root"
+composer dump-autoload
+pnpm build
+pnpm exec wp-env stop >/dev/null 2>&1 || true
 pnpm exec wp-env start
 started=1
 
-result=$(pnpm exec wp-env run cli wp eval-file \
-	/var/www/html/wp-content/msb-pattern-tests/integration/site-foundry-pattern-proof.php \
-	/var/www/html/wp-content/msb-pattern-proof)
-printf '%s\n' "$result"
+playwright_args=(test tests/e2e/local-pattern/msb-pattern.spec.js --output "$evidence_dir/playwright")
+if [[ $headed -eq 1 ]]; then
+	playwright_args+=(--headed)
+fi
+SITE_FOUNDRY_RECORD_VIDEO=1 \
+SITE_FOUNDRY_EVIDENCE_DIR="$evidence_dir" \
+	pnpm exec playwright "${playwright_args[@]}"
 
-site_url=$(php -r '
-    $output = stream_get_contents(STDIN);
-    if (preg_match("~https?://localhost:[0-9]+/pattern-proof-[0-9]+~", $output, $match) !== 1) {
-        exit(1);
-    }
-    echo $match[0];
-' <<< "$result")
+site_url=$(php -r '$r=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $r["site_url"];' "$evidence_dir/result.json")
+video=$(find "$evidence_dir/playwright" -type f -name '*.webm' -print -quit)
+if command -v ffmpeg >/dev/null 2>&1 && [[ -n "$video" ]]; then
+	mp4="$evidence_dir/site-foundry-pattern-e2e.mp4"
+	ffmpeg -y -loglevel error -i "$video" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$mp4"
+	video="$mp4"
+fi
 
-rendered=$(curl -fsS "$site_url/")
-for expected in \
-	'Make room for good work' \
-	'Approved <strong>protected</strong> wording.' \
-	'12 Harbor Street'; do
-	if [[ "$rendered" != *"$expected"* ]]; then
-		printf 'Rendered homepage is missing: %s\n' "$expected"
-		exit 1
-	fi
-done
-
-printf 'Pattern E2E passed: %s/\n' "$site_url"
+printf 'Pattern E2E passed through the Site Foundry plugin: %s\n' "$site_url"
+printf 'Browser recording: %s\n' "$video"
+printf 'Evidence metadata: %s/result.json\n' "$evidence_dir"
 if [[ $keep_running -eq 1 ]]; then
 	printf 'WordPress remains running. Stop it with: cd %s && pnpm exec wp-env stop\n' "$site_foundry_root"
 fi

@@ -87,19 +87,25 @@ its contract.
 
 ## Local WordPress E2E
 
-With the Site Foundry checkout next to this repository, its Composer and pnpm
-dependencies installed, and its gitignored `.wp-env.override.json` mapping the
-proof and test directories, run:
+With the Site Foundry checkout next to this repository and its Composer and
+pnpm dependencies installed, run:
 
 ```sh
-tests/run-pattern-site-foundry-e2e.sh --keep-running
+tests/run-pattern-site-foundry-e2e.sh --keep-running --headed
 ```
 
 The command generates the fixture bundle, validates its blocks with the pinned
-Gutenberg runtime, starts Site Foundry's WordPress multisite, creates a fresh
-subsite through the real importer, and checks the rendered homepage. The flag
-leaves WordPress running for browser inspection. Without it, the command stops
-wp-env after the verification.
+Gutenberg runtime, starts Site Foundry's Docker WordPress multisite, opens the
+real Network Admin plugin flow in Playwright, creates a fresh subsite through
+the plugin's AJAX endpoints, applies the local bundle, and checks the rendered
+homepage. Every run saves a browser video and result metadata under a temporary
+directory printed at the end. `--headed` shows the browser while it records;
+`--keep-running` leaves WordPress running for inspection.
+
+The runner updates Site Foundry's gitignored `.wp-env.override.json` with the
+local-only bundle constant and Docker bind mounts. It also disables the Jetpack
+download in this local configuration because the plugin-side adapter exercises
+the destination boundary without WPCOM services.
 
 Override the sibling checkout convention with `SITE_FOUNDRY_ROOT=/path/to/site-foundry`.
 The E2E uses fixture providers; production authorization, quotas, credentials,
