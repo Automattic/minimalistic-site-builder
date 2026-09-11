@@ -139,7 +139,9 @@ final class SectionUnit extends AbstractPageSectionUnit
                     ),
                 ]),
             'header_contract'   => $this->inputString($input, 'header_contract'),
-            'image_instructions' => $this->renderer->render('image-generation.md', []),
+            'image_instructions' => SectionComposition::metadata($archetype)['max_images'] > 0
+                ? rtrim($this->renderer->render('image-markup.md', []))
+                : 'This composition permits no media. Emit no image placeholders.',
             'form_instructions'  => $this->renderer->render(
                 ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
                 [],

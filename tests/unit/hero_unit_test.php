@@ -64,7 +64,7 @@ function hero_unit_contract_input(
     return [
         'site_spec' => ['name' => 'HERO-SPEC-SENTINEL'],
         'language' => 'hero-language-sentinel',
-        'theme_json' => ['version' => 3, 'hero-theme-sentinel' => true],
+        'theme_json' => ['version' => 3, 'settings' => ['custom' => ['hero-theme-sentinel' => true]]],
         'design_direction' => 'HERO-DIRECTION-SENTINEL',
         'outline' => "1. HERO-OUTLINE-SENTINEL (hero) [#hero]\n2. Work (content) [#work]",
         'site_pages' => '- "Home" — / (front page): HERO-PAGES-SENTINEL',
