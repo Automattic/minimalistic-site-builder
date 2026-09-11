@@ -248,9 +248,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
-     * theme-level block defaults. button, link and heading are also absent:
-     * ContrastFixStep reads those paths and rewrites failing colors, so they
-     * stay model-authored.
+     * theme-level block defaults. This shared scaffold also omits button,
+     * link, and heading colors. Blocks builds compile link defaults below;
+     * HTML-first builds request them from the model. ContrastFixStep checks
+     * these element colors against their surfaces.
      *
      * @var array<mixed>
      */
@@ -742,10 +743,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ],
             'styles' => [
                 'typography' => ['fontWeight' => self::compiledWeight($direction, 'body', '400')],
-                'elements' => ['heading' => ['typography' => [
-                    'fontWeight' => self::compiledWeight($direction, 'heading', '600'),
-                    'lineHeight' => '1.15',
-                ]]],
+                'elements' => [
+                    'heading' => ['typography' => [
+                        'fontWeight' => self::compiledWeight($direction, 'heading', '600'),
+                        'lineHeight' => '1.15',
+                    ]],
+                    'link' => [
+                        'color' => ['text' => 'var:preset|color|primary'],
+                        ':hover' => ['color' => ['text' => 'var:preset|color|accent']],
+                    ],
+                ],
             ],
         ];
     }
