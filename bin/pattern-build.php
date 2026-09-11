@@ -19,7 +19,6 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../src/bootstrap.php';
 
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
@@ -45,6 +44,9 @@ if ($fixtures === null || !is_dir($fixtures)) {
 $composition = StepComposition::patterns();
 $pipeline = new Pipeline($composition->steps(), $composition->seeds());
 
+// Pipeline skips every step when it never matches $fromId and returns
+// normally, so an unknown stage would look like a build that ran and produced
+// nothing. Reject it here instead.
 $from = $flags['from'] ?? null;
 $until = $flags['until'] ?? null;
 foreach (['from' => $from, 'until' => $until] as $flag => $id) {
