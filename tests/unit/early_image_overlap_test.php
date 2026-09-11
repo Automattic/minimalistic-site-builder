@@ -34,7 +34,9 @@ final class LedgerOverlapImageClient implements ImageClient, CooperativeTranspor
     }
 }
 
-test('the default early stage permits fast QA and its failed replacement before the slow raw result', function () {
+foreach ([false, true] as $failReplacement) {
+$case = $failReplacement ? 'failed replacement' : 'successful replacement';
+test('the default early stage permits fast QA before the slow raw result: ' . $case, function () use ($failReplacement) {
     [$project, $tmp] = queue_image_fixture(2);
     $storage = early_image_storage();
     try {
@@ -46,7 +48,7 @@ test('the default early stage permits fast QA and its failed replacement before 
         seed_test_design_direction($project);
         $client = new LedgerOverlapImageClient();
         $client->inner->delays = ['img-0.jpg' => 0.003, 'img-1.jpg' => 0.1];
-        $client->inner->failReplacement = true;
+        $client->inner->failReplacement = $failReplacement;
         $llm = new OverlapVisionLlm($client->inner);
         $llm->fail = ['img-0.jpg'];
         $build = new EarlyImageBuild($project, $client, ['assemble-pages', 'page-styles'], false, $storage);
@@ -60,6 +62,10 @@ test('the default early stage permits fast QA and its failed replacement before 
         assert_true(in_array('qa-img-0.jpg-1', $events, true));
         assert_true(array_search('qa-img-0.jpg-1', $events, true) < array_search('done-img-1.jpg-1', $events, true));
         assert_true(array_search('done-img-0.jpg-2', $events, true) < array_search('done-img-1.jpg-1', $events, true));
+        if (!$failReplacement) {
+            assert_true(in_array('qa-img-0.jpg-2', $events, true));
+            assert_true(array_search('qa-img-0.jpg-2', $events, true) < array_search('done-img-1.jpg-1', $events, true));
+        }
         assert_eq(['img-0.jpg' => 2, 'img-1.jpg' => 1], $client->inner->attempts);
         assert_eq(2, $replay->reusedResults());
         assert_eq(3, $client->imageUsageTotals()['attempts']);
@@ -79,6 +85,7 @@ test('the default early stage permits fast QA and its failed replacement before 
         remove_tree($storage);
     }
 });
+}
 
 test('serial apply failure retains paid raw results and publishes their attempts in finally', function () {
     [$project, $tmp] = queue_image_fixture(2);
