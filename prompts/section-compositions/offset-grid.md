@@ -26,3 +26,8 @@ the items.
 - Objective failure: level tops on every column, equal column widths, fewer
   than two images, or a stagger built with padding that leaves no visible
   offset.
+
+2. `staggered-grid` — offset rhythm, ONLY in a section whose assigned archetype is `offset-grid` (the page plan assigns it only under the DESIGN DIRECTION's `offset` or `gallery` rhythm). The build levels staggered sibling tops in every other section — use `equal-grid` or `editorial-row` there instead.
+   - `wp:columns` (no equal-cards class); each `wp:column` still gets a `"width"` and the widths MUST sum to 100%.
+   - Push every SECOND column's card down by giving its inner card `wp:group` `"style":{"spacing":{"margin":{"top":"3rem"}}}` (odd columns get no offset). Use "4rem" for a stronger stagger.
+   - For image galleries with more than six mixed-aspect items, prefer one `masonry-3` group over repeated `wp:columns` rows. Repeated unequal rows inherit the tallest card's height and create large accidental vertical holes. If masonry does not fit the direction, normalize image media with the documented card crop classes and keep row margins at md/lg — never stack xl/xxl row margins on top of outer section spacing.

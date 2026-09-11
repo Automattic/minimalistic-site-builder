@@ -1852,12 +1852,13 @@ final class DesignDirectionStep implements Step
         $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
         if ($itemPattern !== null) {
             $meaning = match ($itemPattern) {
-                'card'        => 'list-like sections repeat discrete bounded cards',
-                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
-                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
-                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+                'card'        => 'discrete bounded cards',
+                'rule-row'    => 'compact name/detail rows joined by a purposeful hairline',
+                'spec-table'  => 'compact label/value pairs aligned for comparison',
+                'tag-cluster' => 'short categorical labels wrapped as compact inline chips',
             };
-            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
+            $facts[] = "- **Item pattern**: {$itemPattern} — preferred idiom: {$meaning}. "
+                . 'Each section may choose another supported idiom for its content; its assigned recipe takes precedence.';
         }
 
         $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
@@ -1876,11 +1877,7 @@ final class DesignDirectionStep implements Step
         if ($rhythm !== null) {
             $facts[] = '- **Rhythm**: ' . $rhythm . ' — ' . match ($rhythm) {
                 'stacked'     => 'bands follow one another in one steady column; carry the page on type scale and spacing, not on changes of shape',
-                // Deliberately says nothing about backgrounds. Alternating the
-                // page's surfaces is the "stripes" pattern the page plan already
-                // rejects, and this is the DEFAULT rhythm — a background clause
-                // here would contradict that rule on every build.
-                'alternating' => 'consecutive bands carry visibly different compositions; vary the layout archetype down the page rather than repeating one and varying only its contents',
+                'alternating' => 'vary compositions where a change clarifies the sequence; repeated layouts remain valid when the content benefits',
                 'offset'      => 'bands break the centre line: unequal splits and staggered starts, so the eye never settles on one axis',
                 'interrupted' => 'a mostly steady stack broken by full-bleed bands at deliberate intervals — plan at least one edge-to-edge image or colour band per page',
                 'banded'      => 'the page is paced by its surfaces: spend the page\'s contrast and tinted bands here rather than carrying it on layout change',
@@ -1891,15 +1888,13 @@ final class DesignDirectionStep implements Step
 
         $density = BoundedChoice::explicit($direction['density'] ?? null, self::DENSITIES);
         if ($density !== null) {
-            // A bias, not an override: spacious pauses stay accents under every
-            // density, so these clauses must not read as "spacious everywhere"
-            // — the page plan caps them and would demote the excess anyway.
+            // Overall intent, not a per-page quota or a ban on local exceptions.
             $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
-                'expansive' => 'monumental vertical breathing room; spend every allowed spacious pause, keep the rest standard, and let emptiness carry the page',
-                'airy'      => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
-                'measured'  => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'expansive' => 'monumental vertical breathing room; spacious sequences may let emptiness carry the page',
+                'airy'      => 'generous vertical breathing room; favor spacious or standard sections according to their content',
+                'measured'  => 'an even, unhurried rhythm; favor standard spacing, with local changes where useful',
                 'dense'     => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
-                'packed'    => 'maximally compressed; compact everywhere the content permits, no spacious pauses, and the content itself paces the page',
+                'packed'    => 'maximally compressed; favor compact spacing where the content permits and let the content pace the page',
                 default     => 'the committed page density',
             } . '. The build derives the section-padding ramp, component spacing, and page gutter from this commitment.';
         }
@@ -2177,7 +2172,7 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The authoritative repeated-item idiom, with the card default for a
+     * The preferred repeated-item idiom, with the card default for a
      * missing or pre-field direction. Callers persist any invalid-value
      * warning at their own step boundary.
      *

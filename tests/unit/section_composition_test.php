@@ -750,13 +750,14 @@ test('the feature-row-hairlines archetype checks one row of three or four headin
     assert_contains('"card_columns":1', $joined);
 });
 
-test('the ruled-idiom cleanup keeps a composition marker that names hairlines (frm W3e)', function () {
+test('normalization preserves a composition marker and intentional ruled idiom (frm W3e)', function () {
     $markup = '<!-- wp:group {"className":"section-composition--feature-row-hairlines is-style-rule-row","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group section-composition--feature-row-hairlines is-style-rule-row"><!-- wp:paragraph --><p>Row</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
     $repairs = [];
-    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($markup, 'page-home--features', $repairs);
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::normalize($markup, 'page-home--features', $warnings, $repairs);
     assert_contains('section-composition--feature-row-hairlines', $out, 'the archetype marker survives');
-    assert_true(!str_contains($out, 'is-style-rule-row'), 'the authored rule class still goes');
+    assert_contains('is-style-rule-row', $out, 'normalization does not strip an intentional idiom');
 });
 
 test('the zigzag-steps archetype checks three to five two-column rows whose copy side alternates (frm W3g)', function () {

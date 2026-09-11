@@ -73,7 +73,8 @@ test('the design floor does not read a committed badge as a kicker (frm W6a)', f
 
     $eyebrow = str_replace('"className":"section-badge",', '', $badge);
     $eyebrow = str_replace('class="section-badge has-caption-font-size"', 'class="has-caption-font-size"', $eyebrow);
-    assert_contains('kicker', json_encode(DesignFloor::check($eyebrow, [])), 'an unmarked caption line above a heading is still a kicker');
+    assert_true(!str_contains(json_encode(DesignFloor::check($eyebrow, [])), 'kicker'),
+        'the generic floor no longer infers decorative intent from caption typography; marked labels are checked by SectionLabel');
 });
 
 test('the direction normalizes, persists, formats and reads section_label (frm W6a)', function () {

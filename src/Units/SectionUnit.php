@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
@@ -18,8 +19,8 @@ use Automattic\SiteBuild\Steps\PagePlanStep;
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
  * - card_style: the site card treatment.
- * - motion_profile: committed Motion profile; absent/invalid means static,
- *   matching the delivery gate. Only its permitted instructions are sent.
+ * - motion_profile, motion_classes: committed profile and preferred kit classes;
+ *   absent profile means none, and an empty palette uses that profile's kit
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/item_pattern/text_placement/handoff. The
@@ -52,6 +53,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   design_direction:string,
      *   card_style?:string,
      *   motion_profile?:string,
+     *   motion_classes?:list<string>,
      *   outline:string,
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
@@ -116,7 +118,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
             'card_instructions' => $rules->card($cardStyle),
-            'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
+            'motion_instructions' => $this->motionInstructions($input),
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'card_style'        => $cardStyle,
             'page_title'        => $this->pageString($input, 'title'),
@@ -160,6 +162,21 @@ final class SectionUnit extends AbstractPageSectionUnit
         return $request;
     }
 
+    private function motionInstructions(array $input): string
+    {
+        $profile = $input['motion_profile'] ?? 'none';
+        if (!is_string($profile) || !in_array($profile, Motion::PROFILES, true)) {
+            $profile = 'none';
+        }
+        $classes = Motion::validateNote($input['motion_classes'] ?? [], $profile)['classes'];
+        if ($classes === []) {
+            $classes = array_values(array_intersect(Motion::allowedClasses($profile), Motion::noteClasses()));
+        }
+        $palette = $classes === [] ? 'Use no motion-kit classes.'
+            : 'Choose effects from this site\'s palette: `' . implode('`, `', $classes) . '`.';
+        return (new SectionPromptRules($this->renderer))->motion($profile) . "\n" . $palette;
+    }
+
     public function finish(string $raw, array $input): MarkupResult
     {
         $cardStyle = $this->cardStyle($input);
@@ -185,10 +202,6 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $this->key($input),
                 $repairs,
             );
-        }
-        if (!self::ownsRuledSeparators($itemPattern)) {
-            $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
-            $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
         $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
@@ -270,16 +283,6 @@ final class SectionUnit extends AbstractPageSectionUnit
             );
         }
         return new MarkupResult($markup, $repairs, $warnings);
-    }
-
-    /**
-     * Whether the assigned item pattern draws its own rules, so the section
-     * keeps its `wp:separator` blocks. Every other section is under the line
-     * ration of prompts/section.md (BIGR-978).
-     */
-    private static function ownsRuledSeparators(?string $itemPattern): bool
-    {
-        return in_array($itemPattern, ['rule-row', 'spec-table'], true);
     }
 
     /**
