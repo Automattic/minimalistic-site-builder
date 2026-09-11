@@ -168,6 +168,11 @@ final class SectionRhythm
             // normal band rhythm rather than inheriting a page-wide bypass.
             if ($i === 0 && HeroComposition::isAuthoredMarkup($entry['markup'])) {
                 $markups[] = $entry['markup'];
+                $tall = self::authoredHeroHeightNote($entry['markup'], $entry['label']);
+                if ($tall !== null) {
+                    $notes[] = $tall['message'];
+                    $degradations[] = $tall;
+                }
                 continue;
             }
             $preset = self::DENSITY_PRESETS[$entry['density']];
@@ -260,6 +265,51 @@ final class SectionRhythm
         }
 
         return ['markups' => $markups, 'notes' => $notes, 'degradations' => $degradations];
+    }
+
+    /**
+     * Note an authored opening hero that spends the top of the spacing scale
+     * on both edges.
+     *
+     * This step does not touch an authored hero: the slice that made the hero
+     * model-authored gave it its own spacing on purpose, and overruling that
+     * here would take back the authorship. But the opening hero is the one
+     * band whose height decides whether a visitor sees a call to action
+     * without scrolling — the review build spent `xl` on both edges and put
+     * both hero links about 170px below a 768px fold, with 250px of empty page
+     * under them.
+     *
+     * So: rung 4. The hero ships exactly as authored, and the row says how it
+     * spent its height, which is what a cohort audit needs to see whether
+     * authored heroes drift tall.
+     *
+     * @return array{section:string,code:string,reason:string,message:string,newlyDetected:bool}|null
+     */
+    private static function authoredHeroHeightNote(string $markup, string $label): ?array
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return null;
+        }
+        $padding = ($document->attrs($root) ?? [])['style']['spacing']['padding'] ?? null;
+        if (!is_array($padding)) {
+            return null;
+        }
+        $tall = static fn (mixed $value): bool => is_string($value)
+            && preg_match('/^var:preset\|spacing\|(?:xl|xxl)$/', $value) === 1;
+        if (!$tall($padding['top'] ?? null) || !$tall($padding['bottom'] ?? null)) {
+            return null;
+        }
+
+        return [
+            'section' => $label,
+            'code' => 'authored-hero-height',
+            'reason' => 'top and bottom padding both at the top of the spacing scale',
+            'message' => "{$label}: authored hero keeps padding top={$padding['top']}, bottom={$padding['bottom']};"
+                . ' section-rhythm does not cap an authored hero, so its height and the fold are the author\'s',
+            'newlyDetected' => true,
+        ];
     }
 
     /** Base and contrast are exact solid surfaces; tinted/image are not. */

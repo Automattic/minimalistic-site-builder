@@ -2256,6 +2256,86 @@ final class GeneratedMarkup
      *
      * @param list<array<string,mixed>> $repairs
      */
+    /**
+     * Remove a label above the hero H1 that only repeats the site's wordmark.
+     *
+     * The site header renders the wordmark a couple of hundred pixels above,
+     * so the visitor reads the same words twice before reaching a headline.
+     * An authored hero is where this appears: `dedupeHeadlineEcho()` compares
+     * the H1 with its own supporting copy and runs only for a catalog recipe,
+     * and `section_label` does not own the block either — it arrives as an
+     * ad-hoc `design-*` paragraph, which no token governs.
+     *
+     * Only the block immediately above the H1, only when its whole reading
+     * text is the site name, and only within the hero. A label that says
+     * something else is the author's to keep.
+     */
+    public static function dropWordmarkEcho(
+        string $markup,
+        string $siteName,
+        string $part,
+        array &$repairs = []
+    ): string {
+        $wanted = self::wordmarkKey($siteName);
+        if ($wanted === '') {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        $h1 = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1 = $index;
+                break;
+            }
+        }
+        if ($h1 === null) {
+            return $markup;
+        }
+        $parent = $document->parent($h1);
+        $siblings = $parent === null ? $document->children($document->topLevel() ?? 0) : $document->children($parent);
+        $position = array_search($h1, $siblings, true);
+        if ($position === false || $position === 0) {
+            return $markup;
+        }
+        $echo = $siblings[$position - 1];
+        if (!in_array($document->name($echo), ['paragraph', 'heading'], true)
+            || !$document->isStructurallySafe($echo)
+        ) {
+            return $markup;
+        }
+        $text = trim(html_entity_decode(strip_tags($document->innerHtml($echo)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (self::wordmarkKey($text) !== $wanted) {
+            return $markup;
+        }
+        $offset = $document->openingOffset($echo);
+        $end = $document->endOffset($echo);
+        if ($end === null) {
+            return $markup;
+        }
+        $repairs[] = [
+            'part' => $part,
+            'block' => $document->name($echo),
+            'authored' => $text,
+            'delivered' => 'removed',
+            'note' => 'a label above the hero headline repeated the site wordmark the header already shows',
+        ];
+
+        return substr_replace($markup, '', $offset, $end - $offset);
+    }
+
+    /** Comparable form of a wordmark: letters and digits, case-folded. */
+    private static function wordmarkKey(string $text): string
+    {
+        $key = mb_strtolower(trim($text), 'UTF-8');
+
+        return (string) preg_replace('/[^\p{L}\p{N}]+/u', '', $key);
+    }
+
     public static function dedupeHeadlineEcho(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);

@@ -101,6 +101,15 @@ final class HeroUnit extends AbstractPageSectionUnit
         $markup = $actionResult['markup'];
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
+        // Every hero, authored or from the catalog: the header renders the
+        // wordmark just above, and a label that only repeats it makes the
+        // visitor read the same words twice before the headline.
+        $markup = GeneratedMarkup::dropWordmarkEcho(
+            $markup,
+            (string) ($this->inputArrayOrJson($input, 'site_spec')['name'] ?? ''),
+            $key,
+            $repairs,
+        );
         if (!HeroComposition::isAuthored($context['recipe'])) {
             $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
             $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);

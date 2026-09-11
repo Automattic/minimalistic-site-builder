@@ -1078,3 +1078,45 @@ test('a device on the hero does not consume the budget the next band claims', fu
         "'two' is the first non-hero carrier, so the seam above it keeps an edge"
     );
 });
+
+test('an authored hero keeps its spacing and its height is recorded (frm PR-9e)', function () {
+    // This step does not cap an authored hero: the slice that made the hero
+    // model-authored gave it its own spacing on purpose. The opening hero is
+    // also the one band whose height decides whether a visitor sees a call to
+    // action without scrolling, so the choice is recorded rather than undone.
+    $hero = static fn (string $top, string $bottom): string =>
+        '<!-- wp:group {"className":"hero-composition--authored","style":{"spacing":{"padding":'
+        . '{"top":"var:preset|spacing|' . $top . '","bottom":"var:preset|spacing|' . $bottom . '"}}}} -->'
+        . '<div class="wp-block-group hero-composition--authored">'
+        . '<!-- wp:heading {"level":1} --><h1>Stoneware</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $entry = static fn (string $markup): array => [
+        'label' => 'home/hero', 'markup' => $markup, 'density' => 'standard', 'background' => 'base',
+    ];
+
+    $tall = SectionRhythm::rewrite([$entry($hero('xl', 'xl'))]);
+    assert_eq($hero('xl', 'xl'), $tall['markups'][0], 'the hero ships exactly as authored');
+    $rows = array_values(array_filter(
+        $tall['degradations'],
+        static fn (array $row): bool => $row['code'] === 'authored-hero-height',
+    ));
+    assert_eq(1, count($rows), 'and the height is recorded once');
+    assert_contains('var:preset|spacing|xl', $rows[0]['message'], 'the row names the spending');
+    assert_contains('does not cap an authored hero', $rows[0]['message']);
+
+    // An ordinary authored hero is not a finding.
+    $ordinary = SectionRhythm::rewrite([$entry($hero('lg', 'lg'))]);
+    assert_eq($hero('lg', 'lg'), $ordinary['markups'][0]);
+    assert_eq([], array_values(array_filter(
+        $ordinary['degradations'],
+        static fn (array $row): bool => $row['code'] === 'authored-hero-height',
+    )), 'lg on both edges is ordinary');
+
+    // One tall edge is a composition choice, not a fold problem.
+    $oneEdge = SectionRhythm::rewrite([$entry($hero('xl', 'md'))]);
+    assert_eq([], array_values(array_filter(
+        $oneEdge['degradations'],
+        static fn (array $row): bool => $row['code'] === 'authored-hero-height',
+    )));
+});
+

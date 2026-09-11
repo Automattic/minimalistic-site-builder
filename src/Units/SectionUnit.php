@@ -224,6 +224,13 @@ final class SectionUnit extends AbstractPageSectionUnit
             $action = GeneratedMarkup::reconcilePrimaryAction($markup, $input['section']['primary_action'] ?? null, $key);
             $markup = $action['markup'];
             array_push($repairs, ...$action['repairs']);
+            // The header renders the wordmark above this opening too.
+            $markup = GeneratedMarkup::dropWordmarkEcho(
+                $markup,
+                (string) ($this->inputArrayOrJson($input, 'site_spec')['name'] ?? ''),
+                $key,
+                $repairs,
+            );
             array_push($warnings, ...$action['warnings'], ...HeroComposition::markupWarnings($markup, HeroComposition::AUTHORED, $key));
             return new MarkupResult($markup, $repairs, $warnings);
         }
