@@ -1540,3 +1540,42 @@ test('sections records a recipe media removal and preserves the other section', 
         remove_tree($tmp);
     }
 });
+
+test('scoped regeneration strips the stray markers its write path would ship', function () {
+    // runForPages is the HTML-first mixed fallback, reached from
+    // TransformSiteStep. It builds its jobs through the same jobPlan() that
+    // hands each section the placeholder contracts, and it writes its parts
+    // straight to the theme — so it can produce the same stray markers run()
+    // already cleans up, with nothing between them and the visitor.
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'x',
+        'form_placeholders' => true,
+        'map_placeholders' => true,
+    ]);
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText(
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>JP_FORM</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>JP_MAP: nowhere</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->',
+    );
+    $llm->queueText('<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2>About</h2><!-- /wp:heading --></div><!-- /wp:group -->');
+
+    $pages = (array) $project->readJson('pages.json')['pages'];
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->runForPages($project, $pages);
+
+    $markup = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('<h2>Hero</h2>', $markup, 'the real content is kept');
+    assert_eq(0, Automattic\SiteBuild\FormPlaceholder::markerCount($markup), 'no bare JP_FORM ships');
+    assert_eq(0, Automattic\SiteBuild\MapPlaceholder::markerCount($markup), 'and no bare JP_MAP');
+
+    $warned = implode(' ', (array) ($project->readJson('warnings.json')['sections'] ?? []));
+    assert_contains('JP_FORM marker(s) outside', $warned, 'and the removal is reported');
+    assert_contains('JP_MAP marker(s) outside', $warned);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

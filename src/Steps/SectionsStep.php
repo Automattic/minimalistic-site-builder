@@ -476,6 +476,12 @@ final class SectionsStep implements Step
         }
         $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
         $pages = self::repairedPages($pages, $repairs);
+        // Same safety pass run() does before it writes. These parts are
+        // generated from the same prompts, through the same jobPlan(), so they
+        // can carry the same stray markers — and this path writes them
+        // straight to the theme.
+        $files = self::stripLooseFormMarkers($files, $warnings);
+        $files = self::stripLooseMapMarkers($files, $warnings);
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
