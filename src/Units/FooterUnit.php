@@ -31,7 +31,7 @@ final class FooterUnit extends AbstractMarkupUnit
         $surface = $this->surface($input, $archetype);
         $pageCount = $this->pageCount($input);
         $imageInstructions = FooterComposition::usesGeneratedImage($archetype)
-            ? $this->renderer->render('image-generation.md', [])
+            ? $this->renderer->render('image-markup.md', [])
             : '';
 
         return $this->siteLayeredRequest('footer.md', $this->commonVars($input) + [

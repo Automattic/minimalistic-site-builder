@@ -37,7 +37,8 @@ final class HeaderUnit extends AbstractMarkupUnit
             'nav_rule'   => $this->inputString($input, 'nav_rule'),
             'above_fold_contract' => AboveFoldContract::frontContract($contract),
             'archetype_assignment' => "ASSIGNED HEADER ARCHETYPE for this build: **{$archetype}**. "
-                . 'Build exactly this one; every other catalog entry is reference only.',
+                . 'Build exactly this recipe.',
+            'archetype_recipe' => $this->renderer->render('header-archetypes/' . $archetype . '.md', []),
             'header_behavior' => $this->inputString($input, 'header_behavior'),
         ]);
     }
