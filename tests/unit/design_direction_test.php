@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\CtaStyle;
+use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeaderChrome;
@@ -2816,6 +2818,318 @@ test('fallbackDirection commits no tension and no subject anchor', function () {
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_eq('', $generic['tension']);
     assert_eq('', $generic['subject_anchor']);
+});
+
+
+test('a ground the brief states in so many words is read as a bounded phrase (frm PR-4g)', function () {
+    assert_eq('light', GroundKey::statedInBrief('Create a clean SaaS landing page. White page with a pale blue gradient panel hero.'));
+    assert_eq('dark', GroundKey::statedInBrief('Create a dark landing page for an AI studio. Near-black ground, serif headings.'));
+    assert_eq('dark', GroundKey::statedInBrief('white text on a dark ground'), 'dark phrases win when both appear');
+    assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant in Tbilisi Old Town.'), 'a silent brief decides nothing');
+    assert_eq(null, GroundKey::statedInBrief('a lighthearted, darkly funny comedy club'), 'adjectives are not a ground');
+    assert_eq('light', GroundKey::statedInBrief("Light\n  page, please"));
+    assert_eq(null, GroundKey::statedInBrief('the page ends on a lighthearted note, on blackboard green'), 'a phrase must end at a word boundary');
+});
+
+
+test('the stated ground is read from the user\'s own words before the refined brief (frm PR-4i)', function () {
+    assert_eq('light', DesignDirectionStep::statedGroundFor([
+        'original_prompt' => 'Create a portfolio for a designer in Lisbon. Light page, tight sans headings.',
+        'prompt' => 'A single-page portfolio landing site for an independent designer based in Lisbon with tight sans headings.',
+    ]), 'the refine step dropped the phrase; the original still decides');
+    assert_eq('dark', DesignDirectionStep::statedGroundFor([
+        'prompt' => 'A studio site on a dark ground.',
+    ]), 'the refined brief is read when no original is kept');
+    assert_eq('light', DesignDirectionStep::statedGroundFor([
+        'original_prompt' => 'white page please',
+        'prompt' => 'a dark ground',
+    ]), 'the user\'s words outrank the rewrite when both speak');
+    assert_eq(null, DesignDirectionStep::statedGroundFor(['original_prompt' => 'A cafe in Tbilisi.', 'prompt' => 'A cafe in Tbilisi with warm wood.']));
+    assert_eq(null, DesignDirectionStep::statedGroundFor([]));
+});
+
+
+test('a letterform tradition the brief states outranks the seed (frm PR-5f)', function () {
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('Create a playful portfolio. Light, white page, bold black type with one giant marquee.'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('tight sans headings with muted two-tone lines'));
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('Near-black ground, serif display headings with two-tone emphasis.'));
+    assert_eq('mono', ConceptSeeds::statedTypeRegister('monospace labels everywhere'));
+    assert_eq('geometric', ConceptSeeds::statedTypeRegister('a geometric sans for the display'));
+    // The calderr brief names the hero name's face (frm PR-5o); a hyphenated sans-serif never reads as a serif.
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('Off-white page with every letter in one cobalt blue: a giant serif name as the hero headline, hairline rules with small labels between sections.'));
+    assert_eq('transitional', ConceptSeeds::statedTypeRegister('a serif headline over a photo'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('a giant sans-serif name as the hero headline'));
+    assert_eq('grotesque', ConceptSeeds::statedTypeRegister('the sans wordmark set huge'));
+    assert_eq(null, ConceptSeeds::statedTypeRegister('Create a website for a Georgian restaurant.'), 'a silent brief decides nothing');
+    assert_eq(null, ConceptSeeds::statedTypeRegister('a boldness of flavour, monotone walls'), 'a phrase must be a whole word');
+    foreach (['grotesque', 'transitional', 'mono', 'geometric', 'slab', 'didone', 'display-serif', 'script', 'condensed', 'humanist'] as $register) {
+        assert_true(in_array($register, ConceptSeeds::TYPE_REGISTERS, true), $register);
+    }
+
+    assert_eq('grotesque', DesignDirectionStep::statedTypeRegisterFor([
+        'original_prompt' => 'Light page, bold black type, floating objects.',
+        'prompt' => 'A single-page portfolio with a marquee.',
+    ]), 'the user\'s words decide when the rewrite dropped the phrase');
+    assert_eq('transitional', DesignDirectionStep::statedTypeRegisterFor(['prompt' => 'serif headings on a dark ground']));
+    assert_eq(null, DesignDirectionStep::statedTypeRegisterFor([]));
+});
+
+
+test('a phrase that names the page outranks a loose colour word named later (frm PR-4m)', function () {
+    assert_eq('light', GroundKey::statedInBrief('Create a site for a digital agency. Light grey page with rounded near-black panels: the hero is one dark photo panel.'));
+    assert_eq('light', GroundKey::statedInBrief('Off-white page with a near-black footer band.'));
+    assert_eq('dark', GroundKey::statedInBrief('Dark page with white cards and on-white captions.'), 'the page phrase wins over the loose words either way');
+    assert_eq('dark', GroundKey::statedInBrief('white text on a dark ground'), 'the reviewed dark-first order holds for loose words');
+    assert_eq('dark', GroundKey::statedInBrief('Near-black ground, serif display headings'), 'a page-level dark phrase still reads dark');
+    assert_eq('light', GroundKey::statedInBrief('Light page, then a dark page later in the story'), 'the earliest page phrase wins when both appear');
+    assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant.'));
+});
+
+
+test('a canvas the brief states outranks the model commitment, never a caller constraint (frm PR-2p)', function () {
+    assert_eq('framed', DesignDirectionStep::statedCanvas('Warm off-white page, one painted desert-sky cover hero in a rounded frame.'));
+    assert_eq('framed', DesignDirectionStep::statedCanvas('a framed hero on a white page'));
+    assert_eq(null, DesignDirectionStep::statedCanvas('Create a website for a Georgian restaurant.'));
+    assert_eq(null, DesignDirectionStep::statedCanvas('Light grey page with rounded near-black panels'), 'rounded panels are band geometry, not the canvas');
+    assert_eq('framed', DesignDirectionStep::statedCanvasFor(['original_prompt' => 'hero in a rounded frame', 'prompt' => 'a landing page']));
+    assert_eq(null, DesignDirectionStep::statedCanvasFor([]));
+
+    $meta = ['prompt' => 'one painted cover hero in a rounded frame'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'measure' => 'standard'], $meta, false, $repairs);
+    assert_eq('framed', $out['canvas']);
+    assert_eq('standard', $out['measure']);
+    assert_eq(1, count($repairs));
+    assert_contains('field canvas authored "full-bleed" delivered "framed"', $repairs[0]);
+    assert_contains('the brief names its canvas', $repairs[0]);
+
+    $repairs = [];
+    assert_eq(['canvas' => 'full-bleed'], DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed'], $meta, true, $repairs), 'a caller-pinned canvas stands');
+    assert_eq([], $repairs);
+    assert_eq(['canvas' => 'framed'], DesignDirectionStep::withStatedDirection(['canvas' => 'framed'], $meta, false, $repairs), 'already framed: no repair');
+    assert_eq([], $repairs);
+    assert_eq(['canvas' => 'full-bleed'], DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed'], ['prompt' => 'a dark landing page'], false, $repairs), 'a silent brief changes nothing');
+});
+
+
+test('colour photography the brief states outranks a monochrome grade and a duotone treatment (frm PR-4o)', function () {
+    assert_true(DesignDirectionStep::statedColourPhotography('Light grey page, bold grotesque type, moody colour photography, rounded near-black panels'));
+    assert_true(DesignDirectionStep::statedColourPhotography('saturated color photos throughout'));
+    assert_true(!DesignDirectionStep::statedColourPhotography('one cinematic dusk photo series'));
+    assert_true(!DesignDirectionStep::statedColourPhotography('Create a website for a Georgian restaurant.'));
+
+    $meta = ['original_prompt' => 'Light grey page, bold grotesque type, moody colour photography.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection([
+        'image_grade' => 'Cool silver-toned monochrome throughout — every photograph a fine gelatin print: north light raking across the subject.',
+        'image_treatment' => 'duotone',
+    ], $meta, false, $repairs);
+    assert_contains('Full saturated colour photography.', $out['image_grade']);
+    assert_true(!preg_match('/monochrome|silver-toned/i', $out['image_grade']), 'the monochrome words are gone from the authored prose');
+    assert_contains('north light raking across the subject', $out['image_grade'], 'the light description survives');
+    assert_contains('Cool full colour throughout', $out['image_grade'], 'two adjacent monochrome words collapse to one clause');
+    assert_eq('natural', $out['image_treatment']);
+    assert_eq(2, count($repairs));
+    assert_contains('field image_grade authored a monochrome grade', $repairs[0]);
+    assert_contains('field image_treatment authored "duotone" delivered "natural"', $repairs[1]);
+
+    $repairs = [];
+    $drained = DesignDirectionStep::withStatedDirection(['image_grade' => 'Overcast daylight, colour but drained toward warm greys with only muted plum surviving.', 'image_treatment' => 'natural'], $meta, false, $repairs);
+    assert_contains('Full saturated colour photography. Overcast daylight, colour but full colour with only muted plum surviving.', $drained['image_grade'], 'a drained-grey grade counts as monochrome (frm PR-4o-2)');
+    assert_eq(1, count($repairs));
+    $repairs = [];
+    $colour = ['image_grade' => 'Saturated colour under low window light.', 'image_treatment' => 'natural'];
+    assert_eq($colour, DesignDirectionStep::withStatedDirection($colour, $meta, false, $repairs), 'a colour grade stands');
+    assert_eq([], $repairs);
+    $silent = ['image_grade' => 'Cool monochrome throughout.', 'image_treatment' => 'duotone'];
+    assert_eq($silent, DesignDirectionStep::withStatedDirection($silent, ['prompt' => 'a dark editorial page'], false, $repairs), 'a silent brief changes nothing');
+    assert_eq([], $repairs);
+});
+
+
+test('a hue budget the brief states outranks the seed economy (frm PR-4v)', function () {
+    assert_eq('monochrome', ColorEconomy::statedInBrief('Off-white page with every letter and line in one cobalt blue: a short intro paragraph top-left.'));
+    assert_eq('monochrome', ColorEconomy::statedInBrief('a monochrome navy portfolio'));
+    assert_eq('monochrome', ColorEconomy::statedInBrief('set in one ink on cream paper'));
+    assert_eq('single-accent', ColorEconomy::statedInBrief('warm page with one orange accent'), 'a colour named as the accent keeps its accent');
+    assert_eq('single-accent', ColorEconomy::statedInBrief('one accent colour on a white page'));
+    assert_eq('multicolor', ColorEconomy::statedInBrief('a rainbow palette for a kids festival'));
+    assert_eq(null, ColorEconomy::statedInBrief('tone of voice, one more thing'), 'a silent brief decides nothing');
+    assert_eq(null, ColorEconomy::statedInBrief('Create a website for a Georgian restaurant.'));
+    assert_eq('monochrome', DesignDirectionStep::statedEconomyFor(['original_prompt' => 'every line in one cobalt blue', 'prompt' => 'a colourful page']));
+    assert_eq(null, DesignDirectionStep::statedEconomyFor(['prompt' => 'a dark editorial page']));
+});
+
+
+test('a page tint the brief states outranks the seed tint (frm PR-4t)', function () {
+    assert_eq('neutral', GroundTint::statedInBrief('Create a clean SaaS landing page. White page, geometric sans type, with a pale blue gradient panel hero.'));
+    assert_eq('neutral', GroundTint::statedInBrief('Light grey page, bold grotesque type, moody colour photography'));
+    assert_eq('warm', GroundTint::statedInBrief('a warm cream ground with brass accents'));
+    assert_eq('cool', GroundTint::statedInBrief('an ice white page with cobalt type'));
+    assert_eq(null, GroundTint::statedInBrief('Near-black ground, serif headlines'), 'a dark ground names no tint');
+    assert_eq(null, GroundTint::statedInBrief('white space around every card'), 'white space is not a page');
+    assert_eq('neutral', DesignDirectionStep::statedTintFor(['original_prompt' => 'White page with a panel hero', 'prompt' => 'a cream page']));
+    assert_eq(null, DesignDirectionStep::statedTintFor(['prompt' => 'a dark editorial page']));
+});
+
+
+test('an accent hue the brief states moves the model accent into that family (frm PR-4y)', function () {
+    $meta = ['prompt' => 'Warm off-white page with a single orange accent on the buttons.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['primary' => '#7A4A34', 'accent' => '#E8D35C']], $meta, false, $repairs);
+    assert_true(\Automattic\SiteBuild\AccentHue::inFamily($out['palette']['accent'], \Automattic\SiteBuild\AccentHue::statedInBrief('orange accent')), 'yellow became orange');
+    assert_eq('#7A4A34', $out['palette']['primary'], 'the primary is the floor\'s business');
+    assert_eq(1, count($repairs));
+    assert_contains('field palette.accent authored "#E8D35C"', $repairs[0]);
+    assert_contains('the brief names its accent hue (orange)', $repairs[0]);
+
+    $repairs = [];
+    $same = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#E2712A']], $meta, false, $repairs);
+    assert_eq('#E2712A', $same['palette']['accent'], 'already orange: no repair');
+    assert_eq([], $repairs);
+
+    $repairs = [];
+    $grey = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#8A8A8A']], $meta, false, $repairs);
+    assert_true(Automattic\SiteBuild\AccentHue::inFamily($grey['palette']['accent'], Automattic\SiteBuild\AccentHue::statedFor($meta)), 'the gray accent receives the requested hue');
+    assert_eq(1, count($repairs));
+
+    $repairs = [];
+    $silent = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'palette' => ['accent' => '#E8D35C']], ['prompt' => 'a landing page'], false, $repairs);
+    assert_eq('#E8D35C', $silent['palette']['accent'], 'a silent brief changes nothing');
+    assert_eq([], $repairs);
+});
+
+
+test('a stated wordmark case is not the site-wide heading treatment (frm PR-5s)', function () {
+    $fabrica = ['prompt' => 'Light grey page with rounded near-black panels, a rounded near-black hero panel with a giant lowercase wordmark, a label-bar project grid.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], $fabrica, false, $repairs);
+    assert_eq('sentence', $out['type_treatment'], 'the lowercase treatment falls to sentence; the wordmark keeps its own case');
+    $treatmentRepairs = array_values(array_filter($repairs, static fn (string $r): bool => str_contains($r, 'type_treatment')));
+    assert_eq(1, count($treatmentRepairs), 'one treatment repair (the brief also states rounded panels, PR-4n)');
+    assert_contains('field type_treatment authored "lowercase" delivered "sentence"', $treatmentRepairs[0]);
+    assert_contains('the case of the wordmark, not of the headings', $treatmentRepairs[0]);
+
+    $repairs = [];
+    $tight = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $fabrica, false, $repairs);
+    assert_eq('tight', $tight['type_treatment'], 'a treatment that does not match the wordmark case stands');
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'));
+    $repairs = [];
+
+    $dasstudio = ['prompt' => 'White page, huge uppercase wordmark hero with a facts ledger, giant uppercase section titles with counts, 2x2 projects.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tight'], $dasstudio, false, $repairs);
+    assert_eq('caps-tight', $caps['type_treatment'], 'the brief states uppercase titles too, so the caps treatment stays');
+    assert_eq([], $repairs);
+
+    $spector = ['prompt' => 'Dark hero with a full-bleed portrait, a three-line uppercase display headline with a red-to-cream gradient.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tracked'], $spector, false, $repairs);
+    assert_eq('caps-tracked', $caps['type_treatment'], 'a stated uppercase display headline keeps caps without any wordmark phrase');
+
+    $silent = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], ['prompt' => 'a craft studio site'], false, $repairs);
+    assert_eq('lowercase', $silent['type_treatment'], 'no wordmark phrase, no change');
+    assert_eq([], $repairs);
+
+    assert_eq('uppercase', \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('giant uppercase section titles with counts'));
+    assert_eq('lowercase', \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('lowercase headings throughout'));
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedHeadingCase('a giant lowercase wordmark'), 'the wordmark phrase is not a heading case');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::caseOf('sentence'));
+    assert_eq('uppercase', \Automattic\SiteBuild\TypeTreatment::caseOf('caps-tracked'));
+});
+
+
+test('a heading treatment the brief states outranks the seed commitment (frm PR-5t)', function () {
+    $luzia = ['prompt' => 'Light page, tight sans headings with muted-plus-dark two-tone lines, featured work as large image cards with tag pills.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tight'], $luzia, false, $repairs);
+    assert_eq('tight', $out['type_treatment']);
+    $rows = array_values(array_filter($repairs, static fn (string $r): bool => str_contains($r, 'type_treatment')));
+    assert_eq(1, count($rows));
+    assert_contains('field type_treatment authored "caps-tight" delivered "tight"', $rows[0]);
+    assert_contains('the brief states its heading treatment', $rows[0]);
+
+    $repairs = [];
+    $same = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $luzia, false, $repairs);
+    assert_eq('tight', $same['type_treatment']);
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'), 'already tight: no repair');
+
+    $dasstudio = ['prompt' => 'White page, huge uppercase wordmark hero, giant uppercase section titles with counts, tight tracking throughout.'];
+    $caps = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'sentence'], $dasstudio, false, $repairs);
+    assert_eq('caps-tight', $caps['type_treatment'], 'uppercase titles plus tight tracking is the caps-tight treatment');
+
+    assert_eq('tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('tight sans headings'));
+    assert_eq('caps-tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase headings with tight tracking'));
+    assert_eq('lowercase', \Automattic\SiteBuild\TypeTreatment::statedTreatment('lowercase headings'));
+    assert_eq('caps-tight', \Automattic\SiteBuild\TypeTreatment::statedTreatment('uppercase display headline'), 'a stated uppercase heading is the caps treatment (frm PR-5u)');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatment('a tight-knit team'), 'tight must be about type');
+    assert_eq(null, \Automattic\SiteBuild\TypeTreatment::statedTreatmentFor([]));
+});
+
+
+test('a stated uppercase heading binds the caps treatment and a committed caps-tracked stands (frm PR-5u)', function () {
+    $spector = ['prompt' => 'Dark hero with a full-bleed high-contrast portrait, metadata in the corners, a three-line uppercase display headline with a red-to-cream gradient.'];
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'tight'], $spector, false, $repairs);
+    assert_eq('caps-tight', $out['type_treatment']);
+    assert_contains('field type_treatment authored "tight" delivered "caps-tight"', implode("\n", $repairs));
+
+    $repairs = [];
+    $tracked = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'caps-tracked'], $spector, false, $repairs);
+    assert_eq('caps-tracked', $tracked['type_treatment'], 'the case already holds; the tracking is the seed\'s');
+    assert_true(!str_contains(implode("\n", $repairs), 'type_treatment'));
+
+    $repairs = [];
+    $lower = DesignDirectionStep::withStatedDirection(['canvas' => 'full-bleed', 'type_treatment' => 'lowercase'], $spector, false, $repairs);
+    assert_eq('caps-tight', $lower['type_treatment'], 'a lowercase commitment yields to the stated uppercase');
+});
+
+test('explicit brief choices survive the direction and theme steps', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'A white page with a pale blue panel. Use a single orange accent, serif headings, tight headings, and colour photography. Use a framed canvas.']);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(designdir_judge());
+    $authored = designdir_direction();
+    $authored['palette']['accent'] = '#E0D03C';
+    $authored['image_grade'] = 'silver-toned monochrome';
+    $authored['image_treatment'] = 'duotone';
+    $llm->queueJson(['direction' => $authored]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('light', $direction['ground_key']);
+    assert_eq('neutral', $direction['ground_tint']);
+    assert_contains('transitional', $llm->calls[2]['prompt']);
+    assert_eq('single-accent', $direction['color_economy']);
+    assert_eq('framed', $direction['canvas']);
+    assert_eq('tight', $direction['type_treatment']);
+    assert_eq('natural', $direction['image_treatment']);
+    assert_eq('cool', GroundTint::classify($direction['palette']['band']));
+    $orange = Automattic\SiteBuild\AccentHue::statedFor(['prompt' => 'orange accent']);
+    assert_true(Automattic\SiteBuild\AccentHue::inFamily($direction['palette']['accent'], $orange));
+    $repairs = [];
+    $same = DesignDirectionStep::withStatedDirection($direction, $project->readJson('meta.json'), false, $repairs);
+    assert_eq($direction, $same);
+    assert_eq([], $repairs);
+    $llm->queueJson(['settings' => [], 'styles' => []]);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    $palette = array_column($project->readJson('theme/theme.json')['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('cool', GroundTint::classify($palette['band']));
+    assert_true(Automattic\SiteBuild\AccentHue::inFamily($palette['accent'], $orange));
+    assert_true(Automattic\SiteBuild\BandColor::valid($palette['base'], $palette['band'], 'cool'));
+    remove_tree($tmp);
+});
+
+test('explicit tight spacing overrides tracked uppercase and extreme accents warn', function () {
+    $repairs = [];
+    $out = DesignDirectionStep::withStatedDirection(['type_treatment' => 'caps-tracked'], ['prompt' => 'Use tight tracking and uppercase headings.'], false, $repairs);
+    assert_eq('caps-tight', $out['type_treatment']);
+    $out = DesignDirectionStep::withStatedDirection(['type_treatment' => 'caps-tracked'], ['prompt' => 'Use tight uppercase headings.'], false, $repairs);
+    assert_eq('caps-tight', $out['type_treatment']);
+    $warnings = [];
+    $out = DesignDirectionStep::withStatedDirection(['palette' => ['accent' => '#FFFFFF']], ['prompt' => 'Use orange buttons.'], false, $repairs, $warnings);
+    assert_eq('#FFFFFF', $out['palette']['accent']);
+    assert_eq(1, count($warnings));
+    foreach (['designDirection.json', 'palette.accent', '#FFFFFF', 'disposition', 'orange'] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
 });
 
 test('the direction persists the seed register as a bounded token and re-reads it (frm W1a)', function () {

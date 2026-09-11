@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\BilledInput;
 use Automattic\SiteBuild\BlockMarkup;
@@ -1042,6 +1043,9 @@ final class SectionsStep implements Step
 
         $common = [
             'section_label' => DesignDirectionStep::sectionLabelFor($project),
+            'stated_wordmark_case' => (string) HeroComposition::statedWordmarkCaseFor(
+                $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+            ),
             'site_spec'         => $siteSpec,
             'language'          => SiteSpecStep::languageOf($project),
             'theme_json'        => $themeJsonText,

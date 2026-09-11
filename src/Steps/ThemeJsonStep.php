@@ -7,6 +7,7 @@ use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
+use Automattic\SiteBuild\AccentHue;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\Depth;
@@ -16,6 +17,7 @@ use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\BandColor;
+use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
@@ -581,7 +583,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // readable defaults otherwise. Every fill is recorded durably.
         $direction = DesignDirectionStep::dataFor($project);
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
-        [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
+        // A band colour the brief states keeps its own family (frm PR-2ag).
+        $statedMeta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $statedBand = BandTint::statedFor(is_array($statedMeta) ? $statedMeta : []);
+        [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred, $statedBand['tint'] ?? null);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
         // Mirrors the applyMeasure gate above: on the HTML-first path the
@@ -634,10 +639,15 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Floors run on the palette about to be written, after every other
         // repair. A committed surface texture raises the body-ink floor to
         // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        // An accent hue the brief states is never rotated away; the primary
+        // takes the hue separation instead (frm PR-4y).
+        $statedAccent = AccentHue::statedFor($statedMeta);
+        $accentHex = self::deliveredSlugHex($theme['settings']['color']['palette'] ?? [], [], 'accent');
         [$theme, $floorWarnings] = self::applyPaletteFloor(
             $theme,
             Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
             DesignDirectionStep::colorEconomyFor($project),
+            $statedAccent !== null && $accentHex !== null && AccentHue::inFamily($accentHex, $statedAccent),
         );
         $warnings = array_merge($warnings, $floorWarnings);
 
@@ -1649,6 +1659,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         array $theme,
         ?float $contrastOnBase = null,
         ?string $colorEconomy = null,
+        bool $accentStated = false,
     ): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
@@ -1671,7 +1682,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy, $accentStated);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -1700,9 +1711,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *
      * @param array<mixed>         $theme
      * @param array<string,mixed>  $preferredHexes role => "#RRGGBB" (direction palette)
+     * @param string|null          $statedBandTint the band family the brief states (frm PR-2ag)
      * @return array{0:array<mixed>,1:list<string>,2:list<string>} theme, warnings, repairs
      */
-    public static function repairColors(array $theme, array $preferredHexes = []): array
+    public static function repairColors(array $theme, array $preferredHexes = [], ?string $statedBandTint = null): array
     {
         $warnings = [];
         $repairs = [];
@@ -1832,8 +1844,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($baseIndex !== null && $bandIndex !== null) {
             $base = (string) $palette[$baseIndex]['color'];
             $band = (string) $palette[$bandIndex]['color'];
-            if (!BandColor::valid($base, $band)) {
-                $fixedBand = BandColor::fromBase($base);
+            if (!BandColor::valid($base, $band, $statedBandTint)) {
+                $fixedBand = ($statedBandTint !== null ? BandTint::apply($base, $statedBandTint) : null)
+                    ?? BandColor::fromBase($base);
                 if ($fixedBand !== null) {
                     $palette[$bandIndex]['color'] = $fixedBand;
                     $repairs[] = "palette slug 'band': authored {$band}; delivered {$fixedBand}; "
