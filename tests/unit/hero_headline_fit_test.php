@@ -597,3 +597,84 @@ test('the line target bounds only the masthead, never a lower display heading', 
         . '<!-- /wp:heading --></div><!-- /wp:group -->';
     assert_eq($markup, HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 3])['markup'], 'byte-identical');
 });
+
+// BIGR-1015. The absolute 32px floor answers "is a pin worth writing"; it
+// cannot answer "is this still a masthead", which is a question about the
+// site's own scale. tbilisi23 pinned its h1 to 37px against a 57.6px
+// `section-title`, and 24 of 91 built home heroes were pinned below their own
+// section-heading preset — a hero that reads smaller than every H2 under it.
+
+test('a line target no size above the section preset can hold is dropped, not honored', function () {
+    // section-title tops out at 48px here, display at 92px. This headline
+    // needs ~35px to hold two lines in the 720px measure, so the line bound
+    // would demote the masthead under every H2 on the page.
+    $headline = 'Glass Given a Second Life as Light Across Every Room of the Quiet House';
+    $r = HeroHeadlineFit::apply(hhf_scale_hero($headline, 'display'), hhf_scale_theme(), [1, 2]);
+
+    assert_contains('"fontSize":"display"', $r['markup'], 'the masthead keeps the display preset');
+    assert_true(!str_contains($r['markup'], 'min(var('), 'no sub-floor pin is written');
+    assert_eq([], $r['notes'], 'nothing was bounded, so nothing is reported');
+});
+
+test('a line target that holds above the section preset still pins the masthead', function () {
+    // The floor lowers a ceiling; it does not switch the bound off. This
+    // headline holds two lines at ~60px, comfortably above the 48px floor.
+    $r = HeroHeadlineFit::apply(
+        hhf_scale_hero('Glass Given a Second Life as Light Today', 'display'),
+        hhf_scale_theme(),
+        [1, 2],
+    );
+
+    assert_contains('headline line-fit', implode("\n", $r['notes']), 'the line target is still enforced');
+    preg_match('/, (\d+)px\)/', $r['markup'], $m);
+    assert_true($m !== [], 'a cap was written');
+    $cap = (int) ($m[1] ?? 0);
+    assert_true($cap >= 48, "cap {$cap}px must stay at or above the 48px section-title maximum");
+    assert_true($cap < 92, "cap {$cap}px must stay below the 92px display maximum");
+});
+
+test('the word fit keeps its absolute floor, because an extra line cannot fix an overflow', function () {
+    // A word wider than the column overflows or snaps mid-word — a rendering
+    // defect, not a matter of taste — so its cap is written even below the
+    // section preset. 'Rechtsschutzversicherungen' needs ~45px in the 720px
+    // measure, under the 48px floor the line target obeys.
+    $r = HeroHeadlineFit::apply(
+        hhf_scale_hero('Rechtsschutzversicherungen', 'display'),
+        hhf_scale_theme(),
+        [1, 2],
+    );
+
+    assert_contains('headline word-fit', implode("\n", $r['notes']), 'the word bound still applies');
+    preg_match('/, (\d+)px\)/', $r['markup'], $m);
+    $cap = (int) ($m[1] ?? 0);
+    assert_true($cap > 0 && $cap < 48, "word cap {$cap}px is written below the section-title maximum");
+});
+
+test('promotion writes no sub-floor pin when the model authored no preset at all', function () {
+    // With no preset there is nothing to decline back to, so the sub-floor
+    // line target is dropped and the headline wraps one line past its
+    // blueprint at the full masthead scale.
+    $headline = 'Glass Given a Second Life as Light Across Every Room of the Quiet House';
+    $r = HeroHeadlineFit::apply(hhf_scale_hero($headline, ''), hhf_scale_theme(), [1, 2]);
+
+    assert_contains('"fontSize":"display"', $r['markup'], 'promoted to the masthead preset');
+    assert_true(!str_contains($r['markup'], 'min(var('), 'and not pinned beneath the section headings');
+    assert_contains('promoted to the display preset', implode("\n", $r['notes']));
+});
+
+test('a theme with no section-title preset falls back to the absolute floor', function () {
+    // The floor is max(32, section-title). A theme that never defines the
+    // section step keeps the behaviour this pass had before BIGR-1015.
+    $theme = hhf_scale_theme();
+    $theme['settings']['typography']['fontSizes'] = [
+        ['slug' => 'body', 'size' => '1.125rem'],
+        ['slug' => 'display', 'size' => 'clamp(3rem, 6.4vw, 5.75rem)'],
+    ];
+    $headline = 'Glass Given a Second Life as Light Across Every Room of the Quiet House';
+    $r = HeroHeadlineFit::apply(hhf_scale_hero($headline, 'display'), $theme, [1, 2]);
+
+    assert_contains('headline line-fit', implode("\n", $r['notes']), 'the line target is honored again');
+    preg_match('/, (\d+)px\)/', $r['markup'], $m);
+    $cap = (int) ($m[1] ?? 0);
+    assert_true($cap >= 32 && $cap < 48, "cap {$cap}px sits on the absolute floor, not a section step");
+});
