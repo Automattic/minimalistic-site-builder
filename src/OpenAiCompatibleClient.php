@@ -423,8 +423,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
             $body['reasoning'] = ['enabled' => false];
         }
 
-        // Same intent one provider over: quiet the open-weight models Baseten
-        // lets us quiet, so thinking tokens do not eat the markup budget.
+        // Limit reasoning where the model supports an explicit effort.
         $effort = self::resolvedReasoningEffort($req, $provider, $model);
         if ($effort !== null) {
             $body['reasoning_effort'] = $effort;
@@ -553,8 +552,8 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
     }
 
     /**
-     * The effort actually sent: an explicit `reasoning_effort` on the request
-     * outranks the model's default.
+     * Astra uses low effort. Terra uses none. An explicit Baseten `reasoning_effort` takes
+     * precedence over the model default.
      *
      * The tier a model serves is a StepDefaults concept and never reaches this
      * client, which sees only a model id. So a model whose default suits one
@@ -565,6 +564,14 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      */
     private static function resolvedReasoningEffort(array $req, string $provider, string $model): ?string
     {
+        // Astra requires reasoning. Use its lowest effort to limit cost and latency.
+        if ($provider === 'openai' && $model === 'gpt-6-astra') {
+            return 'low';
+        }
+        // Terra serves the small tier. Preserve its previous model's effort.
+        if ($provider === 'openai' && $model === 'gpt-5.6-terra') {
+            return 'none';
+        }
         $asked = $req['reasoning_effort'] ?? null;
         if (is_string($asked) && trim($asked) !== '') {
             return $provider === 'baseten' ? strtolower(trim($asked)) : null;

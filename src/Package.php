@@ -34,6 +34,12 @@ final class Package
         return self::root() . '/examples/site-spec.json';
     }
 
+    /** Neutral local rasters, one per supported aspect ratio and format. */
+    public static function imagePlaceholdersDir(): string
+    {
+        return self::root() . '/assets/image-placeholders';
+    }
+
     /** The static motion kit (motion.css, motion.js, profiles/) shipped into themes. */
     public static function motionDir(): string
     {

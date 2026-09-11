@@ -136,6 +136,7 @@ final class InnerPagesDesignStep implements Step
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
             'band_rhythm'    => $bandRhythm,
+            'section_budget' => PagePlanStep::homeBodyBudget(),
         ]);
         $units['home-body'] = [
             'slug'        => 'home-body',
@@ -176,6 +177,7 @@ final class InnerPagesDesignStep implements Step
                 'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
                 'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
                 'band_rhythm'    => $bandRhythm,
+                'section_budget' => PagePlanStep::innerPageBudget(),
             ]);
             $units[$requestKey] = [
                 'slug'        => $slug,
@@ -429,6 +431,7 @@ final class InnerPagesDesignStep implements Step
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
             'band_rhythm'    => $bandRhythm,
+            'section_budget' => PagePlanStep::homeBodyBudget(),
         ]);
         $requests['home-body'] = $this->withOptions([
             'prompt'          => $homePrompt,
