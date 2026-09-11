@@ -45,7 +45,8 @@ final class SectionReadabilityContract
                 continue;
             }
             if ($name !== 'paragraph' || mb_strlen($text) <= 120
-                || ($sizes[$slug ?? ''] ?? 0) < 20 || ($sizes['body'] ?? 0) < 16 || $sizes['body'] >= 20
+                || !isset($sizes[$slug ?? '']) || ($sizes[$slug] >= 16 && $sizes[$slug] < 20)
+                || ($sizes['body'] ?? 0) < 16 || $sizes['body'] >= 20
                 || isset($attrs['style']['typography']['fontSize'])
             ) {
                 continue;
@@ -68,9 +69,12 @@ final class SectionReadabilityContract
             $document->setAttrs($index, $attrs);
             $document->spliceOwnHtml($index, 0, strlen($tag), $changed);
             $warnings[] = "file='theme/parts/{$part}.html'; block='paragraph[{$index}]'; authored=" . Warnings::value($slug)
-                . '; delivered="body"; disposition=reduced the long paragraph to the body scale; retained all text';
+                . '; delivered="body"; disposition=set the long paragraph to the body scale; retained all text';
             $repairs[] = ['code' => 'long-paragraph-body-scale', 'part' => $part, 'block' => "paragraph[{$index}]",
                 'authored' => $slug, 'delivered' => 'body', 'disposition' => 'repaired'];
+        }
+        if (($input['section']['role'] ?? '') === 'hero') {
+            self::repairHeroHeadings($document, $theme ?? [], $part, $repairs, $warnings);
         }
         $markup = $document->render();
         $title = trim((string) ($input['section']['title'] ?? ''));
@@ -92,6 +96,64 @@ final class SectionReadabilityContract
             }
         }
         return $markup;
+    }
+
+    /** Promote peer h3 headings below one hero h1. Keep their text and font size. */
+    private static function repairHeroHeadings(BlockMarkup $document, array $theme, string $part, array &$repairs, array &$warnings): void
+    {
+        $headings = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading') {
+                continue;
+            }
+            $tag = MarkupScan::wrapperTag($document->ownHtml($index), 0);
+            if ($tag === null || !preg_match('/^\s*<h([1-6])\b/i', $tag, $match)) {
+                return;
+            }
+            $headings[$index] = (int) $match[1];
+        }
+        $levels = array_values($headings);
+        if (count($levels) < 2 || $levels[0] !== 1 || array_unique(array_slice($levels, 1)) !== [3]) {
+            return;
+        }
+        $changes = [];
+        foreach (array_slice(array_keys($headings), 1) as $index) {
+            $attrs = $document->attrs($index) ?? [];
+            $own = $document->ownHtml($index);
+            $tag = MarkupScan::wrapperTag($own, 0);
+            $class = MarkupScan::tagAttribute($tag, 'class');
+            $preset = null;
+            if (!isset($attrs['fontSize']) && !isset($attrs['style']['typography']['fontSize'])) {
+                $size = $theme['styles']['elements']['h3']['typography']['fontSize'] ?? null;
+                if (is_string($size) && preg_match('/^var:preset[|:]font-size[|:]([a-z0-9-]+)$/i', $size, $match)) {
+                    $preset = $match[1];
+                }
+            }
+            if (!$document->isStructurallySafe($index) || !preg_match('/<\/h3>\s*$/i', $own)
+                || ($class === null && preg_match('/\sclass\s*=/i', $tag))
+                || (!isset($attrs['fontSize']) && !isset($attrs['style']['typography']['fontSize']) && $preset === null)) {
+                $warnings[] = "file='theme/parts/{$part}.html'; block='heading[{$index}]'; authored=h3 below h1; delivered=unchanged;"
+                    . ' disposition=retained the ambiguous hero heading boundary or font size; repair the heading hierarchy';
+                return;
+            }
+            if ($preset !== null) {
+                $attrs['fontSize'] = $preset;
+                $value = trim(($class[0] ?? '') . ' has-' . $preset . '-font-size');
+                $tag = $class === null ? substr_replace($tag, ' class="' . $value . '"', -1, 0)
+                    : substr_replace($tag, $value, $class[1], strlen($class[0]));
+            }
+            $attrs['level'] = 2;
+            $tag = preg_replace('/^(\s*<)h3\b/i', '${1}h2', $tag);
+            $changed = $tag . substr($own, strlen(MarkupScan::wrapperTag($own, 0)));
+            $changed = preg_replace('/<\/h3>(\s*)$/i', '</h2>$1', $changed);
+            $changes[$index] = [$attrs, $changed];
+        }
+        foreach ($changes as $index => [$attrs, $html]) {
+            $document->setAttrs($index, $attrs);
+            $document->spliceOwnHtml($index, 0, strlen($document->ownHtml($index)), $html);
+            $repairs[] = ['code' => 'hero-peer-heading-level', 'part' => $part, 'block' => "heading[{$index}]",
+                'authored' => 'h3', 'delivered' => 'h2', 'disposition' => 'repaired'];
+        }
     }
     /** Return a complete body-scale wrapper or retain an ambiguous wrapper. */
     private static function bodyTag(string $tag, string $slug): ?string

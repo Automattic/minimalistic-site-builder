@@ -11,7 +11,8 @@ use Automattic\SiteBuild\ContrastMath;
 /** Prepare complete card shapes before the strict card contract runs. */
 final class CardPreparation
 {
-    private const HOOKS = ['card-style--flush', 'card-style--framed', 'card-style--overlap', 'card-flush', 'card-body', 'overlap-up'];
+    private const MARKERS = ['card-style--flush', 'card-style--framed', 'card-style--overlap', 'card-style--borderless', 'card-flush'];
+    private const HOOKS = [...self::MARKERS, 'card-body', 'overlap-up'];
 
     public static function enforce(string $markup, string $style, string $part, array &$repairs, array &$warnings, string|array|null $themeJson = null): string
     {
@@ -22,7 +23,7 @@ final class CardPreparation
             }
             $attrs = $document->attrs($index) ?? [];
             $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? ''))) ?: [];
-            if (array_intersect($classes, ['card-style--flush', 'card-style--framed', 'card-style--overlap', 'card-flush']) === []) {
+            if (array_intersect($classes, self::MARKERS) === []) {
                 continue;
             }
             $inner = $document->innerHtml($index);
