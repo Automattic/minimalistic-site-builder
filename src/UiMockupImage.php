@@ -12,6 +12,14 @@ final class UiMockupImage
             return null;
         }
         $subject = (string) ($spec['subject'] ?? '');
+        $context = $subject . ' ' . (string) ($spec['pageContext'] ?? '');
+        $position = '(?:cent(?:er|re|ral)|middle|top|bottom|upper|lower)';
+        $space = '(?:empty|negative space|low[- ](?:in[- ]detail|detail)|low in detail)';
+        if (preg_match('/\b' . $position . '\b[^.!?]{0,90}\b' . $space . '\b/i', $context)
+            || preg_match('/\b' . $space . '\b[^.!?]{0,90}\b' . $position . '\b/i', $context)
+        ) {
+            return null;
+        }
         foreach ([
             'schedule' => '/\b(?:schedule|scheduling|week grid)\b/i',
             'roster' => '/\b(?:crew roster|member avatars|team roster)\b/i',
@@ -54,7 +62,7 @@ final class UiMockupImage
             throw new \InvalidArgumentException('The UI image has no local layout.');
         }
         $ratios = ['21:9' => 21 / 9, '16:9' => 16 / 9, '4:3' => 4 / 3, '3:2' => 1.5,
-            '1:1' => 1, '3:4' => .75, '2:3' => 2 / 3, '9:16' => 9 / 16];
+            '1:1' => 1, '4:5' => .8, '5:4' => 1.25, '3:4' => .75, '2:3' => 2 / 3, '9:16' => 9 / 16];
         $width = 1536;
         $height = (int) round($width / ($ratios[$ratio] ?? (16 / 9)));
         $colors = ['base' => '#f0f2f3', 'surface' => '#ffffff', 'contrast' => '#29343b', 'accent' => '#e9a344'];
@@ -80,9 +88,9 @@ final class UiMockupImage
         $left = 72.0;
         $right = $width - 72.0;
         if (preg_match('/left (?:third|half|side).{0,90}(?:empty|calm|negative|low-detail)/i', $context)) {
-            $left = $width * .40;
+            $left = $width * (preg_match('/left half/i', $context) ? .60 : .40);
         } elseif (preg_match('/right (?:third|half|side).{0,90}(?:empty|calm|negative|low-detail)/i', $context)) {
-            $right = $width * .60;
+            $right = $width * (preg_match('/right half/i', $context) ? .40 : .60);
         }
         $w = $right - $left;
         $top = 64.0;
