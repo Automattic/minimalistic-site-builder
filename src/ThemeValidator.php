@@ -116,6 +116,7 @@ final class ThemeValidator
             self::unresolvedImageSourceProblems($project),
             self::placeholderLinkProblems($project),
             self::placeholderMediaSourceProblems($project),
+            self::embedProblems($project),
             self::linkProblems($project),
             self::emptyListProblems($project),
         );
@@ -746,6 +747,49 @@ final class ThemeValidator
             $problems[] = "{$rel}: {$loose} form marker(s) outside a "
                 . FormPlaceholder::CLASS_NAME . ' block — disposition: the host only substitutes'
                 . ' markers inside that block, so these would ship as visible text';
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Every delivered embed block, named by the host it would fetch.
+     *
+     * An embed fetches remote content when WordPress renders it, and nothing
+     * here asks for one: the prompts say a brief wanting a map or a video
+     * states a content need the build decides how to ship, and
+     * ExtractPatternsStep already refuses to make a pattern out of one. The
+     * delivery scrub does not catch it either — a wp:embed serializes to a
+     * figure and a bare URL rather than to a forbidden tag — so a generated
+     * site can ship a third-party embed nobody chose, and the local preview
+     * has to neutralize it with an offline guard to keep the page from
+     * hanging on the fetch.
+     *
+     * @return list<string>
+     */
+    public static function embedProblems(Project $project): array
+    {
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        foreach (self::interactionMarkupFiles($project) as $file) {
+            $markup = (string) file_get_contents($file);
+            if (!str_contains($markup, 'wp:embed')) {
+                continue;
+            }
+
+            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+            $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);
+            $doc = BlockMarkup::parse($markup);
+            foreach ($doc->indices() as $index) {
+                if ($doc->name($index) !== 'embed') {
+                    continue;
+                }
+                $url = (string) (($doc->attrs($index) ?? [])['url'] ?? '');
+                $host = $url === '' ? 'no url' : (parse_url($url, PHP_URL_HOST) ?: $url);
+                $problems[] = "{$rel}: contains an embed block ({$host}) — sections never"
+                    . ' author embeds; disposition: rebuild the section without it';
+            }
         }
 
         return $problems;
