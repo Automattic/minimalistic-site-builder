@@ -337,6 +337,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
+            'action_capabilities' => \Automattic\SiteBuild\ActionCapabilities::prompt(json_decode($input['site_spec'], true)),
             'theme_json'       => $input['theme_json'],
             'design_direction' => $input['design_direction'],
         ]), "\r\n"),

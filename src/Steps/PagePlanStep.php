@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ActionCapabilities;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -442,6 +443,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => SiteSpecStep::promptText($project),
+            'action_capabilities' => ActionCapabilities::prompt($project->readJson('siteSpec.json')),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => $designDirection,
             'item_pattern'     => DesignDirectionStep::itemPatternFor($project),
@@ -773,6 +775,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // path has produced its final page/section set. Recheck the sole
         // eligible action now and null it atomically when its target vanished.
         $out = self::validatePrimaryActionAnchors($out, $warnings);
+        $out = self::reconcileActionCapabilities(
+            $out, $siteSpec, $warnings, (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false),
+        );
 
         $project->writeText('logs/' . self::REPORT_FILE, $successfulRepairs === []
             ? "No semantics-preserving page-plan repairs were needed.\n"
@@ -1604,6 +1609,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $sectionPath,
             );
 
+            if (($section['primary_action'] ?? null) !== null && $primaryAction === null) {
+                $section['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                    . ' Action correction: omit the earlier unsupported action. Follow ACTION CAPABILITIES.';
+            }
+
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -1809,28 +1819,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $reason = 'destination must be non-empty plain text';
         }
         if ($reason === '' && !self::initialDestinationIsKnown($destination, $context)) {
-            // An invented absolute URL (observed: https://atlasfield.io/trial
-            // on a fabricated domain) must never ship — but deleting the
-            // conversion CTA over it is rung 3 when rung 1 exists. Rewrite it
-            // to an anchor named after the URL's last path segment; the later
-            // anchor validation resolves it to a real planned section or
-            // retargets it to the page's closing anchor.
-            if (preg_match('#^https?://#i', $destination) === 1) {
-                $segment = strtolower(trim((string) parse_url($destination, PHP_URL_PATH), '/'));
-                $segment = (string) preg_replace('/[^a-z0-9-]+/', '-', basename($segment));
-                $anchor = '#' . (trim($segment, '-') !== '' ? trim($segment, '-') : 'cta');
-                $warnings[] = self::valueLossWarning(
-                    $path . '.destination',
-                    "'{$destination}'",
-                    "'{$anchor}'",
-                    'invented external URL rewritten to a local anchor for the closing-section retarget '
-                        . 'instead of removing the action',
-                    valuesAlreadyRendered: true,
-                );
-                $destination = $anchor;
-            } else {
-                $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
-            }
+            $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
         }
 
         if ($reason !== '') {
@@ -1932,6 +1921,42 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
+        return $pages;
+    }
+
+    /** Reconcile labels after every page and section destination is final. */
+    public static function reconcileActionCapabilities(array $pages, array $siteSpec, array &$warnings = [], bool $formPlaceholders = false): array
+    {
+        // A host form needs its actual markup. The CTA step checks its destination after sections exist.
+        if ($formPlaceholders) {
+            return $pages;
+        }
+        $context = ActionCapabilities::context($siteSpec, $pages);
+        foreach ($pages as $pageIndex => $page) {
+            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+                $action = $section['primary_action'] ?? null;
+                if (!is_array($action)) {
+                    continue;
+                }
+                $label = ActionCapabilities::label($action['label'], $action['destination'], $context, (string) ($page['path'] ?? '/'));
+                if ($label === $action['label']) {
+                    continue;
+                }
+                $delivered = $label === null ? null : array_replace($action, [
+                    'label' => $label, 'intent' => 'Open the section or page: ' . $label . '.',
+                ]);
+                $pages[$pageIndex]['sections'][$sectionIndex]['primary_action'] = $delivered;
+                $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = trim((string) ($section['content_notes'] ?? ''))
+                    . ($label === null ? ' Action correction: omit the earlier unsupported action.'
+                        : ' Action correction: use the exact label "' . $label . '" for this content link. Omit the earlier transaction promise.');
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath((string) ($page['slug'] ?? ''), (int) $sectionIndex) . '.primary_action',
+                    $action,
+                    $delivered,
+                    'corrected an action promise that its destination cannot deliver',
+                );
+            }
+        }
         return $pages;
     }
 

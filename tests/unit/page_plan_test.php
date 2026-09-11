@@ -1980,34 +1980,19 @@ test('PagePlanStep first-pass validation keeps anchor-shaped destinations for th
     assert_eq([], $warnings);
 });
 
-test('PagePlanStep rewrites an invented external CTA URL to an anchor for the retarget pass', function () {
-    // Regression: atlas14's plan authored https://atlasfield.io/trial (a
-    // fabricated domain) and the whole "Start Free Trial" CTA was deleted.
+test('PagePlanStep removes an invented external CTA destination', function () {
     $context = PagePlanStep::primaryActionContext([], [['slug' => 'home', 'path' => '/']]);
     $warnings = [];
-    $kept = PagePlanStep::normalizePrimaryAction(
-        ['label' => 'Start Free Trial', 'intent' => 'Convert.', 'destination' => 'https://atlasfield.io/trial'],
+    $action = PagePlanStep::normalizePrimaryAction(
+        ['label' => 'Start Free Trial', 'intent' => 'Start a trial.', 'destination' => 'https://atlasfield.io/trial'],
         true,
         $context,
         $warnings,
     );
-    assert_true(is_array($kept), 'the CTA survives');
-    assert_eq('#trial', $kept['destination'], 'external URL becomes a local anchor');
+    assert_eq(null, $action);
     assert_eq(1, count($warnings));
-    assert_contains('invented external URL', $warnings[0]);
-
-    // Downstream, the unknown anchor retargets to the closing section.
-    $pages = [[
-        'slug' => 'home', 'path' => '/', 'front' => true,
-        'sections' => [
-            array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $kept]),
-            array_merge(plan_section(['slug' => 'features', 'title' => 'Features']), ['role' => 'content', 'layout_archetype' => 'bento-grid']),
-            array_merge(plan_section(['slug' => 'signup', 'title' => 'Signup']), ['role' => 'closing', 'layout_archetype' => 'asymmetric-split']),
-        ],
-    ]];
-    $anchorWarnings = [];
-    $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $anchorWarnings);
-    assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
+    assert_contains('https://atlasfield.io/trial', $warnings[0]);
+    assert_contains('removed invalid primary action', $warnings[0]);
 });
 
 test('normalize rejects every CTA fragment form that names no planned section (BIGR-800)', function () {

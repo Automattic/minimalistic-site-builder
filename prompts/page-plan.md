@@ -54,6 +54,7 @@ Return a single JSON object with this exact shape:
   "destination": "/an-exact-page-path/ or #an-exact-planned-section-anchor"
 }
 {{primary_action_rule}}
+{{action_capabilities}}
 When present, keep `label` to 1-80 Unicode grapheme clusters of plain text with no
 markup or control characters. Use that exact visitor-facing label; `intent` is
 non-empty plain-text planning context and must never become button copy;

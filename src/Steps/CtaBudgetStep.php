@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\CtaBudget;
+use Automattic\SiteBuild\ActionCapabilities;
+use Automattic\SiteBuild\FormPlaceholder;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRole;
@@ -13,6 +15,8 @@ use Automattic\SiteBuild\StepDeclaration;
 /**
  * Step (deterministic): keep a page's buttons to the actions its plan placed,
  * and turn every other button into a text link.
+ * First, correct unsupported transaction labels and remove actions without destinations.
+ * Record these action changes in warnings.json.
  *
  * Runs while the generated sections are still separate ordered part files —
  * after copy-dedupe on the blocks graph, after section-layout on HTML-first,
@@ -50,10 +54,42 @@ final class CtaBudgetStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['pages.json', 'theme/parts/*'],
+            reads: ['pages.json', 'siteSpec.json', 'meta.json', 'theme/parts/*'],
             writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
+    }
+
+    /** Repair action promises in the header, footer, hero, and other sections. */
+    private function repairActionCapabilities(Project $project, array &$warnings): void
+    {
+        if (!$project->exists('siteSpec.json')) {
+            return;
+        }
+        $pages = SectionRhythmStep::pages($project);
+        $context = ActionCapabilities::context($project->readJson('siteSpec.json'), $pages);
+        $paths = [];
+        $forms = $project->exists('meta.json') && !empty($project->readJson('meta.json')['form_placeholders']);
+        foreach ($pages as $page) {
+            $path = rtrim((string) ($page['path'] ?? '/'), '/') . '/';
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                $file = 'theme/parts/' . SectionsStep::partSlug((string) $page['slug'], (string) $section['slug']) . '.html';
+                $paths[$file] = $path;
+                if ($forms && $project->exists($file) && FormPlaceholder::find($project->readText($file)) !== []) {
+                    $context['form_destinations'][$path . '#' . $section['slug']] = true;
+                    $context['form_destinations'][$path] = true;
+                }
+            }
+        }
+        foreach (glob($project->path('theme/parts/*.html')) ?: [] as $absolute) {
+            $file = 'theme/parts/' . basename($absolute);
+            $markup = $project->readText($file);
+            $result = ActionCapabilities::repairMarkup($markup, $context, $file, $paths[$file] ?? '/');
+            if ($result['markup'] !== $markup) {
+                $project->writeText($file, $result['markup']);
+            }
+            $warnings = array_merge($warnings, $result['warnings']);
+        }
     }
 
     public function run(Project $project): void
@@ -61,6 +97,7 @@ final class CtaBudgetStep implements Step
         $warnings = [];
         $log = [];
         $demoted = 0;
+        $this->repairActionCapabilities($project, $warnings);
 
         foreach (SectionRhythmStep::pages($project) as $page) {
             $pageSlug = trim((string) ($page['slug'] ?? ''));

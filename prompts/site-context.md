@@ -6,3 +6,5 @@ THEME TOKENS (theme.json):
 
 DESIGN DIRECTION (the committed creative concept for THIS site — everything built below must serve it, not fight it):
 {{design_direction}}
+
+{{action_capabilities}}
