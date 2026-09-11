@@ -247,8 +247,6 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
         );
     }
 
-    private bool $primeBatch = false;
-
     public function canPrimeBatch(array $requests): bool
     {
         return true;
@@ -256,12 +254,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
 
     public function completePrimedBatch(array $requests): TextBatchResult
     {
-        $this->primeBatch = true;
-        try {
-            return $this->completeBatch($requests);
-        } finally {
-            $this->primeBatch = false;
-        }
+        return $this->completeBatch($requests);
     }
 
     public function completeBatch(array $requests): TextBatchResult
@@ -713,14 +706,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     private function streamMulti(array $bodies): array
     {
         $raw = [];
-        $gate = $this->primeBatch && PromptCacheGate::applies($bodies) ? new PromptCacheGate() : null;
-        if ($gate !== null) {
-            $bodies = PromptCacheGate::order($bodies);
-        }
-        $firstKey = array_key_first($bodies);
+        $schedule = PromptCacheGate::applies($bodies) ? new PromptCacheSchedule($bodies) : null;
 
-        $buildHandle = function (string|int $key, array $body) use (&$raw, $gate, $firstKey): \CurlHandle {
+        $buildHandle = function (string|int $key, array $body) use (&$raw, $schedule): \CurlHandle {
             $raw[$key] = '';
+            $schedule?->start($key);
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
                 CURLOPT_POST          => true,
@@ -734,11 +724,9 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 CURLOPT_TIMEOUT       => 600,
                 CURLOPT_LOW_SPEED_LIMIT => 1,
                 CURLOPT_LOW_SPEED_TIME  => 90,
-                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $gate, $firstKey) {
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $schedule) {
                     $raw[$key] .= $chunk;
-                    if ($gate !== null && $key === $firstKey) {
-                        $gate->observe($raw[$key]);
-                    }
+                    $schedule?->observe($key, $raw[$key]);
                     return strlen($chunk);
                 },
             ]);
@@ -747,8 +735,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
 
         // interpretStream marks severed streams and never-responded transfers
         // (status 0, the pool's CURLM-failure fallback) transient.
-        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, $gate): array {
-            $gate?->release();
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw): array {
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
@@ -760,7 +747,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             return $outcome;
         };
 
-        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, self::MAX_CONCURRENCY, $gate === null ? null : fn (): bool => $gate->ready());
+        return (new CurlMultiPool())->run(
+            $bodies, $buildHandle, $classify, self::MAX_CONCURRENCY,
+            $schedule === null ? null : fn (string|int $key): bool => $schedule->canStart($key),
+            $schedule === null ? null : fn (string|int $key) => $schedule->release($key),
+        );
     }
 
     /**

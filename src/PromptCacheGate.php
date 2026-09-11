@@ -47,27 +47,6 @@ final class PromptCacheGate
         }
     }
 
-    /** Put the deepest cache prefix first. Keep all request keys and payloads. */
-    public static function order(array $bodies): array
-    {
-        $winner = null;
-        $largest = 0;
-        foreach ($bodies as $key => $body) {
-            $size = 0;
-            $content = $body['messages'][0]['content'] ?? [];
-            foreach (is_array($content) ? $content : [] as $block) {
-                if (is_array($block) && isset($block['cache_control'])) {
-                    $size += strlen((string) ($block['text'] ?? ''));
-                }
-            }
-            if ($size > $largest) {
-                $largest = $size;
-                $winner = $key;
-            }
-        }
-        return $winner === null ? $bodies : [$winner => $bodies[$winner]] + $bodies;
-    }
-
     public static function applies(array $bodies): bool
     {
         if (count($bodies) < 2) {

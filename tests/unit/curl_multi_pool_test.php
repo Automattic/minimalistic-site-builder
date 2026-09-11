@@ -298,7 +298,7 @@ test('CurlMultiPool starts siblings before the first transfer completes when the
         return $pool->register($key, curl_init('http://localhost/unused'));
     };
     $results = $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build,
-        fn ($key) => ['ok' => true], 3, fn () => $gate->ready());
+        fn ($key) => ['ok' => true], 3, fn ($key) => $key === 'a' || $gate->ready());
     assert_eq(['a' => 0, 'b' => 1, 'c' => 1], $starts);
     assert_eq(3, count($results));
 });
@@ -316,6 +316,6 @@ test('CurlMultiPool releases the gate when the deadline passes during handle pre
         $events[] = 'complete:' . $key;
         return ['ok' => true];
     };
-    $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build, $classify, 3, fn () => $gate->ready());
+    $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $build, $classify, 3, fn ($key) => $key === 'a' || $gate->ready());
     assert_eq(['start:a', 'start:b', 'start:c', 'complete:b', 'complete:c', 'complete:a'], $events);
 });
