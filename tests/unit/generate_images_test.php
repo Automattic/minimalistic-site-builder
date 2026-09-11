@@ -124,7 +124,7 @@ test('I-G9 a preconstructed image client still powers post-build generation', fu
     }
 });
 
-test('generate-images aligns source ratio and prompt composition with image_crop', function () {
+test('generate-images keeps the real cover wide when its scene context names a card', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('designDirection.json', ['image_crop' => 'portrait']);
     $specs = $project->readJson('images.json');
@@ -135,7 +135,7 @@ test('generate-images aligns source ratio and prompt composition with image_crop
 
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq('4:5', $images->calls[0]['opts']['aspect_ratio']);
+    assert_eq('16:9', $images->calls[0]['opts']['aspect_ratio']);
     assert_contains('Site-wide crop direction:', $images->calls[0]['prompt']);
     assert_contains('central portrait safe area', $images->calls[0]['prompt']);
 
@@ -1910,4 +1910,25 @@ test('generate-images checks independent assets together and pools only their fa
     assert_eq(2, count($images->batches));
     assert_eq($before, $project->readText('theme/assets/hero-pass.jpg'));
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+
+test('generate-images keeps a square card at 1K without scene-based QA', function () {
+    [$project, $tmp] = generate_fixture();
+    try {
+        $markup = '<!-- wp:image {"className":"card-media"} --><figure class="card-media"><img src="theme:./assets/dish.jpg" alt="AI_IMAGE: Churchkhela | square dish card; background dissolving into darkness | photo | square"/></figure><!-- /wp:image -->';
+        $project->writeText('theme/parts/hero.html', $markup);
+        $project->writeText('theme/templates/page.html', $markup);
+        $project->writeJson('designDirection.json', ['image_crop' => 'square']);
+        (new CollectImagesStep())->run($project);
+        $images = new FakeImageClient();
+        $llm = new FakeLlm();
+        (new GenerateImagesStep($images, $llm))->run($project);
+        assert_eq('1:1', $images->calls[0]['opts']['aspect_ratio']);
+        assert_eq('1K', $images->calls[0]['opts']['sample_image_size']);
+        assert_eq(0, count($llm->imageCalls));
+        assert_eq('card', $project->readJson('images.json')[0]['image_slot']);
+    } finally {
+        remove_tree($tmp);
+    }
 });
