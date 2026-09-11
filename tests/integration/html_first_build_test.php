@@ -171,7 +171,13 @@ function html_first_queue_success(
     $llm->queueText($homeBody);
 
     $llm->queueJson($siteSpec);
-    $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
+    // Style-compatible seeds keep the judge and downstream responses aligned.
+    $llm->queueJson(['seeds' => [
+        ['text' => 'Flour Archive', 'register' => 'editorial'],
+        ['text' => 'Bread Ledger', 'register' => 'editorial'],
+        ['text' => 'Oven Journal', 'register' => 'editorial'],
+        ['text' => 'Grain Index', 'register' => 'editorial'],
+    ]]);
     $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     $llm->queueJson(html_first_direction());
     $llm->queueJson($themePayload ?? html_first_theme_payload());

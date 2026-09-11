@@ -14,7 +14,6 @@ use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
-use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
@@ -200,7 +199,7 @@ final class DesignDirectionStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json'],
-            writes: ['designDirection.json', 'warnings.json'],
+            writes: ['designDirection.json', 'warnings.json', 'logs/design-direction-seeds.json'],
             concurrent: false,
         );
     }
@@ -227,8 +226,8 @@ final class DesignDirectionStep implements Step
 
         $spec = SiteSpecStep::promptText($project);
         $specData = $project->readJson('siteSpec.json');
-        // Loaded once: the expansion prompt samples its font shortlist from
-        // it, and the monoculture floor below substitutes against it.
+        // The expansion prompt samples discovery suggestions from the catalog;
+        // they do not restrict the authored font pairing.
         $fontCatalog = FontCatalog::load();
 
         $warnings = [];
@@ -240,7 +239,7 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister,
             'color_economy' => $seedColorEconomy,
             'choice'        => $seedChoice,
-        ] = $this->chooseSeed($prompt, $spec, $warnings);
+        ] = $this->chooseSeed($prompt, $spec, $warnings, $project);
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -292,7 +291,7 @@ final class DesignDirectionStep implements Step
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
             'color_economy' => $seedColorEconomy === ''
-                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
+                ? 'not committed by the seed — choose the hue relationships that express the requested style'
                 : $seedColorEconomy,
             // A rotating per-site shortlist of real families in the committed
             // tradition. Naming the tradition alone lands every build on its
@@ -351,6 +350,10 @@ final class DesignDirectionStep implements Step
             array_push($warnings, ...self::commitmentWarnings($direction));
         }
 
+        // Carry the user's intent independently of the generated narrative so
+        // every downstream author can resolve a conflicting design detail.
+        $direction['requested_style'] = ConceptSeeds::explicitStyleFromPrompt($prompt);
+
         if (isset($constraints['hero_canvas']) && $direction['canvas'] !== $constraints['hero_canvas']) {
             $repairs[] = 'designDirection.json: field canvas authored '
                 . self::describe($direction['canvas']) . ' delivered '
@@ -363,30 +366,11 @@ final class DesignDirectionStep implements Step
             Narrator::write('  [design-direction] repaired ' . count($repairs)
                 . " generated direction field(s) (reported separately from durable warnings).\n");
         }
-        // Naming the reflex faces in the prompt moved us off them and straight
-        // onto the next tier — prose is a suggestion the model may decline.
-        // This is the floor under it, and it runs here rather than in
-        // normalize() because it needs the shipped catalog off disk.
-        $direction = self::substituteMonocultureFonts(
-            $direction,
-            (string) ($specData['slug'] ?? $project->slug()),
-            $fontCatalog,
-            $warnings,
-        );
+        // The committed pairing is a creative choice. Font availability and
+        // face resolution are checked downstream; familiarity is not a defect.
 
-        // Last, with every field final: does the narrative promise decoration
-        // no step can execute? The prose is handed to every downstream design
-        // and section prompt as the authoritative brief, so a promise outside
-        // the bounded vocabulary is never refused and never delivered — the
-        // page just ships plainer than its own direction (BIGR-884). Nothing
-        // here can be repaired deterministically (rewriting prose needs a
-        // model), so this is rung 4: record it and continue.
-        array_push($warnings, ...DirectionExecutability::problems($direction));
-
-        // Narrated HERE, after every source has contributed: font substitution
-        // and the executability walk both add warnings, and announcing the
-        // count before them printed no line at all for a build whose only
-        // durable warning came from one of the two.
+        // Artwork vocabulary alone cannot establish whether generated imagery
+        // can deliver a direction. Report actual normalization losses only.
         if ($warnings !== []) {
             Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
                 . " generated-content degradation(s) (recorded in warnings.json)\n");
@@ -406,8 +390,52 @@ final class DesignDirectionStep implements Step
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
 
-        $project->addWarnings($this->id(), $warnings);
+        $project->addWarnings($this->id(), array_merge(
+            $warnings,
+            self::monocultureFontWarnings($direction, $prompt),
+        ));
         $project->writeJson(self::FILE, $direction);
+    }
+
+    /**
+     * Record an unprompted reach for a face that reads as a default.
+     *
+     * The deterministic substitution is gone on purpose: the model now
+     * reaches the whole catalog instead of a hand-picked shelf, which is a
+     * wider design space than the substitution could offer. What must not go
+     * with it is the measurement that justified it — across 128 audited
+     * builds, 128 sites drew on 13 heading families and five of them set more
+     * than half of everything, and naming those five in the prompt moved the
+     * reflex to `Space Grotesk` twice in five builds.
+     *
+     * So this changes nothing the visitor sees. It is rung 4: the choice
+     * ships, and warnings.json carries the row a cohort audit can count, so a
+     * returning monoculture is visible without anything being overruled.
+     *
+     * A face the brief itself names is a genuine request and is not recorded.
+     *
+     * @param array<string,mixed> $direction
+     * @return list<string>
+     */
+    public static function monocultureFontWarnings(array $direction, string $prompt): array
+    {
+        $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
+        $rows = [];
+        foreach (['heading', 'body', 'accent'] as $slot) {
+            $family = $type[$slot]['family'] ?? null;
+            if (!is_string($family) || trim($family) === '' || !FontMonoculture::isOverused($family)) {
+                continue;
+            }
+            if (mb_stripos($prompt, trim($family)) !== false) {
+                continue;
+            }
+            $rows[] = "file='designDirection.json'; path=\"type.{$slot}.family\"; authored="
+                . Warnings::value(trim($family)) . '; delivered=' . Warnings::value(trim($family))
+                . '; disposition=delivered as authored; the brief did not name this face and it is one the'
+                . ' catalog-wide audit measures as a default rather than a choice';
+        }
+
+        return $rows;
     }
 
     /**
@@ -487,8 +515,10 @@ final class DesignDirectionStep implements Step
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
      * out of range — including a failed seed call — fails loud, because a
      * forced eval must not silently drift, so it indexes the round as the
-     * model wrote it, and it bypasses the judge); otherwise the judge picks
-     * over the DISTINCT seeds (see judgeSeed), and only when the judge fails
+     * model wrote it, and a style-compatible override bypasses the judge).
+     * The user's requested style wins over an incompatible forced candidate.
+     * Otherwise the judge picks over style-compatible seeds (see judgeSeed),
+     * deduplicated by axes only for open-style briefs, and only when the judge fails
      * or answers off the ballot does the pick fall to uniform random — over
      * the distinct seeds, since a world the model described twice would
      * otherwise be twice as likely to win (see ConceptSeeds). A round with one
@@ -506,10 +536,11 @@ final class DesignDirectionStep implements Step
      * @param list<string> $warnings
      * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
      */
-    private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
+    private function chooseSeed(string $brief, string $spec, array &$warnings, Project $project): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
+        $requestedStyle = ConceptSeeds::requestedStyle($brief);
 
         $seeds = [];
         try {
@@ -526,6 +557,9 @@ final class DesignDirectionStep implements Step
             }
             $payload = $this->llm->completeJson($rendered, $opts);
             $locked = ConceptSeeds::lockedFromBrief($brief);
+            if ($requestedStyle !== '') {
+                $locked['registers'][] = $requestedStyle;
+            }
             foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
                 $seed = ConceptSeeds::normalize($raw, $locked);
                 if ($seed !== null) {
@@ -539,6 +573,11 @@ final class DesignDirectionStep implements Step
             // Fall through to the fallback seed below.
         }
 
+        $project->writeJson('logs/design-direction-seeds.json', [
+            'requested_style' => $requestedStyle,
+            'candidates' => $seeds,
+        ]);
+
         if ($isForced) {
             $n = (int) $forced;
             if ($n < 1 || $n > count($seeds)) {
@@ -549,19 +588,43 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return self::chosen($seeds[$n - 1], [
-                ...self::seedRoundReport($seeds),
-                'Seed choice: forced ' . self::CHOICE_ENV . '=' . $n . ' [' . ($n - 1) . '] ' . $seeds[$n - 1]['text'],
-            ]);
+            $candidate = $seeds[$n - 1];
+            if ($requestedStyle === '' || (is_string($candidate['register'])
+                && ConceptSeeds::styleKey($candidate['register']) === $requestedStyle)) {
+                return self::chosen($candidate, [
+                    ...self::seedRoundReport($seeds),
+                    'Seed choice: forced ' . self::CHOICE_ENV . '=' . $n . ' [' . ($n - 1) . '] ' . $candidate['text'],
+                ]);
+            }
+            $warnings[] = 'file=designDirection.json; path=concept_seed; authored=forced candidate '
+                . $n . '; delivered=style-compatible selection; disposition=forced candidate bypassed because '
+                . 'the requested style outranks a generated candidate';
         }
 
+        $seeds = ConceptSeeds::respectStyle($seeds, $requestedStyle, $warnings);
         if ($seeds === []) {
-            return self::chosen(['text' => self::SEED_FALLBACK], [
-                'Seed round: no usable seeds',
-                'Seed choice: fallback (built-in "invent one concept" seed)',
+            if ($requestedStyle !== '') {
+                $warnings[] = 'file=designDirection.json; path=concept_seed; authored=no compatible candidate; '
+                    . 'delivered=' . self::describe($requestedStyle)
+                    . '; disposition=expand the requested style directly instead of an unrelated seed';
+            }
+            return self::chosen([
+                'text' => $requestedStyle === '' ? self::SEED_FALLBACK
+                    : 'Develop one distinctive interpretation of the user-requested style: ' . $requestedStyle
+                        . '. The brief owns the aesthetic; choose all unspecified details to serve it.',
+                'ground' => '',
+                'tint' => '',
+                'register' => $requestedStyle,
+                'type_register' => '',
+                'color_economy' => '',
+            ], [
+                'Seed round: no usable style-compatible seeds',
+                $requestedStyle === '' ? 'Seed choice: fallback (built-in "invent one concept" seed)'
+                    : 'Seed choice: fallback (expand user-requested style: ' . $requestedStyle . ')',
             ]);
         }
-        $pool = ConceptSeeds::distinct($seeds, $warnings);
+        // Coarse labels must not erase different interpretations of one style.
+        $pool = $requestedStyle === '' ? ConceptSeeds::distinct($seeds, $warnings) : $seeds;
         $choice = self::seedRoundReport($pool);
         if (count($pool) < 2) {
             $choice[] = 'Seed choice: single seed [0] ' . $pool[0]['text'];
@@ -577,7 +640,7 @@ final class DesignDirectionStep implements Step
         // distinct() already records a collapsed round (one world, kept
         // whole). A second row that restates the shared axis is the same
         // event, and "open brief" is a claim this step never checked.
-        if (count($triples) > 1) {
+        if ($requestedStyle === '' && count($triples) > 1) {
             $sharedGround = ConceptSeeds::sharedGround($pool);
             if ($sharedGround !== null) {
                 $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
@@ -1176,11 +1239,13 @@ final class DesignDirectionStep implements Step
             'motion_note'      => $motionNote,
             'subject_anchor'   => self::normalizeProseCommitment($raw, 'subject_anchor', $warnings),
             'tension'          => self::normalizeProseCommitment($raw, 'tension', $warnings),
+            'style_signature'  => self::normalizeProseCommitment($raw, 'style_signature', $warnings),
             'concept_seed'     => $conceptSeed,
             'register'         => BoundedChoice::explicit($conceptRegister, ConceptSeeds::knownRegisters())
                 ?? BoundedChoice::explicit($raw['register'] ?? null, ConceptSeeds::knownRegisters())
                 ?? '',
             'hero_blueprint'   => $blueprint,
+            'requested_style'  => is_string($raw['requested_style'] ?? null) ? trim($raw['requested_style']) : '',
         ];
     }
 
@@ -1210,11 +1275,10 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The two prose commitments, judged once on the delivered direction: a
-     * blank `tension` means nothing in the direction argues, so the page is
-     * its category's default by construction; a blank `subject_anchor` means
-     * the swap test went unanswered; an anchor naming no palette role binds
-     * no committed hex. None of these can be repaired deterministically
+     * Missing prose commitments are recorded once on the delivered direction.
+     * A subject connection may live in imagery or content, not just a palette
+     * role. Neither an omitted contrast nor a non-palette anchor proves a
+     * generic aesthetic. Missing guidance cannot be repaired deterministically
      * (inventing a subject's world needs a model), so each is rung 4: a
      * durable row for the cohort audit and the future repair pass, and the
      * build continues. Called from run(), not normalize(), so a re-normalized
@@ -1229,18 +1293,12 @@ final class DesignDirectionStep implements Step
         $tension = trim((string) ($direction['tension'] ?? ''));
         if ($tension === '') {
             $rows[] = "file='designDirection.json'; path=\"tension\"; authored=\"\"; delivered=\"\"; "
-                . 'disposition=no deliberate contrast committed; the direction ships as its category default';
+                . 'disposition=composition relationship omitted; remaining design direction retained';
         }
         $anchor = trim((string) ($direction['subject_anchor'] ?? ''));
         if ($anchor === '') {
             $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored=\"\"; delivered=\"\"; "
-                . "disposition=no palette role was tied to the subject's own world, so the swap test is "
-                . 'unanswered; direction delivered unanchored';
-        } elseif (preg_match('/\b(base|contrast|primary|secondary|accent|band)\b/i', $anchor) !== 1) {
-            $rows[] = "file='designDirection.json'; path=\"subject_anchor\"; authored="
-                . Warnings::value($anchor) . '; delivered=' . Warnings::value($anchor)
-                . '; disposition=anchor names no palette role (base, contrast, primary, secondary, accent, band), '
-                . 'so it binds no committed hex; retained unbound';
+                . 'disposition=subject connection omitted; remaining design direction retained';
         }
         return $rows;
     }
@@ -1319,45 +1377,6 @@ final class DesignDirectionStep implements Step
             $warnings,
             'unsupported elevation treatment replaced by flat',
         );
-    }
-
-    /**
-     * Move any type slot off a monoculture face, keeping its category.
-     *
-     * `axes` is cleared alongside the swap: an `opsz` range was committed for
-     * the family the model named, and carrying it onto a different face would
-     * promise an optical-size axis the replacement may not have. Weights need
-     * no such care — FontCatalog::faces() already resolves to the nearest
-     * weight the delivered family actually ships.
-     *
-     * Pure given the catalog — unit-testable.
-     *
-     * @param array<string,mixed> $direction
-     * @param list<string> $warnings
-     * @return array<string,mixed>
-     */
-    public static function substituteMonocultureFonts(
-        array $direction,
-        string $seed,
-        FontCatalog $catalog,
-        array &$warnings = [],
-    ): array {
-        foreach (['heading', 'body', 'accent'] as $slot) {
-            $family = $direction['type'][$slot]['family'] ?? null;
-            if (!is_string($family) || trim($family) === '') {
-                continue;
-            }
-            $replacement = FontMonoculture::substitute(trim($family), $seed, $catalog, $slot);
-            if ($replacement === null) {
-                continue;
-            }
-            $direction['type'][$slot]['family'] = $replacement;
-            $direction['type'][$slot]['axes'] = [];
-            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                . Warnings::value($family) . '; delivered ' . Warnings::value($replacement)
-                . '; disposition substituted a monoculture face for one outside it, category preserved';
-        }
-        return $direction;
     }
 
     /**
@@ -1688,6 +1707,13 @@ final class DesignDirectionStep implements Step
         $title = trim((string) ($direction['title'] ?? ''));
         $description = trim((string) ($direction['description'] ?? ''));
         $head = $title === '' ? $description : "# {$title}\n\n{$description}";
+        $requestedStyle = is_string($direction['requested_style'] ?? null)
+            ? trim($direction['requested_style']) : '';
+        if ($requestedStyle !== '') {
+            $head = 'USER-REQUESTED STYLE: ' . json_encode($requestedStyle, JSON_UNESCAPED_UNICODE)
+                . ". This aesthetic outranks conflicting generated design details; express it in the composition, not just the copy.\n\n"
+                . $head;
+        }
 
         $facts = [];
 
@@ -1735,6 +1761,12 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Tension**: ' . $tension
                 . ' — the one deliberate contrast the site is built on; a band holds both halves'
                 . ' rather than resolving into one of them.';
+        }
+        $signature = trim((string) ($direction['style_signature'] ?? ''));
+        if ($signature !== '') {
+            $facts[] = '- **Style signature**: ' . $signature
+                . ' — express this through image choice and composition, palette, typography and spacing;'
+                . ' use the shared image grade for medium, light and color treatment. This is not a request for added ornaments.';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];

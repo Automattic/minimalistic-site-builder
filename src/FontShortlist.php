@@ -162,12 +162,13 @@ final class FontShortlist
         if ($candidates === []) {
             return '';
         }
-        return 'Candidate families inside this tradition, all on Google Fonts: '
+        return 'Candidate display families inside this tradition, all on Google Fonts: '
             . implode(', ', $candidates) . '. '
             . 'Treat the list as a starting shelf, not a fence: pick from it, or go beyond it '
             . 'when you can say what makes another real Google Fonts family in this tradition '
             . 'righter for THIS site. Do not default to the one famous family the tradition is '
-            . 'known by; that reflex is how every generated site ends up set in the same face.'
+            . 'known by; that reflex is how every generated site ends up set in the same face. '
+            . 'The body face may come from another tradition to complement the display choice.'
             . self::productWeightSentence($typeRegister, $register);
     }
 
@@ -181,7 +182,7 @@ final class FontShortlist
             || !in_array($typeRegister, self::PRODUCT_TYPE_REGISTERS, true)) {
             return '';
         }
-        return ' Use a MEDIUM weight for the display heading for this product or portfolio tradition. '
+        return ' Unless the user explicitly requests a different typographic style or weight, use a MEDIUM weight for the display heading for this product or portfolio tradition. '
             . 'Commit 500 and 600 in `weights`. Use `type_treatment: "tight"` and body weight 400. '
             . 'Do not use weight 800 for the display heading.';
     }
