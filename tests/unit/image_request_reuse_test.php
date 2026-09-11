@@ -81,7 +81,7 @@ test('a failed equivalent request removes only its references and preserves a di
     $delivered = $project->readText('theme/parts/copy.html');
     assert_true(str_ends_with($delivered, $sentinel));
     assert_true(!str_contains($delivered, 'hero-copy.jpg'));
-    assert_true(!str_contains($delivered, '<img')); 
+    assert_true(!str_contains($delivered, '<img'));
     assert_true($project->exists('theme/assets/other.jpg'));
     $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
     assert_contains('theme/assets/hero-copy.jpg', $warnings);
