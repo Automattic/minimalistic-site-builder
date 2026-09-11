@@ -1868,3 +1868,46 @@ test('generate-images retries a rotated screen or object and records the residua
         }
     }
 });
+
+test('generate-images checks independent assets together and pools only their failed replacements', function () {
+    [$project, $tmp] = generate_fixture();
+    $first = $project->readJson('images.json')[0];
+    $specs = [$first];
+    foreach (['hero-other.jpg', 'hero-pass.jpg'] as $filename) {
+        $specs[] = array_replace($first, ['filename' => $filename, 'src' => 'theme:./assets/' . $filename]);
+    }
+    $project->writeJson('images.json', $specs);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new class implements \Automattic\SiteBuild\VisionBatchLlm {
+        public array $imageCalls = [];
+        public function complete(string $prompt, array $opts = []): string { throw new RuntimeException('Unexpected request'); }
+        public function completeJson(string $prompt, array $opts = []): array { throw new RuntimeException('Unexpected request'); }
+        public function completeJsonBatch(array $requests): array { throw new RuntimeException('Unexpected request'); }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult { throw new RuntimeException('Unexpected request'); }
+        public function completeWithImage(string $prompt, string $imageBytes, string $mime, array $opts = []): string { throw new RuntimeException('Unexpected request'); }
+        public array $checks = [];
+        public function completeImageBatch(array $requests): array
+        {
+            $this->checks[] = $requests;
+            if (count($this->checks) === 1) {
+                return [0 => GI_QA_ROTATED, 1 => GI_QA_ROTATED, 2 => GI_QA_PASS];
+            }
+            return [0 => GI_QA_PASS, 1 => null];
+        }
+    };
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq([3, 2], array_map('count', $llm->checks));
+    assert_eq([3, 2], array_map('count', $images->batches));
+    assert_eq('image-qa-hero-other.jpg', $llm->checks[0][1]['log_label']);
+    assert_eq(0, count($llm->imageCalls));
+    assert_true(!$project->exists('warnings.json'));
+    $rows = $project->readJson('images.json');
+    assert_eq(true, $rows[0]['qa']['regenerated']);
+    assert_eq(true, $rows[1]['qa']['regenerated']);
+    assert_true(!isset($rows[2]['qa']));
+    $before = $project->readText('theme/assets/hero-pass.jpg');
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(2, count($images->batches));
+    assert_eq($before, $project->readText('theme/assets/hero-pass.jpg'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

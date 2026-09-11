@@ -83,7 +83,9 @@ final class ImageQa
         if (($data['rendered_text'] ?? false) === true) {
             $findings[] = 'rendered text or lettering in the picture';
         }
-        if (($data['matches_subject'] ?? true) === false) {
+        $subjectDifference = $data['subject_difference'] ?? null;
+        if (($data['matches_subject'] ?? true) === false
+            && ($subjectDifference === null || in_array($subjectDifference, ['main_subject', 'vantage'], true))) {
             $findings[] = 'picture does not show the requested subject';
         }
         $note = is_string($data['note'] ?? null) ? trim($data['note']) : '';
