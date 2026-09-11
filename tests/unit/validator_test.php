@@ -327,6 +327,33 @@ test('typography warnings flag hardcoded font sizes and an unused display preset
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('typography warnings retain harmless exact scale values and flag other raw sizes', function () {
+    [$project, $tmp] = validator_project();
+    try {
+        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
+            ['slug' => 'lead', 'size' => '1.565rem'],
+            ['slug' => 'fluid', 'size' => 'clamp(1rem, 2vw, 2rem)'],
+        ]]]]);
+        $markup = '<!-- wp:paragraph {"style":{"typography":{"fontSize":"1.565rem"}}} -->'
+            . '<p style="font-size:1.565rem">A cellar table, a clay cup, and food cooked the old way.</p><!-- /wp:paragraph -->'
+            . '<!-- wp:heading {"style":{"typography":{"fontSize":"clamp(1rem, 2vw, 2rem)"}}} -->'
+            . '<h2 style="font-size:clamp(1rem, 2vw, 2rem)">Menu</h2><!-- /wp:heading -->';
+        $project->writeText('theme/parts/footer.html', $markup);
+        assert_eq([], ThemeValidator::typographyWarnings($project));
+        assert_eq($markup, $project->readText('theme/parts/footer.html'));
+        $long = str_replace('A cellar table, a clay cup, and food cooked the old way.', str_repeat('Keep this body text. ', 10), $markup);
+        $project->writeText('theme/parts/footer.html', $long);
+        $warnings = implode("\n", ThemeValidator::typographyWarnings($project));
+        assert_contains('paragraphs set at heading-scale', $warnings);
+        assert_true(!str_contains($warnings, 'hardcoded font-size'));
+        $project->writeText('theme/parts/footer.html', $markup
+            . '<!-- wp:paragraph {"style":{"typography":{"fontSize":"1.8rem"}}} --><p>Other size</p><!-- /wp:paragraph -->');
+        assert_contains('footer.html (1)', implode("\n", ThemeValidator::typographyWarnings($project)));
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 test('typography warnings verify the committed type treatment and per-level inheritance', function () {
     [$project, $tmp] = validator_project();
     seed_test_design_direction($project, overrides: ['type_treatment' => 'lowercase']);
