@@ -16,6 +16,7 @@ final class OverlapImageClient implements ImageClient, CooperativeTransport
     public array $events = [];
     public array $attempts = [];
     public array $delays = [];
+    public array $waitForEvent = [];
     public int $active = 0;
     public int $peak = 0;
     public ?string $bytes = null;
@@ -38,6 +39,14 @@ final class OverlapImageClient implements ImageClient, CooperativeTransport
                 $attempt = $this->attempts[$asset] = ($this->attempts[$asset] ?? 0) + 1;
                 $this->events[] = 'start-' . $asset . '-' . $attempt;
                 ImageTransportScheduler::pause($this->delays[$asset] ?? 0.003);
+                $event = $this->waitForEvent[$asset] ?? null;
+                $deadline = microtime(true) + 5;
+                while ($event !== null && !in_array($event, $this->events, true)) {
+                    if (microtime(true) >= $deadline) {
+                        throw new RuntimeException('The overlap test did not reach event: ' . $event);
+                    }
+                    ImageTransportScheduler::pause();
+                }
                 $result = $this->failReplacement && $attempt > 1
                     ? ['ok' => false, 'error' => 'replacement failed']
                     : ['ok' => true, 'bytes' => $this->bytes ?? $this->generate($spec['prompt'], $spec)];
@@ -103,7 +112,7 @@ test('API-capable clients check and replace a fast image before a slow image com
     [$project, $tmp] = queue_image_fixture(2);
     try {
         $images = new OverlapImageClient();
-        $images->delays = ['img-0.jpg' => 0.003, 'img-1.jpg' => 0.1];
+        $images->waitForEvent['img-1.jpg'] = 'done-img-0.jpg-2';
         $llm = new OverlapVisionLlm($images);
         $llm->fail = ['img-0.jpg'];
         (new GenerateImagesStep($images, $llm))->run($project);
