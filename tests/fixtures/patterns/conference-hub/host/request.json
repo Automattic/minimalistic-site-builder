@@ -29,6 +29,54 @@
     "primary_cta": "Register"
   },
   "capabilities": {
-    "classes": []
-  }
+    "classes": [],
+    "template_parts": [
+      {
+        "name": "header",
+        "area": "header"
+      },
+      {
+        "name": "vertical-header",
+        "area": "header"
+      },
+      {
+        "name": "header-large-title",
+        "area": "header"
+      },
+      {
+        "name": "footer",
+        "area": "footer"
+      },
+      {
+        "name": "footer-columns",
+        "area": "footer"
+      },
+      {
+        "name": "footer-newsletter",
+        "area": "footer"
+      },
+      {
+        "name": "sidebar",
+        "area": "uncategorized"
+      }
+    ]
+  },
+  "navigation": [
+    {
+      "title": "Home",
+      "slug": "home"
+    },
+    {
+      "title": "Agenda",
+      "slug": "agenda"
+    },
+    {
+      "title": "Speakers",
+      "slug": "speakers"
+    },
+    {
+      "title": "Venue",
+      "slug": "venue"
+    }
+  ]
 }
