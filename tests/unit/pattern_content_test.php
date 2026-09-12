@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ReplayLlm;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Tests\FakeLlm;
@@ -30,6 +31,21 @@ function pattern_proof_project(string $dir): Project
     $project->writeText('media/studio.png', 'fixture-image-bytes');
     return $project;
 }
+
+test('ReplayLlm preserves batch keys and refuses uncovered transports', function () {
+    $llm = new ReplayLlm([
+        ['content' => [['id' => 'first', 'e' => 'One']]],
+        ['content' => [['id' => 'second', 'e' => 'Two']]],
+    ]);
+    $results = $llm->completeJsonBatch([
+        'home' => ['prompt' => 'first'],
+        'about' => ['prompt' => 'second'],
+    ]);
+    assert_eq('One', $results['home']['content'][0]['e']);
+    assert_eq('Two', $results['about']['content'][0]['e']);
+    assert_eq(0, $llm->remaining());
+    assert_contains('raw-text', assert_throws(fn () => $llm->complete('unsupported'))->getMessage());
+});
 
 test('pattern input schema example and runtime publish the same versioned contract', function () {
     $schema = json_decode(file_get_contents(Package::patternInputsSchemaPath()), true, flags: JSON_THROW_ON_ERROR);

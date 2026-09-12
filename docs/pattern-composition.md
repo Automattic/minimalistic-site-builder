@@ -81,9 +81,10 @@ php tests/pattern-proof.php /tmp/msb-pattern-proof
 node tests/integration/pattern-content-oracle.js /tmp/msb-pattern-proof/pattern-output.json
 ```
 
-The importer integration harness is an optional consumer smoke test. It adapts
-the portable bundle only at its boundary and does not define the composition or
-its contract.
+The importer integration harness is an optional consumer smoke test. Site
+Foundry remains the source of the selected Brand, Blueprint, resolved deployed
+theme, site creation, and WordPress application. It maps those inputs into this
+contract and adapts the returned portable bundle at its destination boundary.
 
 ## Local WordPress E2E
 
@@ -94,18 +95,21 @@ pnpm dependencies installed, run:
 tests/run-pattern-site-foundry-e2e.sh --keep-running --headed
 ```
 
-The command generates the fixture bundle, validates its blocks with the pinned
-Gutenberg runtime, starts Site Foundry's Docker WordPress multisite, opens the
-real Network Admin plugin flow in Playwright, creates a fresh subsite through
-the plugin's AJAX endpoints, applies the local bundle, and checks the rendered
-homepage. Every run saves a browser video and result metadata under a temporary
-directory printed at the end. `--headed` shows the browser while it records;
-`--keep-running` leaves WordPress running for inspection.
+The command starts Site Foundry's Docker WordPress multisite and drives the real
+Network Admin product flow in Playwright. It selects the curated Customer
+Microsite Blueprint and a saved Northstar Brand, asks the mounted MSB checkout
+to personalize only the Blueprint's declared slots, creates a fresh subsite,
+and applies the bundle through Site Foundry's existing interpreter. The checks
+cover the deployed theme, four pages, inner-page copy, portable links, front
+page, and the Brand palette rendered from WordPress global styles. Every run
+saves a browser video and result metadata under a temporary directory printed
+at the end. `--headed` shows the browser while it records; `--keep-running`
+leaves WordPress at `http://localhost:8888` for inspection.
 
 The runner updates Site Foundry's gitignored `.wp-env.override.json` with the
-local-only bundle constant and Docker bind mounts. It also disables the Jetpack
-download in this local configuration because the plugin-side adapter exercises
-the destination boundary without WPCOM services.
+local MSB checkout mount. Local mode bypasses the Jetpack connection check and
+the Site Spec CDN widget because it uses recorded fixture responses. Production
+keeps the existing WordPress.com transport.
 
 Override the sibling checkout convention with `SITE_FOUNDRY_ROOT=/path/to/site-foundry`.
 The E2E uses fixture providers; production authorization, quotas, credentials,
