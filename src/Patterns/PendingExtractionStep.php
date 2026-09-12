@@ -59,9 +59,13 @@ final class PendingExtractionStep implements Step
 
     public function run(Project $project): void
     {
+        // Naming --from matters: supplying this stage's output in a fixture
+        // does not skip the stage, it only makes a later one runnable. A
+        // message that suggested otherwise sent the reader to a fixture that
+        // already had the file and hit this same error again.
         throw new \RuntimeException(sprintf(
             'Stage "%s" is not implemented yet. Its behaviour is being extracted from %s. '
-            . 'Stop before it with --until, or run a fixture that supplies %s.',
+            . 'Stop before it with --until, or start past it with --from once a fixture supplies %s.',
             $this->id,
             $this->source,
             implode(', ', $this->writes),
