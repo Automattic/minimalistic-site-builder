@@ -61,13 +61,17 @@ final class ExportBundleStep implements Step
             'brand' => $inputs['brand'] ?? [],
             'pages' => self::readPages($project, $provenance),
             'parts' => self::readParts($project),
+            // The destination builds the menu from this. Dropping it leaves a
+            // multi-page site whose pages cannot reach each other, and nothing
+            // downstream notices that the pages are orphaned.
+            'navigation' => $inputs['navigation'] ?? [],
             'media' => $media['images'] ?? [],
         ];
 
         $violations = ContentOnlyGuard::check(
             $bundle,
             $inputs['inventory_ids'] ?? [],
-            $inputs['capabilities']['classes'] ?? [],
+            $inputs['capabilities'] ?? [],
         );
 
         $project->writeJson(PatternArtifacts::REPORT, [

@@ -47,7 +47,11 @@ function export_clean_inputs(): array
         'theme' => 'twentytwentyfive',
         'brand' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
         'inventory_ids' => ['twentytwentyfive/banner-cover-big-heading'],
-        'capabilities' => ['classes' => []],
+        'capabilities' => [
+            'classes' => [],
+            'template_parts' => [['name' => 'header', 'area' => 'header']],
+        ],
+        'navigation' => [['title' => 'Home', 'slug' => 'home']],
     ];
 }
 
@@ -215,4 +219,18 @@ test('the same inputs export a byte-identical bundle', function () {
         $first->readText(PatternArtifacts::BUNDLE),
         $second->readText(PatternArtifacts::BUNDLE),
     );
+});
+
+/**
+ * A multi-page site whose pages cannot reach each other is not a site. The
+ * destination builds the menu from this, so losing it here would be invisible
+ * until someone opened the result and found no navigation.
+ */
+test('navigation reaches the bundle', function () {
+    $project = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+
+    (new ExportBundleStep())->run($project);
+
+    $navigation = $project->readJson(PatternArtifacts::BUNDLE)['navigation'];
+    assert_eq([['title' => 'Home', 'slug' => 'home']], $navigation);
 });

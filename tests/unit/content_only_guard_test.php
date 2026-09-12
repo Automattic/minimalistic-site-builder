@@ -61,7 +61,7 @@ test('classes the destination theme does define are accepted', function () {
         ],
     ]);
 
-    assert_eq([], ContentOnlyGuard::check($bundle, ['theme/hero'], ['card-media']));
+    assert_eq([], ContentOnlyGuard::check($bundle, ['theme/hero'], ['classes' => ['card-media']]));
 });
 
 test('a block outside core is reported, since the host cannot install it', function () {
@@ -137,4 +137,34 @@ test('shared parts are checked alongside page bodies', function () {
     $counts = ContentOnlyGuard::unbackedClasses($bundle, []);
 
     assert_eq(['bespoke-header' => 1], $counts);
+});
+
+/**
+ * A generated theme owns its header and footer, so filling one is always safe.
+ * A fixed theme decides which parts exist, and WordPress drops one it never
+ * declared without a word — so the build has to be the thing that notices.
+ */
+test('a shared part the destination theme never declared is rejected', function () {
+    $bundle = [
+        'pages' => [],
+        'parts' => [['slug' => 'mega-header', 'content' => '<!-- wp:group --><div></div><!-- /wp:group -->']],
+    ];
+
+    $violations = ContentOnlyGuard::check($bundle, [], [
+        'template_parts' => [['name' => 'header', 'area' => 'header']],
+    ]);
+
+    assert_eq(1, count($violations));
+    assert_contains('mega-header', $violations[0]);
+});
+
+test('a shared part the theme does declare is accepted', function () {
+    $bundle = [
+        'pages' => [],
+        'parts' => [['slug' => 'header', 'content' => '<!-- wp:group --><div></div><!-- /wp:group -->']],
+    ];
+
+    assert_eq([], ContentOnlyGuard::check($bundle, [], [
+        'template_parts' => [['name' => 'header', 'area' => 'header']],
+    ]));
 });
