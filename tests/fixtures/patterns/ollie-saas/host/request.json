@@ -252,7 +252,8 @@
       "woocommerce-page",
       "woocommerce-product-attributes",
       "woocommerce-tabs"
-    ]
+    ],
+    "page_template": "page-no-title"
   },
   "navigation": [
     {

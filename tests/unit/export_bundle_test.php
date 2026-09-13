@@ -261,3 +261,18 @@ test('a class an approved pattern shipped with is not held against the bundle', 
 
     assert_eq(true, $project->readJson(PatternArtifacts::REPORT)['passed']);
 });
+
+/**
+ * A theme's default page template prints the title, so a front page titled
+ * "Home" opens with the word Home above its hero. The host names one of the
+ * theme's templates and the bundle carries the choice to the destination.
+ */
+test('the page template the host chose reaches the bundle', function () {
+    $inputs = export_clean_inputs();
+    $inputs['capabilities']['page_template'] = 'page-no-title';
+    $project = export_project($inputs, export_clean_pages(), export_clean_provenance());
+
+    (new ExportBundleStep())->run($project);
+
+    assert_eq('page-no-title', $project->readJson(PatternArtifacts::BUNDLE)['page_template']);
+});

@@ -67,6 +67,7 @@ final class ExportBundleStep implements Step
             // downstream notices that the pages are orphaned.
             'navigation' => $inputs['navigation'] ?? [],
             'media' => $media['images'] ?? [],
+            'page_template' => (string) ($inputs['capabilities']['page_template'] ?? ''),
         ];
 
         // A class an approved pattern shipped with is the customer's, not
