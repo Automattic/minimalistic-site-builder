@@ -1,68 +1,85 @@
 {
-  "pages": [
-    {
-      "slug": "home",
-      "title": "Home",
-      "sections": [
+    "pages": [
         {
-          "intent": "Hero",
-          "category": "hero"
+            "slug": "home",
+            "title": "Home",
+            "front": true,
+            "menu_order": 0,
+            "description": "Frame the multi-session conference and drive registration from a central hub.",
+            "sections": [
+                {
+                    "category": "banner",
+                    "intent": "Establish brand and conference identity at the top of the hub.",
+                    "reason": "An events team visitor needs immediate recognition that this is the official conference hub before scrolling further."
+                },
+                {
+                    "category": "call-to-action",
+                    "intent": "Provide a prominent registration prompt for the multi-session conference.",
+                    "reason": "The primary action is registering for the whole conference; placing it high reduces friction for teams deciding whether to commit."
+                },
+                {
+                    "category": "about",
+                    "intent": "Summarize the conference scope, dates, and multi-track value.",
+                    "reason": "Teams running multi-track conferences need to quickly grasp whether this event matches their professional interests before exploring details."
+                },
+                {
+                    "category": "featured",
+                    "intent": "Highlight headline speakers, tracks, or sponsors that make this edition compelling.",
+                    "reason": "Events teams compare conferences by keynotes and prestige; featuring marquee names builds urgency and validates the registration decision."
+                },
+                {
+                    "category": "testimonials",
+                    "intent": "Show quotes from past attendees or organizers who ran similar multi-track events.",
+                    "reason": "Social proof matters when committing staff time and budget; testimonials from peers in events teams lower perceived risk."
+                },
+                {
+                    "category": "text",
+                    "intent": "Close the homepage with practical next steps or a note on group registration.",
+                    "reason": "A footer text section ensures late-scrolling visitors have a clear path to act without a harsh dead-end, reinforcing the hub role."
+                }
+            ]
         },
         {
-          "intent": "Stats",
-          "category": "stats"
+            "slug": "agenda",
+            "title": "Agenda",
+            "front": false,
+            "menu_order": 10,
+            "description": "",
+            "sections": [
+                {
+                    "category": "text",
+                    "intent": "Display a condensed grid or timeline of sessions, tracks, and breaks.",
+                    "reason": "Events teams evaluate whether the schedule offers enough depth across tracks for their different staff roles before committing to register."
+                }
+            ]
         },
         {
-          "intent": "Why attend",
-          "category": "why attend"
+            "slug": "speakers",
+            "title": "Speakers",
+            "front": false,
+            "menu_order": 20,
+            "description": "",
+            "sections": [
+                {
+                    "category": "about",
+                    "intent": "Introduce each speaker with a short bio and their session topic.",
+                    "reason": "Knowing who is on stage helps events teams judge expertise and session quality, which drives the decision to register and attend specific tracks."
+                }
+            ]
         },
         {
-          "intent": "Sponsors",
-          "category": "sponsors"
-        },
-        {
-          "intent": "CTA",
-          "category": "cta"
+            "slug": "venue",
+            "title": "Venue",
+            "front": false,
+            "menu_order": 30,
+            "description": "",
+            "sections": [
+                {
+                    "category": "text",
+                    "intent": "Explain accessibility, room setup, and nearby accommodation.",
+                    "reason": "Logistics are a gatekeeper for events teams; clear venue information removes a common blocker for multi-session conference registration."
+                }
+            ]
         }
-      ]
-    },
-    {
-      "slug": "agenda",
-      "title": "Agenda",
-      "sections": [
-        {
-          "intent": "Agenda overview",
-          "category": "agenda overview"
-        },
-        {
-          "intent": "Tracks",
-          "category": "tracks"
-        }
-      ]
-    },
-    {
-      "slug": "speakers",
-      "title": "Speakers",
-      "sections": [
-        {
-          "intent": "Featured speakers",
-          "category": "featured speakers"
-        }
-      ]
-    },
-    {
-      "slug": "venue",
-      "title": "Venue",
-      "sections": [
-        {
-          "intent": "Venue and travel",
-          "category": "venue and travel"
-        },
-        {
-          "intent": "Travel questions",
-          "category": "travel questions"
-        }
-      ]
-    }
-  ]
+    ]
 }
