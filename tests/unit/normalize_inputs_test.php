@@ -39,7 +39,7 @@ test('valid inputs settle into the shape the later stages read', function () {
             'theme' => 'twentytwentyfive',
             'locale' => 'es',
             'navigation' => [['title' => 'Home', 'slug' => 'home']],
-            'capabilities' => ['classes' => ['card'], 'template_parts' => [['name' => 'header']]],
+            'capabilities' => ['classes' => ['card']],
         ],
         normalize_inventory(),
         ['settings' => ['color' => []]],

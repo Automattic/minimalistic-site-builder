@@ -125,7 +125,6 @@ final class NormalizeInputsStep implements Step
             'facts' => $request['facts'] ?? [],
             'capabilities' => [
                 'classes' => self::strings($request['capabilities']['classes'] ?? []),
-                'template_parts' => $request['capabilities']['template_parts'] ?? [],
             ],
         ]);
     }

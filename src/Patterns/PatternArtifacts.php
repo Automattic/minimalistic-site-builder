@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Patterns;
 
+use Automattic\SiteBuild\Project;
+
 /**
  * The artifact contract for the pattern composition.
  *
@@ -61,15 +63,43 @@ final class PatternArtifacts
     /** Per-page block trees after content has been written into the patterns. */
     public const PAGES = 'patterns/pages/*';
 
-    /** Shared parts — header, footer — that every page renders inside. */
-    public const PARTS = 'patterns/parts';
-
     /** Images to import and the navigation targets to resolve, by reference. */
     public const MEDIA = 'patterns/media.json';
 
-    /** What the host applies: pages, shared parts, Brand, and media references. */
+    /** What the host applies: pages, Brand, navigation, and media references. */
     public const BUNDLE = 'bundle/content.json';
 
     /** What the export found: counts, and every check that did not pass. */
     public const REPORT = 'patterns/report.json';
+
+    /**
+     * Every composed page, decoded, in the order their files sort.
+     *
+     * The one place that knows a page is a JSON file under PAGES with a
+     * `slug`. Two stages read them and a third will; each reading the
+     * directory its own way is how one of them ends up seeing a page the
+     * other skipped.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function pages(Project $project): array
+    {
+        $dir = $project->path(rtrim(self::PAGES, '/*'));
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $files = glob($dir . '/*.json') ?: [];
+        sort($files);
+
+        $pages = [];
+        foreach ($files as $file) {
+            $page = json_decode((string) file_get_contents($file), true);
+            if (is_array($page) && isset($page['slug'])) {
+                $pages[] = $page;
+            }
+        }
+
+        return $pages;
+    }
 }

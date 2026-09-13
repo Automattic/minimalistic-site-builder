@@ -44,11 +44,10 @@ final class ContentOnlyGuard
      * whether to apply wants the whole picture, and a caller measuring build
      * quality wants to count them.
      *
-     * @param array<string, mixed> $bundle       Pages and shared parts, each with `content`.
+     * @param array<string, mixed> $bundle       Pages, each with `content`.
      * @param list<string>         $inventoryIds Pattern ids the host approved.
      * @param array<string, mixed> $capabilities What the destination theme offers:
-     *                                           `classes` it defines, and the
-     *                                           `template_parts` it declares.
+     *                                           the `classes` it defines.
      * @return list<string> Human-readable violations; empty when the bundle may be applied.
      */
     public static function check(array $bundle, array $inventoryIds, array $capabilities = []): array
@@ -66,13 +65,6 @@ final class ContentOnlyGuard
             $violations[] = sprintf(
                 'section came from pattern "%s", which is not in the approved inventory',
                 $pattern,
-            );
-        }
-
-        foreach (self::unknownParts($bundle, $capabilities['template_parts'] ?? []) as $part) {
-            $violations[] = sprintf(
-                'shared part "%s" is not a template part the destination theme declares, so it has nowhere to render',
-                $part,
             );
         }
 
@@ -146,39 +138,6 @@ final class ContentOnlyGuard
     }
 
     /**
-     * Shared parts the bundle fills that the destination theme never declared.
-     *
-     * A generated theme owns its own header and footer, so filling one is
-     * always safe. A fixed theme decides which template parts exist and which
-     * area each occupies, and a part it does not declare has no slot to render
-     * in — WordPress simply drops it, silently, which is why this is checked
-     * rather than left to the destination.
-     *
-     * @param array<string, mixed>       $bundle
-     * @param list<array<string, mixed>> $templateParts As the theme declares them.
-     * @return list<string>
-     */
-    private static function unknownParts(array $bundle, array $templateParts): array
-    {
-        $declared = [];
-        foreach ($templateParts as $part) {
-            if (is_array($part) && isset($part['name'])) {
-                $declared[(string) $part['name']] = true;
-            }
-        }
-
-        $unknown = [];
-        foreach ($bundle['parts'] ?? [] as $part) {
-            $slug = is_array($part) ? ($part['slug'] ?? null) : null;
-            if (is_string($slug) && !isset($declared[$slug])) {
-                $unknown[$slug] = true;
-            }
-        }
-
-        return array_keys($unknown);
-    }
-
-    /**
      * Classes the markup leans on that neither WordPress nor the destination
      * theme defines, counted by how often they are referenced.
      *
@@ -241,12 +200,6 @@ final class ContentOnlyGuard
         foreach (self::pages($bundle) as $page) {
             if (isset($page['content']) && is_string($page['content'])) {
                 $html[] = $page['content'];
-            }
-        }
-
-        foreach ($bundle['parts'] ?? [] as $part) {
-            if (is_array($part) && isset($part['content']) && is_string($part['content'])) {
-                $html[] = $part['content'];
             }
         }
 
