@@ -19,11 +19,13 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../src/bootstrap.php';
 
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Patterns\FixtureLoader;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -42,7 +44,15 @@ if ($fixtures === null || !is_dir($fixtures)) {
     exit(1);
 }
 
-$composition = StepComposition::patterns();
+// A fixture run never reaches a stage that sends a request, but the graph
+// still has to be built, and the planning stage takes its transport in the
+// constructor. Building it here keeps --from=plan-site available for a live
+// run without a second entry point.
+$composition = StepComposition::patterns(
+    make_llm(),
+    new PromptRenderer(__DIR__ . '/../prompts'),
+    step_models(),
+);
 $pipeline = new Pipeline($composition->steps(), $composition->seeds());
 
 // Pipeline skips every step when it never matches $fromId and returns
