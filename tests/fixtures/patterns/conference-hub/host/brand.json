@@ -4,15 +4,18 @@
       "palette": [
         {
           "slug": "base",
-          "color": "#FCFAF6"
+          "color": "#FCFAF6",
+          "name": "Base"
         },
         {
           "slug": "contrast",
-          "color": "#0B2B3C"
+          "color": "#0B2B3C",
+          "name": "Contrast"
         },
         {
           "slug": "accent-1",
-          "color": "#E2725B"
+          "color": "#E2725B",
+          "name": "Accent 1"
         }
       ]
     }

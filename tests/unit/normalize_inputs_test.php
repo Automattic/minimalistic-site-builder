@@ -167,3 +167,33 @@ test('inputs from an older contract are refused rather than half-read', function
     assert_contains('version', $thrown->getMessage());
     assert_contains('normalize-inputs', $thrown->getMessage());
 });
+
+/**
+ * theme.json requires a name on every preset, and the save filter a site
+ * running Gutenberg applies to global styles drops each nameless one before it
+ * persists. Observed on an Atomic site: three colours written, a 52-byte post
+ * saved, and the apply reporting success.
+ */
+test('a Brand preset with no name is refused by name', function () {
+    $project = normalize_project(
+        ['theme' => 'twentytwentyfive'],
+        normalize_inventory(),
+        ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
+    );
+
+    $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
+
+    assert_contains('settings.color.palette[0] has no name', $thrown->getMessage());
+});
+
+test('a Brand whose presets are named is accepted', function () {
+    $project = normalize_project(
+        ['theme' => 'twentytwentyfive'],
+        normalize_inventory(),
+        ['settings' => ['color' => ['palette' => [['slug' => 'base', 'name' => 'Base', 'color' => '#FFF']]]]],
+    );
+
+    (new NormalizeInputsStep())->run($project);
+
+    assert_eq('Base', $project->readJson(PatternArtifacts::NORMALIZED)['brand']['settings']['color']['palette'][0]['name']);
+});
