@@ -37,6 +37,13 @@ final class NormalizeInputsStep implements Step
     /** theme.json's own top-level keys. A Brand is a partial of one. */
     private const BRAND_KEYS = ['settings', 'styles'];
 
+    /** The preset lists a Brand may carry, as theme.json lays them out. */
+    private const PRESET_LISTS = [
+        'color' => ['palette', 'gradients', 'duotone'],
+        'typography' => ['fontSizes', 'fontFamilies'],
+        'spacing' => ['spacingSizes'],
+    ];
+
     /**
      * Refuse normalized inputs this build cannot read.
      *
@@ -105,6 +112,21 @@ final class NormalizeInputsStep implements Step
                     'Brand carries "%s", which is not a theme.json key and would be dropped without a word',
                     $key,
                 );
+            }
+        }
+
+        // A preset without a name is a preset a destination drops. theme.json
+        // requires one, and the save filter a site running Gutenberg applies to
+        // global styles rejects each nameless preset before it persists — the
+        // Brand lands as an empty post and the apply reports success. Observed
+        // on an Atomic site: three colours written, a 52-byte post saved.
+        foreach (self::presets($brand) as $path => $entries) {
+            foreach ($entries as $index => $entry) {
+                foreach (['slug', 'name'] as $field) {
+                    if (!is_array($entry) || trim((string) ($entry[$field] ?? '')) === '') {
+                        $problems[] = sprintf('Brand %s[%d] has no %s, which theme.json requires', $path, $index, $field);
+                    }
+                }
             }
         }
 
@@ -188,5 +210,31 @@ final class NormalizeInputsStep implements Step
             static fn ($item) => is_string($item) ? trim($item) : '',
             $value,
         ), static fn (string $item): bool => $item !== ''));
+    }
+
+    /**
+     * Every preset entry the Brand carries, keyed by where it sits.
+     *
+     * A theme writes a preset list flat; a user layer keys it by origin. Both
+     * shapes reach here, and an entry is an entry either way.
+     *
+     * @param array<string, mixed> $brand
+     * @return array<string, list<mixed>>
+     */
+    private static function presets(array $brand): array
+    {
+        $found = [];
+        foreach (self::PRESET_LISTS as $group => $lists) {
+            foreach ($lists as $list) {
+                $value = $brand['settings'][$group][$list] ?? null;
+                if (!is_array($value)) {
+                    continue;
+                }
+                $entries = array_is_list($value) ? $value : array_merge(...array_values(array_filter($value, 'is_array')) ?: [[]]);
+                $found['settings.' . $group . '.' . $list] = array_values($entries);
+            }
+        }
+
+        return $found;
     }
 }
