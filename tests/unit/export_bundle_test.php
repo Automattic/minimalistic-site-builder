@@ -208,7 +208,13 @@ test('the conference-hub fixture exports a bundle that passes its checks', funct
     assert_eq(true, $report['passed']);
     assert_eq(['home', 'agenda', 'speakers', 'venue'], array_column($bundle['pages'], 'slug'));
     assert_eq('twentytwentyfive', $bundle['theme']);
-    assert_eq(5, count($bundle['pages'][0]['sections']));
+
+    // Against the fixture's own plan rather than a number. How many sections
+    // the homepage has is the model's choice on the day the fixture was made,
+    // and pinning it turns "the plan was regenerated" into a failing test
+    // that says nothing about the bundle.
+    $planned = json_decode((string) file_get_contents($fixtures . '/patterns/plan.json'), true);
+    assert_eq(count($planned['pages'][0]['sections']), count($bundle['pages'][0]['sections']));
 });
 
 /**
