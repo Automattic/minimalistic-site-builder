@@ -11,8 +11,11 @@ require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/FakeLlm.php';
 require_once __DIR__ . '/doubles.php';
 
-/** @var array<int,array{0:string,1:callable}> */
+/** @var array<int,array{0:string,1:callable,2:string}> */
 $GLOBALS['__tests'] = [];
+
+/** The test file being loaded, so a filter can name one. */
+$GLOBALS['__test_file'] = '';
 
 /** Raised by skip_test() so a missing optional capability is never a false pass. */
 final class TestSkipped extends RuntimeException
@@ -21,7 +24,15 @@ final class TestSkipped extends RuntimeException
 
 function test(string $name, callable $fn): void
 {
-    $GLOBALS['__tests'][] = [$name, $fn];
+    $GLOBALS['__tests'][] = [$name, $fn, $GLOBALS['__test_file']];
+}
+
+/** Load a test file, recording which file the cases in it came from. */
+function load_test_file(string $path): void
+{
+    $GLOBALS['__test_file'] = basename($path, '.php');
+    require_once $path;
+    $GLOBALS['__test_file'] = '';
 }
 
 /** Mark the current test as explicitly skipped, with a reviewable reason. */
@@ -243,12 +254,31 @@ function seed_test_design_direction(object $project, string $recipe = 'cinematic
 }
 
 /** Run all registered tests, print results, return exit code. */
-function run_tests(): int
+/**
+ * @param list<string> $only Substrings. A case runs when one of them appears
+ *                           in its file's name or its own name; no filter runs
+ *                           everything.
+ */
+function run_tests(array $only = []): int
 {
+    $all = $GLOBALS['__tests'];
+    $cases = $only === [] ? $all : select_tests($all, $only);
+
+    // A filter that matches nothing would otherwise report "0 passed" and exit
+    // zero, which reads exactly like a suite that ran and was clean.
+    if ($cases === []) {
+        fwrite(STDERR, sprintf(
+            "No test matches %s. %d cases are registered; a filter matches a file's name or a case's name.\n",
+            implode(' or ', array_map(static fn (string $p): string => '"' . $p . '"', $only)),
+            count($all),
+        ));
+        return 1;
+    }
+
     $pass = 0;
     $fail = 0;
     $skip = 0;
-    foreach ($GLOBALS['__tests'] as [$name, $fn]) {
+    foreach ($cases as [$name, $fn]) {
         $obLevel = ob_get_level();
         try {
             $fn();
@@ -266,6 +296,33 @@ function run_tests(): int
         }
         echo $line;
     }
-    echo "\n{$pass} passed, {$fail} failed, {$skip} skipped\n";
+    // A filtered run says so on the line people read, because a green count
+    // from part of the suite reads the same as a green count from all of it.
+    $scope = count($cases) === count($all)
+        ? ''
+        : sprintf(' — %d of %d cases, filtered by %s', count($cases), count($all), implode(' or ', $only));
+
+    echo "\n{$pass} passed, {$fail} failed, {$skip} skipped{$scope}\n";
     return $fail === 0 ? 0 : 1;
+}
+
+/**
+ * @param array<int,array{0:string,1:callable,2:string}> $all
+ * @param list<string>                                   $only
+ * @return array<int,array{0:string,1:callable,2:string}>
+ */
+function select_tests(array $all, array $only): array
+{
+    $wanted = array_map('strtolower', $only);
+
+    return array_values(array_filter($all, static function (array $case) use ($wanted): bool {
+        $haystack = strtolower($case[2] . ' ' . $case[0]);
+        foreach ($wanted as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }));
 }
