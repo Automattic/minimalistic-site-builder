@@ -1,3 +1,33 @@
 {
-  "images": []
+    "version": 1,
+    "images": [],
+    "theme_assets": [
+        "/wp-content/themes/twentytwentyfive/assets/images/coming-soon-bg-image.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/botany-flowers-closeup.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/nurse.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/flower-meadow-square.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/vash-gon-square.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/coral-square.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/agenda-img-4.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/parthenon-square.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/dallas-creek-square.webp",
+        "/wp-content/themes/twentytwentyfive/assets/images/marshland-birds-square.webp"
+    ],
+    "links": [
+        {
+            "page": "home",
+            "target": "#",
+            "kind": "placeholder"
+        },
+        {
+            "page": "speakers",
+            "target": "#",
+            "kind": "placeholder"
+        },
+        {
+            "page": "venue",
+            "target": "#",
+            "kind": "placeholder"
+        }
+    ]
 }

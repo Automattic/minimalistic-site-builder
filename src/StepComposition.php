@@ -8,8 +8,8 @@ use Automattic\SiteBuild\Patterns\ExportBundleStep;
 use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PlanSiteStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
-use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Patterns\PersonalizeContentStep;
+use Automattic\SiteBuild\Patterns\ResolveMediaStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
@@ -135,13 +135,7 @@ final class StepComposition
                 new PlanSiteStep($llm, $renderer, $models['plan-site'] ?? null),
                 new ComposeLayoutsStep(),
                 new PersonalizeContentStep($llm, $renderer, $models['personalize-content'] ?? null),
-                new PendingExtractionStep(
-                    id: 'resolve-media',
-                    label: 'Generate or reuse permitted images and resolve navigation',
-                    reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::PAGES],
-                    writes: [PatternArtifacts::MEDIA],
-                    source: 'big-sky/images/class.image-utils.php',
-                ),
+                new ResolveMediaStep(),
                 new ExportBundleStep(),
             ],
             PatternArtifacts::SEEDS,
