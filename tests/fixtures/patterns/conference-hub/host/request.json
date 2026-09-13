@@ -29,7 +29,8 @@
     "primary_cta": "Register"
   },
   "capabilities": {
-    "classes": []
+    "classes": [],
+    "page_template": "page-no-title"
   },
   "navigation": [
     {

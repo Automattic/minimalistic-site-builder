@@ -39,7 +39,7 @@ test('valid inputs settle into the shape the later stages read', function () {
             'theme' => 'twentytwentyfive',
             'locale' => 'es',
             'navigation' => [['title' => 'Home', 'slug' => 'home']],
-            'capabilities' => ['classes' => ['card']],
+            'capabilities' => ['classes' => ['card'], 'page_template' => 'page-no-title'],
         ],
         normalize_inventory(),
         ['settings' => ['color' => []]],
@@ -53,6 +53,7 @@ test('valid inputs settle into the shape the later stages read', function () {
     assert_eq('es', $inputs['locale']);
     assert_eq(1, count($inputs['inventory']));
     assert_eq(array('card'), $inputs['capabilities']['classes']);
+    assert_eq('page-no-title', $inputs['capabilities']['page_template']);
     assert_eq(1, count($inputs['navigation']));
 });
 

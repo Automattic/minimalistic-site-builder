@@ -147,6 +147,12 @@ final class NormalizeInputsStep implements Step
             'facts' => $request['facts'] ?? [],
             'capabilities' => [
                 'classes' => self::strings($request['capabilities']['classes'] ?? []),
+                // Which of the theme's page templates a generated page renders
+                // in. A theme's default page template usually prints the
+                // title, and a front page titled "Home" then opens with the
+                // word Home above its hero. The host knows its theme's
+                // templates; generation only carries the choice through.
+                'page_template' => trim((string) ($request['capabilities']['page_template'] ?? '')),
             ],
         ]);
     }
