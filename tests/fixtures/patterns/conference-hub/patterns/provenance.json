@@ -1,0 +1,54 @@
+{
+  "sections": [
+    {
+      "page": "home",
+      "pattern": "twentytwentyfive/banner-cover-big-heading",
+      "intent": "Hero"
+    },
+    {
+      "page": "home",
+      "pattern": "twentytwentyfive/stats",
+      "intent": "Stats"
+    },
+    {
+      "page": "home",
+      "pattern": "twentytwentyfive/services-3-col",
+      "intent": "Why attend"
+    },
+    {
+      "page": "home",
+      "pattern": "twentytwentyfive/sponsors",
+      "intent": "Sponsors"
+    },
+    {
+      "page": "home",
+      "pattern": "twentytwentyfive/event-rsvp",
+      "intent": "CTA"
+    },
+    {
+      "page": "agenda",
+      "pattern": "twentytwentyfive/event-schedule",
+      "intent": "Agenda overview"
+    },
+    {
+      "page": "agenda",
+      "pattern": "twentytwentyfive/services-3-col",
+      "intent": "Tracks"
+    },
+    {
+      "page": "speakers",
+      "pattern": "twentytwentyfive/event-3-col",
+      "intent": "Featured speakers"
+    },
+    {
+      "page": "venue",
+      "pattern": "twentytwentyfive/contact-info-locations",
+      "intent": "Venue and travel"
+    },
+    {
+      "page": "venue",
+      "pattern": "twentytwentyfive/text-faqs",
+      "intent": "Travel questions"
+    }
+  ]
+}

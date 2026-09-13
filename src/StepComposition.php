@@ -3,6 +3,11 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
+use Automattic\SiteBuild\Patterns\ExportBundleStep;
+use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
+use Automattic\SiteBuild\Patterns\PatternArtifacts;
+use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
@@ -100,6 +105,57 @@ final class StepComposition
         return self::htmlFirstSelected()
             ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
             : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+    }
+
+    /**
+     * Compose a site's content from a supplied pattern inventory, against a
+     * theme the host has already deployed.
+     *
+     * This is a separate graph, not the blocks graph with its theme stages
+     * removed. Subtracting them was measured and does not give portable
+     * content: the markup the content stages emit leans on utility classes
+     * whose CSS the same pipeline writes into the theme, so a host that ships
+     * only the content half gets pages with their layout missing. Composing
+     * from patterns the host's theme already styles avoids that by
+     * construction.
+     *
+     * The stages before the export are declared placeholders today. The
+     * behaviour is arriving one at a time, and the graph carries the contract
+     * from the start so each stage has a shape to satisfy on landing, and so a
+     * caller who runs past the extracted prefix is told which stage is missing
+     * rather than handed an empty bundle.
+     */
+    public static function patterns(): self
+    {
+        return new self(
+            [
+                new NormalizeInputsStep(),
+                new PendingExtractionStep(
+                    id: 'plan-site',
+                    label: 'Choose pages, sections and the shared-part policy',
+                    reads: [PatternArtifacts::NORMALIZED],
+                    writes: [PatternArtifacts::PLAN],
+                    source: 'ability.get-site-structure.php',
+                ),
+                new ComposeLayoutsStep(),
+                new PendingExtractionStep(
+                    id: 'personalize-content',
+                    label: 'Write content into the chosen patterns',
+                    reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::LAYOUTS],
+                    writes: [PatternArtifacts::PAGES],
+                    source: 'class.replace-content.php and class.block-inner-html-regenerator.php',
+                ),
+                new PendingExtractionStep(
+                    id: 'resolve-media',
+                    label: 'Generate or reuse permitted images and resolve navigation',
+                    reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::PAGES],
+                    writes: [PatternArtifacts::MEDIA],
+                    source: 'big-sky/images/class.image-utils.php',
+                ),
+                new ExportBundleStep(),
+            ],
+            PatternArtifacts::SEEDS,
+        );
     }
 
     /**

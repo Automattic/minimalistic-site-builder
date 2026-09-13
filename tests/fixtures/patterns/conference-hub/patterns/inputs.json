@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "theme": "twentytwentyfive",
+  "brand": {
+    "settings": {
+      "color": {
+        "palette": [
+          {
+            "slug": "base",
+            "color": "#FCFAF6"
+          },
+          {
+            "slug": "contrast",
+            "color": "#0B2B3C"
+          },
+          {
+            "slug": "accent-1",
+            "color": "#E2725B"
+          }
+        ]
+      }
+    }
+  },
+  "capabilities": {
+    "classes": [],
+    "template_parts": [
+      {
+        "name": "header",
+        "area": "header"
+      },
+      {
+        "name": "vertical-header",
+        "area": "header"
+      },
+      {
+        "name": "header-large-title",
+        "area": "header"
+      },
+      {
+        "name": "footer",
+        "area": "footer"
+      },
+      {
+        "name": "footer-columns",
+        "area": "footer"
+      },
+      {
+        "name": "footer-newsletter",
+        "area": "footer"
+      },
+      {
+        "name": "sidebar",
+        "area": "uncategorized"
+      }
+    ]
+  },
+  "navigation": [
+    {
+      "title": "Home",
+      "slug": "home"
+    },
+    {
+      "title": "Agenda",
+      "slug": "agenda"
+    },
+    {
+      "title": "Speakers",
+      "slug": "speakers"
+    },
+    {
+      "title": "Venue",
+      "slug": "venue"
+    }
+  ],
+  "inventory": [
+    {
+      "id": "twentytwentyfive/banner-cover-big-heading",
+      "categories": [
+        "hero"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/banner-cover-big-heading\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/stats",
+      "categories": [
+        "stats"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/stats\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/services-3-col",
+      "categories": [
+        "why attend",
+        "tracks"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/services-3-col\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/sponsors",
+      "categories": [
+        "sponsors"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/sponsors\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/event-rsvp",
+      "categories": [
+        "cta"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/event-rsvp\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/event-schedule",
+      "categories": [
+        "agenda overview"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/event-schedule\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/event-3-col",
+      "categories": [
+        "featured speakers"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/event-3-col\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/contact-info-locations",
+      "categories": [
+        "venue and travel"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/contact-info-locations\"></div><!-- /wp:group -->"
+    },
+    {
+      "id": "twentytwentyfive/text-faqs",
+      "categories": [
+        "travel questions"
+      ],
+      "content": "<!-- wp:group --><div class=\"wp-block-group\" data-pattern=\"twentytwentyfive/text-faqs\"></div><!-- /wp:group -->"
+    }
+  ]
+}
