@@ -4,67 +4,67 @@
             "page": "home",
             "index": 0,
             "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Announce key dates, early-bird closing, or headline news."
+            "intent": "Set the conference identity with key date, name, and tagline."
         },
         {
             "page": "home",
             "index": 1,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Hero summary of the conference value proposition with a register prompt."
+            "pattern": "twentytwentyfive/event-rsvp",
+            "intent": "Push the primary registration action above the fold."
         },
         {
             "page": "home",
             "index": 2,
-            "pattern": "twentytwentyfive/pricing-3-col",
-            "intent": "Highlight the three pillars: multi-track design, speaker curation, and networking format."
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Highlight conference stats and headline speakers."
         },
         {
             "page": "home",
             "index": 3,
             "pattern": "twentytwentyfive/testimonials-2-col",
-            "intent": "Quotes from past attendees about track-switching ease and session quality."
+            "intent": "Show quotes from past attendees and industry peers."
         },
         {
             "page": "home",
             "index": 4,
-            "pattern": "twentytwentyfive/event-rsvp",
-            "intent": "Final registration push with group-rate link."
+            "pattern": "twentytwentyfive/contact-info-locations",
+            "intent": "Offer a direct line for group bookings and press inquiries."
         },
         {
             "page": "agenda",
             "index": 0,
-            "pattern": "twentytwentyfive/media-instagram-grid",
-            "intent": "Embed an at-a-glance timetable graphic with color-coded tracks."
+            "pattern": "twentytwentyfive/text-faqs",
+            "intent": "Present the day-by-day schedule with track columns and timings."
         },
         {
             "page": "agenda",
+            "index": 1,
+            "pattern": "twentytwentyfive/pricing-3-col",
+            "intent": "List auxiliary sessions, workshops, and networking slots."
+        },
+        {
+            "page": "speakers",
+            "index": 0,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Display speaker headshots in a browsable grid."
+        },
+        {
+            "page": "speakers",
+            "index": 1,
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Provide short bios and session affiliations for each speaker."
+        },
+        {
+            "page": "venue",
+            "index": 0,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Embed a venue tour video and interactive map."
+        },
+        {
+            "page": "venue",
             "index": 1,
             "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Explain the track themes and how to navigate between them."
-        },
-        {
-            "page": "speakers",
-            "index": 0,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Showcase two or three keynote speakers with photos and bios."
-        },
-        {
-            "page": "speakers",
-            "index": 1,
-            "pattern": "twentytwentyfive/media-instagram-grid",
-            "intent": "Grid of all speaker headshots linking to their agenda slots."
-        },
-        {
-            "page": "venue",
-            "index": 0,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Describe the venue's breakout rooms, stage capacity, and accessibility."
-        },
-        {
-            "page": "venue",
-            "index": 1,
-            "pattern": "twentytwentyfive/contact-info-locations",
-            "intent": "Address, map, transport tips, and hotel block information."
+            "intent": "Detail travel, accommodation, and accessibility information."
         }
     ]
 }

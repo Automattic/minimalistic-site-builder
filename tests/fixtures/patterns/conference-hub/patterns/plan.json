@@ -5,32 +5,32 @@
             "title": "Home",
             "front": true,
             "menu_order": 0,
-            "description": "Frame the conference, establish urgency, and drive registration.",
+            "description": "Frame the conference brand and drive visitor registration.",
             "sections": [
                 {
                     "category": "banner",
-                    "intent": "Announce key dates, early-bird closing, or headline news.",
-                    "reason": "Events teams need at-a-glance awareness of deadlines so they act before it's too late."
-                },
-                {
-                    "category": "banner",
-                    "intent": "Hero summary of the conference value proposition with a register prompt.",
-                    "reason": "A hero anchors the page's core promise and gives the primary CTA the prominence that drives conversion."
-                },
-                {
-                    "category": "services",
-                    "intent": "Highlight the three pillars: multi-track design, speaker curation, and networking format.",
-                    "reason": "This audience evaluates conferences by structure; listing what the event does well helps them justify the ticket."
-                },
-                {
-                    "category": "testimonials",
-                    "intent": "Quotes from past attendees about track-switching ease and session quality.",
-                    "reason": "Social proof from peer event teams reduces perceived risk for a multi-track format."
+                    "intent": "Set the conference identity with key date, name, and tagline.",
+                    "reason": "A multi-session conference hub needs immediate recognition and urgency; a banner gives the events team a branded header that anchors every visit."
                 },
                 {
                     "category": "call-to-action",
-                    "intent": "Final registration push with group-rate link.",
-                    "reason": "Footer CTA captures the decision-makers who scrolled to confirm details before committing."
+                    "intent": "Push the primary registration action above the fold.",
+                    "reason": "The core goal is registration; a hero-level call-to-action turns brand interest into sign-ups before the visitor scrolls."
+                },
+                {
+                    "category": "featured",
+                    "intent": "Highlight conference stats and headline speakers.",
+                    "reason": "Events teams need social proof and authority signals to trust the hub's value; featured cards for tracks, speaker count, and past attendance build that trust."
+                },
+                {
+                    "category": "testimonials",
+                    "intent": "Show quotes from past attendees and industry peers.",
+                    "reason": "Multi-track conference buyers look for peer validation; testimonials from events-team peers reduce perceived risk and reinforce the registration decision."
+                },
+                {
+                    "category": "contact",
+                    "intent": "Offer a direct line for group bookings and press inquiries.",
+                    "reason": "Events teams often manage group registrations and need a fast channel that doesn't require navigating away; a footer contact section closes the page with action-ready access."
                 }
             ]
         },
@@ -39,17 +39,17 @@
             "title": "Agenda",
             "front": false,
             "menu_order": 10,
-            "description": "Visual schedule enabling quick track comparison across slots.",
+            "description": "Display the multi-track timetable so attendees can plan their sessions.",
             "sections": [
                 {
-                    "category": "media",
-                    "intent": "Embed an at-a-glance timetable graphic with color-coded tracks.",
-                    "reason": "Events teams need to scan parallel streams fast; a graphical schedule is faster than a list."
+                    "category": "text",
+                    "intent": "Present the day-by-day schedule with track columns and timings.",
+                    "reason": "A text layout keeps the dense schedule readable and scannable, which is essential when events teams need to compare parallel tracks quickly."
                 },
                 {
-                    "category": "text",
-                    "intent": "Explain the track themes and how to navigate between them.",
-                    "reason": "First-time attendees need context to plan their day, reducing confusion and support inquiries."
+                    "category": "services",
+                    "intent": "List auxiliary sessions, workshops, and networking slots.",
+                    "reason": "Beyond main tracks, the conference offers add-on experiences; a services section groups them as distinct offerings that deepen the agenda's value."
                 }
             ]
         },
@@ -58,17 +58,17 @@
             "title": "Speakers",
             "front": false,
             "menu_order": 20,
-            "description": "Curated speaker lineup with roles and session links.",
+            "description": "Showcase speaker profiles to build credibility and excitement.",
             "sections": [
                 {
-                    "category": "featured",
-                    "intent": "Showcase two or three keynote speakers with photos and bios.",
-                    "reason": "Headliners are a major draw; featuring them prominently helps sell the conference's caliber."
+                    "category": "gallery",
+                    "intent": "Display speaker headshots in a browsable grid.",
+                    "reason": "Events teams evaluate conferences by the talent on stage; a gallery makes speaker recognition immediate and visually engaging."
                 },
                 {
-                    "category": "gallery",
-                    "intent": "Grid of all speaker headshots linking to their agenda slots.",
-                    "reason": "A browsable face wall lets attendees quickly spot the experts they want to hear."
+                    "category": "about",
+                    "intent": "Provide short bios and session affiliations for each speaker.",
+                    "reason": "Bio details connect the person to their session topic, helping attendees choose tracks and trust the expertise behind each talk."
                 }
             ]
         },
@@ -77,17 +77,17 @@
             "title": "Venue",
             "front": false,
             "menu_order": 30,
-            "description": "Practical details about the venue, travel, and stay.",
+            "description": "Help attendees navigate the venue and plan their stay.",
             "sections": [
                 {
-                    "category": "about",
-                    "intent": "Describe the venue's breakout rooms, stage capacity, and accessibility.",
-                    "reason": "Multi-track events depend on room layout; describing it reassures planners the venue can handle parallel streams."
+                    "category": "media",
+                    "intent": "Embed a venue tour video and interactive map.",
+                    "reason": "Logistics confidence drives registration; a media section gives events teams a visual walkthrough of the space and surrounding area."
                 },
                 {
-                    "category": "contact",
-                    "intent": "Address, map, transport tips, and hotel block information.",
-                    "reason": "Logistics are a make-or-break factor for out-of-town attendees; clear contact info reduces drop-off."
+                    "category": "text",
+                    "intent": "Detail travel, accommodation, and accessibility information.",
+                    "reason": "Practical logistics text answers the operational questions events teams need resolved before they commit travel budgets."
                 }
             ]
         }
