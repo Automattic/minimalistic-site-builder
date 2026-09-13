@@ -46,6 +46,7 @@ final class ComposeLayoutsStep implements Step
     public function run(Project $project): void
     {
         $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+        NormalizeInputsStep::assertVersion($inputs);
         $plan = $project->readJson(PatternArtifacts::PLAN);
 
         $inventory = self::byId($inputs['inventory'] ?? []);
