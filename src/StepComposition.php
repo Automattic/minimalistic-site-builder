@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild;
 use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
 use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
+use Automattic\SiteBuild\Patterns\PlanSiteStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
@@ -119,24 +120,18 @@ final class StepComposition
      * from patterns the host's theme already styles avoids that by
      * construction.
      *
-     * The stages before the export are declared placeholders today. The
+     * Two stages remain declared placeholders. The
      * behaviour is arriving one at a time, and the graph carries the contract
      * from the start so each stage has a shape to satisfy on landing, and so a
      * caller who runs past the extracted prefix is told which stage is missing
      * rather than handed an empty bundle.
      */
-    public static function patterns(): self
+    public static function patterns(Llm $llm, PromptRenderer $renderer, array $models = []): self
     {
         return new self(
             [
                 new NormalizeInputsStep(),
-                new PendingExtractionStep(
-                    id: 'plan-site',
-                    label: 'Choose pages, sections and the shared-part policy',
-                    reads: [PatternArtifacts::NORMALIZED],
-                    writes: [PatternArtifacts::PLAN],
-                    source: 'ability.get-site-structure.php',
-                ),
+                new PlanSiteStep($llm, $renderer, $models['plan-site'] ?? null),
                 new ComposeLayoutsStep(),
                 new PendingExtractionStep(
                     id: 'personalize-content',

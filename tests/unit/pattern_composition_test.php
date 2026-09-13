@@ -19,7 +19,9 @@ const PATTERN_STAGES = [
 
 function pattern_composition(): StepComposition
 {
-    return StepComposition::patterns();
+    $deps = composition_deps();
+
+    return StepComposition::patterns($deps['llm'], $deps['renderer']);
 }
 
 test('the pattern graph runs its stages in order', function () {
