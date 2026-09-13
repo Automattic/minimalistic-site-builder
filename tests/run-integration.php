@@ -4,7 +4,11 @@ declare(strict_types=1);
 /**
  * Integration test runner. Includes tests/integration/*_test.php.
  * Deterministic tests use FakeLlm.
- * Usage: php tests/run-integration.php
+ *
+ * Usage: php tests/run-integration.php [filter...]
+ *
+ * A filter is a substring matched against the test file's name and the case's
+ * name, as in tests/run.php.
  */
 
 require_once __DIR__ . '/lib.php';
@@ -15,7 +19,7 @@ if ($files === []) {
     exit(1);
 }
 foreach ($files as $f) {
-    require_once $f;
+    load_test_file($f);
 }
 
-exit(run_tests());
+exit(run_tests(array_slice($argv, 1)));
