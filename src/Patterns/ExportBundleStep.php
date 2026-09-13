@@ -52,6 +52,7 @@ final class ExportBundleStep implements Step
     public function run(Project $project): void
     {
         $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+        NormalizeInputsStep::assertVersion($inputs);
         $provenance = $project->readJson(PatternArtifacts::PROVENANCE);
         $media = $project->readJson(PatternArtifacts::MEDIA);
 

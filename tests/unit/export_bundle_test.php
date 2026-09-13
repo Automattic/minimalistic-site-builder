@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
+use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Project;
 
@@ -44,6 +45,7 @@ function export_project(array $inputs, array $pages, array $provenance, array $p
 function export_clean_inputs(): array
 {
     return [
+        'version' => NormalizeInputsStep::INPUTS_VERSION,
         'theme' => 'twentytwentyfive',
         'brand' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
         'inventory' => [

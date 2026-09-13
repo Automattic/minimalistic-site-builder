@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
+use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
@@ -128,13 +129,7 @@ final class StepComposition
     {
         return new self(
             [
-                new PendingExtractionStep(
-                    id: 'normalize-inputs',
-                    label: 'Validate request, inventory, Brand and capabilities',
-                    reads: [PatternArtifacts::REQUEST, PatternArtifacts::INVENTORY, PatternArtifacts::BRAND],
-                    writes: [PatternArtifacts::NORMALIZED],
-                    source: 'new validation against the agreed request schema',
-                ),
+                new NormalizeInputsStep(),
                 new PendingExtractionStep(
                     id: 'plan-site',
                     label: 'Choose pages, sections and the shared-part policy',

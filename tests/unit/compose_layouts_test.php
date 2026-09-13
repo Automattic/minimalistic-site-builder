@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
+use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Project;
 
@@ -15,7 +16,10 @@ function compose_project(array $inventory, array $pages): Project
     mkdir($dir, 0o777, true);
 
     $project = new Project($dir, basename($dir));
-    $project->writeJson(PatternArtifacts::NORMALIZED, ['inventory' => $inventory]);
+    $project->writeJson(PatternArtifacts::NORMALIZED, [
+        'version' => NormalizeInputsStep::INPUTS_VERSION,
+        'inventory' => $inventory,
+    ]);
     $project->writeJson(PatternArtifacts::PLAN, ['pages' => $pages]);
 
     return $project;
