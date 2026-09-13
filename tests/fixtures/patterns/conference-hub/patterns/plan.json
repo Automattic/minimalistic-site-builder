@@ -5,37 +5,32 @@
             "title": "Home",
             "front": true,
             "menu_order": 0,
-            "description": "Frame the multi-session conference and drive registration from a central hub.",
+            "description": "Frame the conference, establish urgency, and drive registration.",
             "sections": [
                 {
                     "category": "banner",
-                    "intent": "Establish brand and conference identity at the top of the hub.",
-                    "reason": "An events team visitor needs immediate recognition that this is the official conference hub before scrolling further."
+                    "intent": "Announce key dates, early-bird closing, or headline news.",
+                    "reason": "Events teams need at-a-glance awareness of deadlines so they act before it's too late."
                 },
                 {
-                    "category": "call-to-action",
-                    "intent": "Provide a prominent registration prompt for the multi-session conference.",
-                    "reason": "The primary action is registering for the whole conference; placing it high reduces friction for teams deciding whether to commit."
+                    "category": "banner",
+                    "intent": "Hero summary of the conference value proposition with a register prompt.",
+                    "reason": "A hero anchors the page's core promise and gives the primary CTA the prominence that drives conversion."
                 },
                 {
-                    "category": "about",
-                    "intent": "Summarize the conference scope, dates, and multi-track value.",
-                    "reason": "Teams running multi-track conferences need to quickly grasp whether this event matches their professional interests before exploring details."
-                },
-                {
-                    "category": "featured",
-                    "intent": "Highlight headline speakers, tracks, or sponsors that make this edition compelling.",
-                    "reason": "Events teams compare conferences by keynotes and prestige; featuring marquee names builds urgency and validates the registration decision."
+                    "category": "services",
+                    "intent": "Highlight the three pillars: multi-track design, speaker curation, and networking format.",
+                    "reason": "This audience evaluates conferences by structure; listing what the event does well helps them justify the ticket."
                 },
                 {
                     "category": "testimonials",
-                    "intent": "Show quotes from past attendees or organizers who ran similar multi-track events.",
-                    "reason": "Social proof matters when committing staff time and budget; testimonials from peers in events teams lower perceived risk."
+                    "intent": "Quotes from past attendees about track-switching ease and session quality.",
+                    "reason": "Social proof from peer event teams reduces perceived risk for a multi-track format."
                 },
                 {
-                    "category": "text",
-                    "intent": "Close the homepage with practical next steps or a note on group registration.",
-                    "reason": "A footer text section ensures late-scrolling visitors have a clear path to act without a harsh dead-end, reinforcing the hub role."
+                    "category": "call-to-action",
+                    "intent": "Final registration push with group-rate link.",
+                    "reason": "Footer CTA captures the decision-makers who scrolled to confirm details before committing."
                 }
             ]
         },
@@ -44,12 +39,17 @@
             "title": "Agenda",
             "front": false,
             "menu_order": 10,
-            "description": "",
+            "description": "Visual schedule enabling quick track comparison across slots.",
             "sections": [
                 {
+                    "category": "media",
+                    "intent": "Embed an at-a-glance timetable graphic with color-coded tracks.",
+                    "reason": "Events teams need to scan parallel streams fast; a graphical schedule is faster than a list."
+                },
+                {
                     "category": "text",
-                    "intent": "Display a condensed grid or timeline of sessions, tracks, and breaks.",
-                    "reason": "Events teams evaluate whether the schedule offers enough depth across tracks for their different staff roles before committing to register."
+                    "intent": "Explain the track themes and how to navigate between them.",
+                    "reason": "First-time attendees need context to plan their day, reducing confusion and support inquiries."
                 }
             ]
         },
@@ -58,12 +58,17 @@
             "title": "Speakers",
             "front": false,
             "menu_order": 20,
-            "description": "",
+            "description": "Curated speaker lineup with roles and session links.",
             "sections": [
                 {
-                    "category": "about",
-                    "intent": "Introduce each speaker with a short bio and their session topic.",
-                    "reason": "Knowing who is on stage helps events teams judge expertise and session quality, which drives the decision to register and attend specific tracks."
+                    "category": "featured",
+                    "intent": "Showcase two or three keynote speakers with photos and bios.",
+                    "reason": "Headliners are a major draw; featuring them prominently helps sell the conference's caliber."
+                },
+                {
+                    "category": "gallery",
+                    "intent": "Grid of all speaker headshots linking to their agenda slots.",
+                    "reason": "A browsable face wall lets attendees quickly spot the experts they want to hear."
                 }
             ]
         },
@@ -72,12 +77,17 @@
             "title": "Venue",
             "front": false,
             "menu_order": 30,
-            "description": "",
+            "description": "Practical details about the venue, travel, and stay.",
             "sections": [
                 {
-                    "category": "text",
-                    "intent": "Explain accessibility, room setup, and nearby accommodation.",
-                    "reason": "Logistics are a gatekeeper for events teams; clear venue information removes a common blocker for multi-session conference registration."
+                    "category": "about",
+                    "intent": "Describe the venue's breakout rooms, stage capacity, and accessibility.",
+                    "reason": "Multi-track events depend on room layout; describing it reassures planners the venue can handle parallel streams."
+                },
+                {
+                    "category": "contact",
+                    "intent": "Address, map, transport tips, and hotel block information.",
+                    "reason": "Logistics are a make-or-break factor for out-of-town attendees; clear contact info reduces drop-off."
                 }
             ]
         }

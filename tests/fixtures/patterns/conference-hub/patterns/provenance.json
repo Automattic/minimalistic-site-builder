@@ -4,55 +4,67 @@
             "page": "home",
             "index": 0,
             "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Establish brand and conference identity at the top of the hub."
+            "intent": "Announce key dates, early-bird closing, or headline news."
         },
         {
             "page": "home",
             "index": 1,
-            "pattern": "twentytwentyfive/event-rsvp",
-            "intent": "Provide a prominent registration prompt for the multi-session conference."
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Hero summary of the conference value proposition with a register prompt."
         },
         {
             "page": "home",
             "index": 2,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Summarize the conference scope, dates, and multi-track value."
+            "pattern": "twentytwentyfive/pricing-3-col",
+            "intent": "Highlight the three pillars: multi-track design, speaker curation, and networking format."
         },
         {
             "page": "home",
             "index": 3,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Highlight headline speakers, tracks, or sponsors that make this edition compelling."
+            "pattern": "twentytwentyfive/testimonials-2-col",
+            "intent": "Quotes from past attendees about track-switching ease and session quality."
         },
         {
             "page": "home",
             "index": 4,
-            "pattern": "twentytwentyfive/testimonials-2-col",
-            "intent": "Show quotes from past attendees or organizers who ran similar multi-track events."
-        },
-        {
-            "page": "home",
-            "index": 5,
-            "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Close the homepage with practical next steps or a note on group registration."
+            "pattern": "twentytwentyfive/event-rsvp",
+            "intent": "Final registration push with group-rate link."
         },
         {
             "page": "agenda",
             "index": 0,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Embed an at-a-glance timetable graphic with color-coded tracks."
+        },
+        {
+            "page": "agenda",
+            "index": 1,
             "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Display a condensed grid or timeline of sessions, tracks, and breaks."
+            "intent": "Explain the track themes and how to navigate between them."
         },
         {
             "page": "speakers",
             "index": 0,
             "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Introduce each speaker with a short bio and their session topic."
+            "intent": "Showcase two or three keynote speakers with photos and bios."
+        },
+        {
+            "page": "speakers",
+            "index": 1,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Grid of all speaker headshots linking to their agenda slots."
         },
         {
             "page": "venue",
             "index": 0,
-            "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Explain accessibility, room setup, and nearby accommodation."
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Describe the venue's breakout rooms, stage capacity, and accessibility."
+        },
+        {
+            "page": "venue",
+            "index": 1,
+            "pattern": "twentytwentyfive/contact-info-locations",
+            "intent": "Address, map, transport tips, and hotel block information."
         }
     ]
 }
