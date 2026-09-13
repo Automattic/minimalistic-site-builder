@@ -194,3 +194,77 @@ test('slots carry where they sit so copy in one place can cohere', function () {
 
     assert_eq('1.1', ContentSlots::in($markup, 'home')->request()[0]['group']);
 });
+
+/**
+ * A theme writes a text link as a paragraph holding nothing but an anchor.
+ * Replacing the paragraph's whole content takes the link with it, and the page
+ * ends up carrying the word "RSVP" where it used to carry a way to do it.
+ * Found by running the fixture ten times: nine of the fourteen slots that held
+ * inline markup were this shape.
+ */
+test('a slot whose whole text is a link keeps the link', function () {
+    $markup = '<!-- wp:paragraph -->
+<p class="is-link"><a href="/rsvp" rel="noopener">RSVP</a></p>
+<!-- /wp:paragraph -->';
+    $slots = ContentSlots::in($markup, 'home');
+
+    $outcome = $slots->fill([$slots->request()[0]['id'] => 'Reserve a seat']);
+
+    assert_contains('<a href="/rsvp" rel="noopener">Reserve a seat</a>', $outcome['markup']);
+    assert_eq([], $outcome['flattened']);
+});
+
+test('the copy asked for is what the link says, not the markup around it', function () {
+    $markup = '<!-- wp:paragraph -->
+<p><a href="/rsvp">RSVP</a></p>
+<!-- /wp:paragraph -->';
+
+    assert_eq('RSVP', ContentSlots::in($markup, 'home')->request()[0]['example']);
+});
+
+/**
+ * One string cannot preserve markup that wraps part of the text, so this one
+ * is still flattened — and still reported, because that is a link the page
+ * loses.
+ */
+test('a slot mixing text and markup is still flattened, and says so', function () {
+    $markup = '<!-- wp:paragraph -->
+<p>Lecture by <a href="/bio">Prof. Presley</a></p>
+<!-- /wp:paragraph -->';
+    $slots = ContentSlots::in($markup, 'home');
+
+    $outcome = $slots->fill([$slots->request()[0]['id'] => 'A talk by someone else']);
+
+    assert_eq(1, count($outcome['flattened']));
+    assert_eq(false, str_contains($outcome['markup'], '/bio'));
+});
+
+/**
+ * Two links side by side are not one link wrapping everything. A greedy match
+ * reads the first opening tag and the last closing one as a pair, and writing
+ * into that "wrapper" replaces the first link's text, the second link, and the
+ * markup between them.
+ */
+test('two links side by side are not mistaken for one wrapping the text', function () {
+    $markup = '<!-- wp:paragraph -->
+<p><a href="/a">One</a> <a href="/b">Two</a></p>
+<!-- /wp:paragraph -->';
+    $slots = ContentSlots::in($markup, 'home');
+
+    $outcome = $slots->fill([$slots->request()[0]['id'] => 'Replaced']);
+
+    assert_eq(1, count($outcome['flattened']), 'the whole paragraph is replaced, not half of it');
+    assert_contains('<p>Replaced</p>', $outcome['markup']);
+});
+
+/** Nested wrappers narrow all the way in, so the emphasis survives too. */
+test('a link inside emphasis keeps both', function () {
+    $markup = '<!-- wp:heading -->
+<h2 class="wp-block-heading"><strong><a href="/x">Old words</a></strong></h2>
+<!-- /wp:heading -->';
+    $slots = ContentSlots::in($markup, 'home');
+
+    $outcome = $slots->fill([$slots->request()[0]['id'] => 'New words']);
+
+    assert_contains('<strong><a href="/x">New words</a></strong>', $outcome['markup']);
+});

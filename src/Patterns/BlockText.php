@@ -57,7 +57,54 @@ final class BlockText
             return null;
         }
 
-        return self::spanFor($document->ownHtml($index), $tag);
+        $own = $document->ownHtml($index);
+        $span = self::spanFor($own, $tag);
+
+        return $span === null ? null : self::insideWrapper($own, $span[0], $span[1]);
+    }
+
+    /**
+     * The span narrowed past any element that wraps the whole of it.
+     *
+     * A paragraph whose entire text is a link — `<p><a href="#">RSVP</a></p>`,
+     * which is how a theme writes a text link — would otherwise have the link
+     * replaced along with the words, and the page would carry the word RSVP
+     * where it used to carry a way to do it. Writing inside the wrapper keeps
+     * the element, its href and its classes, and changes only the words.
+     *
+     * Measured over ten live runs of the conference fixture: nine of the
+     * fourteen slots holding inline markup are this shape. The other five mix
+     * text with markup — "Lecture by <a>Prof. Presley</a>" — and one string
+     * cannot preserve those, so they stay flattened and stay reported.
+     *
+     * @return array{int, int}
+     */
+    private static function insideWrapper(string $own, int $start, int $length): array
+    {
+        while (true) {
+            $raw = substr($own, $start, $length);
+            $trimmed = trim($raw);
+
+            if (!preg_match('~^<([a-z][a-z0-9]*)~i', $trimmed, $open)) {
+                return [$start, $length];
+            }
+
+            $inner = self::spanFor($trimmed, $open[1]);
+            if ($inner === null || $inner[1] === 0) {
+                return [$start, $length];
+            }
+
+            // The element has to close at the end, or it is the first of
+            // several siblings and its "inner" text runs through the ones
+            // after it.
+            $after = substr($trimmed, $inner[0] + $inner[1]);
+            if (!preg_match('~^</' . $open[1] . '\s*>$~i', $after)) {
+                return [$start, $length];
+            }
+
+            $start += strlen($raw) - strlen(ltrim($raw)) + $inner[0];
+            $length = $inner[1];
+        }
     }
 
     /** The text a reader sees, which is what bounds a replacement's length. */
