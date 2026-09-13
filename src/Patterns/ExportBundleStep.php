@@ -69,10 +69,22 @@ final class ExportBundleStep implements Step
             'media' => $media['images'] ?? [],
         ];
 
+        // A class an approved pattern shipped with is the customer's, not
+        // something generation added: personalization changes text bytes and
+        // nothing else, so any class in the bundle that the inventory carries
+        // came from the inventory. A theme's own patterns do write classes the
+        // theme never styles -- Ollie's `feature-boxes` -- and refusing a
+        // bundle over those would refuse the customer's own markup.
+        $capabilities = $inputs['capabilities'] ?? [];
+        $capabilities['classes'] = array_values(array_unique(array_merge(
+            $capabilities['classes'] ?? [],
+            ContentOnlyGuard::classesIn(array_column($inputs['inventory'] ?? [], 'content')),
+        )));
+
         $violations = ContentOnlyGuard::check(
             $bundle,
             array_column( $inputs['inventory'] ?? [], 'id' ),
-            $inputs['capabilities'] ?? [],
+            $capabilities,
         );
 
         $project->writeJson(PatternArtifacts::REPORT, [

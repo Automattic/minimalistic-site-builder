@@ -128,3 +128,19 @@ test('a section with no recorded pattern counts as unapproved', function () {
     assert_contains('(unrecorded)', $violations[0]);
 });
 
+
+/**
+ * Two of core's own classes fall outside the prefixes core mostly uses:
+ * columns write `are-vertically-aligned-*`, and an image block writes
+ * `wp-image-<id>`. Both were reported as classes the theme does not define,
+ * which refused a bundle made of nothing but core blocks from a theme's own
+ * patterns.
+ */
+test('core classes outside the usual prefixes are not mistaken for theme ones', function () {
+    $bundle = ['pages' => [['slug' => 'home', 'sections' => [], 'content' =>
+        '<!-- wp:columns {"verticalAlignment":"center"} --><div class="wp-block-columns are-vertically-aligned-center">'
+        . '<!-- wp:image {"id":5} --><figure class="wp-block-image"><img class="wp-image-5" src="/wp-content/themes/t/a.webp"/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:columns -->']]];
+
+    assert_eq([], ContentOnlyGuard::unbackedClasses($bundle, []));
+});

@@ -33,8 +33,10 @@ final class ContentOnlyGuard
         'align',
         'has-',
         'is-',
+        'are-',
         'size-',
         'screen-reader-',
+        'wp-image-',
     ];
 
     /**
@@ -163,6 +165,29 @@ final class ContentOnlyGuard
         }
 
         return $counts;
+    }
+
+    /**
+     * Every class token the given markup carries.
+     *
+     * @param list<string> $markups
+     * @return list<string>
+     */
+    public static function classesIn(array $markups): array
+    {
+        $classes = [];
+        foreach ($markups as $html) {
+            preg_match_all('/class="([^"]+)"/', (string) $html, $matches);
+            foreach ($matches[1] as $attr) {
+                foreach (preg_split('/\s+/', trim($attr)) ?: [] as $class) {
+                    if ($class !== '') {
+                        $classes[$class] = true;
+                    }
+                }
+            }
+        }
+
+        return array_keys($classes);
     }
 
     private static function isCoreClass(string $class): bool

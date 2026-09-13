@@ -243,3 +243,21 @@ test('a media manifest from an older contract is refused rather than half-read',
 
     assert_contains('resolve-media', $thrown->getMessage());
 });
+
+/**
+ * A theme's own patterns write classes the theme never styles. Personalization
+ * changes text and nothing else, so a class the bundle carries that the
+ * inventory also carries is the customer's own markup, not something
+ * generation added, and refusing over it would refuse the approved pattern.
+ */
+test('a class an approved pattern shipped with is not held against the bundle', function () {
+    $inputs = export_clean_inputs();
+    $inputs['inventory'][0]['content'] = '<!-- wp:group --><div class="wp-block-group feature-boxes"></div><!-- /wp:group -->';
+    $pages = export_clean_pages();
+    $pages[0]['content'] = $inputs['inventory'][0]['content'];
+    $project = export_project($inputs, $pages, export_clean_provenance());
+
+    (new ExportBundleStep())->run($project);
+
+    assert_eq(true, $project->readJson(PatternArtifacts::REPORT)['passed']);
+});
