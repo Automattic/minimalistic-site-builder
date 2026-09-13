@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PlanSiteStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Patterns\PendingExtractionStep;
+use Automattic\SiteBuild\Patterns\PersonalizeContentStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
@@ -133,13 +134,7 @@ final class StepComposition
                 new NormalizeInputsStep(),
                 new PlanSiteStep($llm, $renderer, $models['plan-site'] ?? null),
                 new ComposeLayoutsStep(),
-                new PendingExtractionStep(
-                    id: 'personalize-content',
-                    label: 'Write content into the chosen patterns',
-                    reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::LAYOUTS],
-                    writes: [PatternArtifacts::PAGES],
-                    source: 'class.replace-content.php and class.block-inner-html-regenerator.php',
-                ),
+                new PersonalizeContentStep($llm, $renderer, $models['personalize-content'] ?? null),
                 new PendingExtractionStep(
                     id: 'resolve-media',
                     label: 'Generate or reuse permitted images and resolve navigation',
