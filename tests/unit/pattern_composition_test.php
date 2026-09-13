@@ -2,7 +2,6 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
-use Automattic\SiteBuild\Patterns\PendingExtractionStep;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\StepComposition;
@@ -55,33 +54,6 @@ test('the inventory and the Brand are host inputs, not fetched', function () {
 
     assert_true(in_array(PatternArtifacts::INVENTORY, $seeds, true), 'inventory is a seed');
     assert_true(in_array(PatternArtifacts::BRAND, $seeds, true), 'Brand is a seed');
-});
-
-/**
- * An unimplemented stage has to stop the build. The alternative — omitting it
- * until it lands — produces a bundle with no content and reports success.
- */
-test('an unextracted stage refuses to run instead of producing nothing', function () {
-    $dir = sys_get_temp_dir() . '/pattern-composition-' . bin2hex(random_bytes(4));
-    mkdir($dir, 0o777, true);
-
-    $step = new PendingExtractionStep(
-        id: 'compose-layouts',
-        label: 'Select approved patterns',
-        reads: [PatternArtifacts::NORMALIZED],
-        writes: [PatternArtifacts::LAYOUTS],
-        source: 'class.pattern-utils.php',
-    );
-
-    $thrown = assert_throws(
-        static fn () => $step->run(new Project($dir, basename($dir))),
-        'an unextracted stage throws',
-    );
-
-    exec('rm -rf ' . escapeshellarg($dir));
-
-    assert_contains('compose-layouts', $thrown->getMessage());
-    assert_contains('class.pattern-utils.php', $thrown->getMessage());
 });
 
 /**

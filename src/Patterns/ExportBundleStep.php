@@ -55,13 +55,13 @@ final class ExportBundleStep implements Step
         NormalizeInputsStep::assertVersion($inputs);
         $provenance = $project->readJson(PatternArtifacts::PROVENANCE);
         $media = $project->readJson(PatternArtifacts::MEDIA);
+        ResolveMediaStep::assertVersion($media);
 
         $bundle = [
             'version' => self::BUNDLE_VERSION,
             'theme' => $inputs['theme'] ?? null,
             'brand' => $inputs['brand'] ?? [],
             'pages' => self::readPages($project, $provenance),
-            'parts' => self::readParts($project),
             // The destination builds the menu from this. Dropping it leaves a
             // multi-page site whose pages cannot reach each other, and nothing
             // downstream notices that the pages are orphaned.
@@ -79,7 +79,6 @@ final class ExportBundleStep implements Step
             'bundle_version' => self::BUNDLE_VERSION,
             'theme' => $bundle['theme'],
             'pages' => count($bundle['pages']),
-            'parts' => count($bundle['parts']),
             'media' => count($bundle['media']),
             'violations' => $violations,
             'passed' => $violations === [],
@@ -112,52 +111,13 @@ final class ExportBundleStep implements Step
         }
 
         $pages = [];
-        foreach (self::jsonFiles($project, rtrim(PatternArtifacts::PAGES, '/*')) as $file) {
-            $page = json_decode((string) file_get_contents($file), true);
-            if (!is_array($page) || !isset($page['slug'])) {
-                continue;
-            }
-
-            $slug = (string) $page['slug'];
-            $page['sections'] = $sections[$slug] ?? [];
+        foreach (PatternArtifacts::pages($project) as $page) {
+            $page['sections'] = $sections[(string) $page['slug']] ?? [];
             $pages[] = $page;
         }
 
         usort($pages, static fn (array $a, array $b) => ($a['menu_order'] ?? 0) <=> ($b['menu_order'] ?? 0));
 
         return $pages;
-    }
-
-    /**
-     * Shared parts — header, footer — which every page renders inside and
-     * which therefore have to clear the same checks the pages do.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private static function readParts(Project $project): array
-    {
-        $parts = [];
-        foreach (self::jsonFiles($project, PatternArtifacts::PARTS) as $file) {
-            $part = json_decode((string) file_get_contents($file), true);
-            if (is_array($part) && isset($part['slug'])) {
-                $parts[] = $part;
-            }
-        }
-
-        return $parts;
-    }
-
-    /** @return list<string> */
-    private static function jsonFiles(Project $project, string $rel): array
-    {
-        $dir = $project->path($rel);
-        if (!is_dir($dir)) {
-            return [];
-        }
-
-        $files = glob($dir . '/*.json') ?: [];
-        sort($files);
-
-        return $files;
     }
 }

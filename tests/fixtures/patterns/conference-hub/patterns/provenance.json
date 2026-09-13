@@ -4,67 +4,43 @@
             "page": "home",
             "index": 0,
             "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Set the conference identity with key date, name, and tagline."
+            "intent": "Set the tone with the conference name, date, location, and a bold visual of the stage or crowd."
         },
         {
             "page": "home",
             "index": 1,
             "pattern": "twentytwentyfive/event-rsvp",
-            "intent": "Push the primary registration action above the fold."
+            "intent": "Push the primary 'Register' action with urgency (early-bird deadline or limited capacity)."
         },
         {
             "page": "home",
             "index": 2,
             "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Highlight conference stats and headline speakers."
+            "intent": "Surface three key differentiators (e.g., track count, top-tier speakers, interactive workshops)."
         },
         {
             "page": "home",
             "index": 3,
-            "pattern": "twentytwentyfive/testimonials-2-col",
-            "intent": "Show quotes from past attendees and industry peers."
+            "pattern": "twentytwentyfive/text-faqs",
+            "intent": "Summarize the conference narrative: the theme, the tracks, and the promise of actionable takeaways."
         },
         {
-            "page": "home",
-            "index": 4,
+            "page": "agenda",
+            "index": 0,
+            "pattern": "twentytwentyfive/text-faqs",
+            "intent": "Present a structured, multi-day schedule with time slots, concurrent tracks, and session titles."
+        },
+        {
+            "page": "speakers",
+            "index": 0,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Display speaker headshots in a clean, browsable grid with name, role, and topic on hover."
+        },
+        {
+            "page": "venue",
+            "index": 0,
             "pattern": "twentytwentyfive/contact-info-locations",
-            "intent": "Offer a direct line for group bookings and press inquiries."
-        },
-        {
-            "page": "agenda",
-            "index": 0,
-            "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Present the day-by-day schedule with track columns and timings."
-        },
-        {
-            "page": "agenda",
-            "index": 1,
-            "pattern": "twentytwentyfive/pricing-3-col",
-            "intent": "List auxiliary sessions, workshops, and networking slots."
-        },
-        {
-            "page": "speakers",
-            "index": 0,
-            "pattern": "twentytwentyfive/media-instagram-grid",
-            "intent": "Display speaker headshots in a browsable grid."
-        },
-        {
-            "page": "speakers",
-            "index": 1,
-            "pattern": "twentytwentyfive/banner-cover-big-heading",
-            "intent": "Provide short bios and session affiliations for each speaker."
-        },
-        {
-            "page": "venue",
-            "index": 0,
-            "pattern": "twentytwentyfive/media-instagram-grid",
-            "intent": "Embed a venue tour video and interactive map."
-        },
-        {
-            "page": "venue",
-            "index": 1,
-            "pattern": "twentytwentyfive/text-faqs",
-            "intent": "Detail travel, accommodation, and accessibility information."
+            "intent": "Share the venue address, map, transport links, and a contact for accessibility or dietary queries."
         }
     ]
 }

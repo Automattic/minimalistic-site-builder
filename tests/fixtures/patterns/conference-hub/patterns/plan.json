@@ -5,32 +5,27 @@
             "title": "Home",
             "front": true,
             "menu_order": 0,
-            "description": "Frame the conference brand and drive visitor registration.",
+            "description": "The hub that sets the scene for the conference and compels visitors to secure their spot.",
             "sections": [
                 {
                     "category": "banner",
-                    "intent": "Set the conference identity with key date, name, and tagline.",
-                    "reason": "A multi-session conference hub needs immediate recognition and urgency; a banner gives the events team a branded header that anchors every visit."
+                    "intent": "Set the tone with the conference name, date, location, and a bold visual of the stage or crowd.",
+                    "reason": "A banner gives events teams an immediate sense of the conference scale and atmosphere, anchoring the brand the moment they land."
                 },
                 {
                     "category": "call-to-action",
-                    "intent": "Push the primary registration action above the fold.",
-                    "reason": "The core goal is registration; a hero-level call-to-action turns brand interest into sign-ups before the visitor scrolls."
+                    "intent": "Push the primary 'Register' action with urgency (early-bird deadline or limited capacity).",
+                    "reason": "The brief’s sole CTA is registration; a dedicated hero-level CTA ensures the highest traffic page converts the moment interest peaks."
                 },
                 {
                     "category": "featured",
-                    "intent": "Highlight conference stats and headline speakers.",
-                    "reason": "Events teams need social proof and authority signals to trust the hub's value; featured cards for tracks, speaker count, and past attendance build that trust."
+                    "intent": "Surface three key differentiators (e.g., track count, top-tier speakers, interactive workshops).",
+                    "reason": "Events teams evaluate conferences on standout value; featured cards let them scan proof points without scrolling through dense copy."
                 },
                 {
-                    "category": "testimonials",
-                    "intent": "Show quotes from past attendees and industry peers.",
-                    "reason": "Multi-track conference buyers look for peer validation; testimonials from events-team peers reduce perceived risk and reinforce the registration decision."
-                },
-                {
-                    "category": "contact",
-                    "intent": "Offer a direct line for group bookings and press inquiries.",
-                    "reason": "Events teams often manage group registrations and need a fast channel that doesn't require navigating away; a footer contact section closes the page with action-ready access."
+                    "category": "text",
+                    "intent": "Summarize the conference narrative: the theme, the tracks, and the promise of actionable takeaways.",
+                    "reason": "A concise text block bridges the emotional pull of the banner with practical detail, addressing both the aspirational and logistical mindsets of event managers."
                 }
             ]
         },
@@ -39,17 +34,12 @@
             "title": "Agenda",
             "front": false,
             "menu_order": 10,
-            "description": "Display the multi-track timetable so attendees can plan their sessions.",
+            "description": "A day-by-day layout of sessions, tracks, and breaks so organizers can judge the flow of the event.",
             "sections": [
                 {
                     "category": "text",
-                    "intent": "Present the day-by-day schedule with track columns and timings.",
-                    "reason": "A text layout keeps the dense schedule readable and scannable, which is essential when events teams need to compare parallel tracks quickly."
-                },
-                {
-                    "category": "services",
-                    "intent": "List auxiliary sessions, workshops, and networking slots.",
-                    "reason": "Beyond main tracks, the conference offers add-on experiences; a services section groups them as distinct offerings that deepen the agenda's value."
+                    "intent": "Present a structured, multi-day schedule with time slots, concurrent tracks, and session titles.",
+                    "reason": "A single text-driven grid is the clearest way for time-conscious events teams to map their own agenda and spot sessions relevant to their planning responsibilities."
                 }
             ]
         },
@@ -58,17 +48,12 @@
             "title": "Speakers",
             "front": false,
             "menu_order": 20,
-            "description": "Showcase speaker profiles to build credibility and excitement.",
+            "description": "A showcase of headliners and session leads, with credentials that matter to event professionals.",
             "sections": [
                 {
                     "category": "gallery",
-                    "intent": "Display speaker headshots in a browsable grid.",
-                    "reason": "Events teams evaluate conferences by the talent on stage; a gallery makes speaker recognition immediate and visually engaging."
-                },
-                {
-                    "category": "about",
-                    "intent": "Provide short bios and session affiliations for each speaker.",
-                    "reason": "Bio details connect the person to their session topic, helping attendees choose tracks and trust the expertise behind each talk."
+                    "intent": "Display speaker headshots in a clean, browsable grid with name, role, and topic on hover.",
+                    "reason": "A gallery matches the visual scanning behaviour of an events team vetting credibility—faces and affiliations build trust faster than paragraphs."
                 }
             ]
         },
@@ -77,17 +62,12 @@
             "title": "Venue",
             "front": false,
             "menu_order": 30,
-            "description": "Help attendees navigate the venue and plan their stay.",
+            "description": "Everything an attendee needs to arrive prepared: the venue, travel tips, and on-site services.",
             "sections": [
                 {
-                    "category": "media",
-                    "intent": "Embed a venue tour video and interactive map.",
-                    "reason": "Logistics confidence drives registration; a media section gives events teams a visual walkthrough of the space and surrounding area."
-                },
-                {
-                    "category": "text",
-                    "intent": "Detail travel, accommodation, and accessibility information.",
-                    "reason": "Practical logistics text answers the operational questions events teams need resolved before they commit travel budgets."
+                    "category": "contact",
+                    "intent": "Share the venue address, map, transport links, and a contact for accessibility or dietary queries.",
+                    "reason": "Logistics are a decisive factor for busy events professionals; a contact section bundles all arrival and access information into one actionable block."
                 }
             ]
         }

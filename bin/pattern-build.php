@@ -110,9 +110,8 @@ function report(Project $project): void
 
     $report = $project->readJson(PatternArtifacts::REPORT);
     Narrator::write(sprintf(
-        "report:   %d page(s), %d part(s), %d image(s), %s\n",
+        "report:   %d page(s), %d image(s), %s\n",
         $report['pages'] ?? 0,
-        $report['parts'] ?? 0,
         $report['media'] ?? 0,
         ($report['passed'] ?? false) ? 'checks passed' : 'checks FAILED',
     ));

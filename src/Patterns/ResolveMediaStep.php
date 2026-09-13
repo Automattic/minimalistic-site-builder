@@ -35,12 +35,33 @@ final class ResolveMediaStep implements Step
 {
     public const MEDIA_VERSION = 1;
 
-    /** Blocks whose block attributes name a source, not only their markup. */
-    private const MEDIA_BLOCKS = ['core/image', 'core/cover', 'core/media-text', 'core/video', 'core/audio'];
+    /** Blocks whose `url` attribute names a source, not only their markup. */
+    private const MEDIA_BLOCKS = ['core/image', 'core/cover', 'core/media-text'];
 
     public function id(): string
     {
         return 'resolve-media';
+    }
+
+    /**
+     * Refuse a media manifest from an older contract.
+     *
+     * A run started at the export takes this file from a fixture, and a stale
+     * one with no `images` key exports zero images and reports success.
+     *
+     * @param array<string, mixed> $media
+     */
+    public static function assertVersion(array $media): void
+    {
+        $version = $media['version'] ?? null;
+
+        if ($version !== self::MEDIA_VERSION) {
+            throw new \RuntimeException(sprintf(
+                'The media manifest is version %s; this build reads version %d. Re-run from resolve-media.',
+                var_export($version, true),
+                self::MEDIA_VERSION,
+            ));
+        }
     }
 
     public function label(): string
@@ -73,7 +94,6 @@ final class ResolveMediaStep implements Step
         }
 
         $imports = [];
-        $assets = [];
         $unknown = [];
         $links = [];
         $avatars = [];
@@ -83,7 +103,7 @@ final class ResolveMediaStep implements Step
                 $where = $slug . ': ' . $source;
 
                 match (self::classify($source, $theme)) {
-                    'theme' => $assets[] = $source,
+                    'theme' => null,
                     'import' => $imports[$source]['pages'][] = $slug,
                     default => $unknown[] = $where,
                 };
@@ -109,11 +129,13 @@ final class ResolveMediaStep implements Step
             );
         }
 
+        // Only what the host consumes is written. What was seen and left
+        // alone — the theme's own images, the links — is said in the
+        // warnings, where a person reads it, not persisted for a reader that
+        // does not exist yet.
         $project->writeJson(PatternArtifacts::MEDIA, [
             'version' => self::MEDIA_VERSION,
             'images' => self::images($imports, $avatars, $facts),
-            'theme_assets' => array_values(array_unique($assets)),
-            'links' => $links,
         ]);
 
         $project->replaceWarnings($this->id(), self::warnings($links, $avatars, $facts));
@@ -300,20 +322,9 @@ final class ResolveMediaStep implements Step
      */
     private static function pages(Project $project): array
     {
-        $dir = $project->path(rtrim(PatternArtifacts::PAGES, '/*'));
-        if (!is_dir($dir)) {
-            return [];
-        }
-
-        $files = glob($dir . '/*.json') ?: [];
-        sort($files);
-
         $pages = [];
-        foreach ($files as $file) {
-            $page = json_decode((string) file_get_contents($file), true);
-            if (is_array($page) && isset($page['slug'])) {
-                $pages[(string) $page['slug']] = (string) ($page['content'] ?? '');
-            }
+        foreach (PatternArtifacts::pages($project) as $page) {
+            $pages[(string) $page['slug']] = (string) ($page['content'] ?? '');
         }
 
         return $pages;

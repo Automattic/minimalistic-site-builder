@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
 use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
+use Automattic\SiteBuild\Patterns\ResolveMediaStep;
 use Automattic\SiteBuild\Project;
 
 /**
@@ -15,27 +16,20 @@ use Automattic\SiteBuild\Project;
  * @param list<array<string, mixed>> $pages
  * @param array<string, mixed> $provenance
  */
-function export_project(array $inputs, array $pages, array $provenance, array $parts = []): Project
+function export_project(array $inputs, array $pages, array $provenance): Project
 {
     $dir = sys_get_temp_dir() . '/export-bundle-' . bin2hex(random_bytes(4));
     mkdir($dir . '/patterns/pages', 0o777, true);
-    mkdir($dir . '/patterns/parts', 0o777, true);
 
     $project = new Project($dir, basename($dir));
     $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
     $project->writeJson(PatternArtifacts::PROVENANCE, $provenance);
-    $project->writeJson(PatternArtifacts::MEDIA, ['images' => []]);
+    $project->writeJson(PatternArtifacts::MEDIA, ['version' => ResolveMediaStep::MEDIA_VERSION, 'images' => []]);
 
     foreach ($pages as $page) {
         file_put_contents(
             $dir . '/patterns/pages/' . $page['slug'] . '.json',
             (string) json_encode($page),
-        );
-    }
-    foreach ($parts as $part) {
-        file_put_contents(
-            $dir . '/patterns/parts/' . $part['slug'] . '.json',
-            (string) json_encode($part),
         );
     }
 
@@ -55,10 +49,7 @@ function export_clean_inputs(): array
                 'content' => '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->',
             ],
         ],
-        'capabilities' => [
-            'classes' => [],
-            'template_parts' => [['name' => 'header', 'area' => 'header']],
-        ],
+        'capabilities' => ['classes' => []],
         'navigation' => [['title' => 'Home', 'slug' => 'home']],
     ];
 }
@@ -176,15 +167,6 @@ test('each page carries the patterns its sections came from', function () {
     assert_eq('twentytwentyfive/banner-cover-big-heading', $page['sections'][0]['pattern']);
 });
 
-test('shared parts are exported and checked with the pages', function () {
-    $parts = [['slug' => 'header', 'content' => '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->']];
-    $project = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance(), $parts);
-
-    (new ExportBundleStep())->run($project);
-
-    assert_eq(1, count($project->readJson(PatternArtifacts::BUNDLE)['parts']));
-});
-
 /**
  * The checked-in fixture is a real four-page site composed from a theme's own
  * patterns. Running the export over it is the closest thing to an end-to-end
@@ -247,4 +229,17 @@ test('navigation reaches the bundle', function () {
 
     $navigation = $project->readJson(PatternArtifacts::BUNDLE)['navigation'];
     assert_eq([['title' => 'Home', 'slug' => 'home']], $navigation);
+});
+
+/**
+ * A run started at the export takes its media manifest from a fixture. One
+ * from before the manifest had a shape exports zero images and passes.
+ */
+test('a media manifest from an older contract is refused rather than half-read', function () {
+    $project = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+    $project->writeJson(PatternArtifacts::MEDIA, ['images' => []]);
+
+    $thrown = assert_throws(static fn () => (new ExportBundleStep())->run($project));
+
+    assert_contains('resolve-media', $thrown->getMessage());
 });

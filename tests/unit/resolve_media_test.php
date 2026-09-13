@@ -56,9 +56,7 @@ test('an image the theme ships needs no import', function () {
 
     (new ResolveMediaStep())->run($project);
 
-    $media = media_of($project);
-    assert_eq([], $media['images']);
-    assert_eq(1, count($media['theme_assets']));
+    assert_eq([], media_of($project)['images']);
 });
 
 /**
@@ -182,13 +180,9 @@ test('links still pointing at a placeholder are counted, by page', function () {
 
     (new ResolveMediaStep())->run($project);
 
-    $kinds = array_count_values(array_column(media_of($project)['links'], 'kind'));
-    assert_eq(1, $kinds['placeholder']);
-    assert_eq(1, $kinds['relative']);
-    assert_eq(1, $kinds['external']);
-
     $warnings = (string) json_encode($project->readJson('warnings.json')['resolve-media']);
     assert_contains('home (1)', $warnings);
+    assert_eq(false, str_contains($warnings, 'venue'), 'a link that goes somewhere is not a placeholder');
 });
 
 test('a build with no page written stops rather than writing an empty manifest', function () {
