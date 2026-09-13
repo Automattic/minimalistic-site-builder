@@ -1,0 +1,68 @@
+{
+  "pages": [
+    {
+      "slug": "home",
+      "title": "Home",
+      "sections": [
+        {
+          "intent": "Hero",
+          "category": "hero"
+        },
+        {
+          "intent": "Stats",
+          "category": "stats"
+        },
+        {
+          "intent": "Why attend",
+          "category": "why attend"
+        },
+        {
+          "intent": "Sponsors",
+          "category": "sponsors"
+        },
+        {
+          "intent": "CTA",
+          "category": "cta"
+        }
+      ]
+    },
+    {
+      "slug": "agenda",
+      "title": "Agenda",
+      "sections": [
+        {
+          "intent": "Agenda overview",
+          "category": "agenda overview"
+        },
+        {
+          "intent": "Tracks",
+          "category": "tracks"
+        }
+      ]
+    },
+    {
+      "slug": "speakers",
+      "title": "Speakers",
+      "sections": [
+        {
+          "intent": "Featured speakers",
+          "category": "featured speakers"
+        }
+      ]
+    },
+    {
+      "slug": "venue",
+      "title": "Venue",
+      "sections": [
+        {
+          "intent": "Venue and travel",
+          "category": "venue and travel"
+        },
+        {
+          "intent": "Travel questions",
+          "category": "travel questions"
+        }
+      ]
+    }
+  ]
+}

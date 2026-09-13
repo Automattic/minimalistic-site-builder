@@ -46,7 +46,13 @@ function export_clean_inputs(): array
     return [
         'theme' => 'twentytwentyfive',
         'brand' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
-        'inventory_ids' => ['twentytwentyfive/banner-cover-big-heading'],
+        'inventory' => [
+            [
+                'id' => 'twentytwentyfive/banner-cover-big-heading',
+                'categories' => ['hero'],
+                'content' => '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->',
+            ],
+        ],
         'capabilities' => [
             'classes' => [],
             'template_parts' => [['name' => 'header', 'area' => 'header']],

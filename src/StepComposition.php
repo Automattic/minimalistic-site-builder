@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Patterns\PendingExtractionStep;
@@ -141,13 +142,7 @@ final class StepComposition
                     writes: [PatternArtifacts::PLAN],
                     source: 'ability.get-site-structure.php',
                 ),
-                new PendingExtractionStep(
-                    id: 'compose-layouts',
-                    label: 'Select approved patterns for every page and shared part',
-                    reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::PLAN],
-                    writes: [PatternArtifacts::LAYOUTS, PatternArtifacts::PROVENANCE],
-                    source: 'class.pattern-utils.php and ability.compose-site-layouts.php',
-                ),
+                new ComposeLayoutsStep(),
                 new PendingExtractionStep(
                     id: 'personalize-content',
                     label: 'Write content into the chosen patterns',

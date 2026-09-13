@@ -70,7 +70,7 @@ final class ExportBundleStep implements Step
 
         $violations = ContentOnlyGuard::check(
             $bundle,
-            $inputs['inventory_ids'] ?? [],
+            array_column( $inputs['inventory'] ?? [], 'id' ),
             $inputs['capabilities'] ?? [],
         );
 
