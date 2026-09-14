@@ -37,11 +37,11 @@ use Automattic\SiteBuild\Warnings;
 use Throwable;
 
 /**
- * Step (LLM): generate the block theme's theme.json.
+ * Compile fixed theme values and request the remaining typography choices.
  *
  * Input:  meta.json (user prompt) + siteSpec.json (factual info) +
  *         designDirection.json (the committed creative and typography floor).
- *         The model translates that direction into theme.json tokens.
+ *         Code supplies palette and font presets from the direction.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the six color
@@ -248,9 +248,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
-     * theme-level block defaults. button, link and heading are also absent:
-     * ContrastFixStep reads those paths and rewrites failing colors, so they
-     * stay model-authored.
+     * theme-level block defaults. This shared scaffold also omits button,
+     * link, and heading colors. Blocks builds compile link defaults below;
+     * HTML-first builds request them from the model. ContrastFixStep checks
+     * these element colors against their surfaces.
      *
      * @var array<mixed>
      */
@@ -444,6 +445,23 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     public function requests(Project $project): array
     {
+        if (!$this->htmlFirst) {
+            $direction = DesignDirectionStep::dataFor($project);
+            $contract = array_intersect_key($direction, array_flip([
+                'title', 'description', 'type', 'type_treatment', 'type_scale', 'cta_style', 'density',
+            ]));
+            return [self::REQ => $this->withOptions([
+                'prompt' => $this->renderer->render('theme-typography.md', [
+                    'design_contract' => json_encode($contract, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                    'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint(DesignDirectionStep::heroBlueprintFor($project)),
+                    'heading_weights' => implode(', ', array_map(
+                        static fn (string $weight): string => '`' . $weight . '`',
+                        self::committedWeights($direction, 'heading') ?: ['400', '500', '600', '700'],
+                    )),
+                ]),
+                'json_schema' => ['name' => 'theme_typography', 'schema' => self::typographySchema($direction)],
+            ])];
+        }
         $meta = $project->readJson('meta.json');
         $designDirection = DesignDirectionStep::readFor($project);
         if ($this->htmlFirst) {
@@ -495,7 +513,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($theme)) {
             throw new \RuntimeException('theme-json: missing model output');
         }
-        $this->writeTheme($project, $theme);
+        $warnings = $theme === [] ? [
+            'theme/theme.json at styles: authored empty object; delivered default typography; disposition missing typography choices replaced',
+        ] : [];
+        if (!$this->htmlFirst) {
+            $theme = self::typographyChoices($theme, DesignDirectionStep::dataFor($project), $warnings);
+        }
+        $this->writeTheme($project, $theme, $warnings);
     }
 
     public function consumeGeneratedJsonFailure(
@@ -515,6 +539,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /** @param array<mixed> $theme @param list<string> $warnings */
     private function writeTheme(Project $project, array $theme, array $warnings = []): void
     {
+        if (!$this->htmlFirst) {
+            $theme = self::mergeScaffoldDefaultsAtPath(
+                self::compileDefaults(DesignDirectionStep::dataFor($project)), $theme, '', $warnings,
+            );
+        }
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
@@ -693,6 +722,159 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $project->writeJson('theme/theme.json', $theme);
+    }
+
+    /** Compile the fixed values before the normal repair passes. */
+    public static function compileDefaults(array $direction): array
+    {
+        $palette = [];
+        foreach (self::FALLBACK_COLORS as $slug => $fallback) {
+            $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $direction['palette'][$slug] ?? $fallback];
+        }
+        $fonts = [];
+        foreach (self::FALLBACK_FONTS as $slug => $fallback) {
+            $family = $direction['type'][$slug]['family'] ?? null;
+            if ($slug === 'accent' && (!is_string($family) || trim($family) === '')) {
+                continue;
+            }
+            $fonts[] = [
+                'slug' => $slug, 'name' => ucfirst($slug),
+                'fontFamily' => is_string($family) && trim($family) !== ''
+                    ? self::replacePrimaryFamily($fallback, trim($family)) : $fallback,
+            ];
+        }
+        return [
+            'settings' => [
+                'color' => ['palette' => $palette],
+                'typography' => ['fontFamilies' => $fonts, 'fluid' => true],
+            ],
+            'styles' => [
+                'typography' => ['fontWeight' => self::compiledWeight($direction, 'body', '400')],
+                'elements' => [
+                    'heading' => ['typography' => [
+                        'fontWeight' => self::compiledWeight($direction, 'heading', '600'),
+                        'lineHeight' => '1.15',
+                    ]],
+                    'link' => [
+                        'color' => ['text' => 'var:preset|color|primary'],
+                        ':hover' => ['color' => ['text' => 'var:preset|color|accent']],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /** The committed weight nearest to the fallback, so body text does not ship at the lightest weight. */
+    private static function compiledWeight(array $direction, string $slot, string $fallback): string
+    {
+        $weights = self::committedWeights($direction, $slot);
+        if ($weights === []) {
+            return $fallback;
+        }
+        usort($weights, static fn (string $a, string $b): int => abs((int) $a - (int) $fallback) <=> abs((int) $b - (int) $fallback));
+        return $weights[0];
+    }
+
+    /**
+     * Normalize the bounded typography choices in the model response.
+     * A present choice outside its usable range takes the compiled default
+     * and leaves an actionable warning. Numbers are accepted, because
+     * prompt-only transports return them unquoted. A missing choice and
+     * every other key pass through to the existing scaffold and repair
+     * passes, which own the malformed-shape warnings.
+     *
+     * @param array<mixed> $response @param list<string> $warnings
+     * @return array<mixed>
+     */
+    public static function typographyChoices(array $response, array $direction, array &$warnings): array
+    {
+        $number = static fn (float $min, float $max): \Closure => static fn (string $value): bool =>
+            is_numeric($value) && (float) $value >= $min && (float) $value <= $max;
+        // Variable fonts use intermediate weights such as 650.
+        $weight = static fn (string $value): bool => ctype_digit($value) && (int) $value >= 100 && (int) $value <= 900;
+        $rules = [
+            'styles.typography.lineHeight' => ['1.6', $number(1.3, 2.0)],
+            'styles.elements.heading.typography.lineHeight' => ['1.15', $number(0.9, 1.4)],
+            'styles.elements.heading.typography.fontWeight' => [self::compiledWeight($direction, 'heading', '600'), $weight],
+            'styles.elements.button.typography.fontWeight' => ['600', $weight],
+            'styles.elements.button.typography.textTransform' => ['none', static fn (string $value): bool =>
+                in_array($value, ['none', 'uppercase', 'lowercase', 'capitalize'], true)],
+            'styles.elements.button.typography.letterSpacing' => ['0', static fn (string $value): bool =>
+                preg_match('/^(?:0|-?\d*\.?\d+(?:em|rem|px))$/', $value) === 1
+                && (float) $value >= -0.05 && (float) $value <= 0.3],
+            'styles.blocks.core/navigation.typography.fontWeight' => ['500', $weight],
+        ];
+        foreach ($rules as $path => [$default, $valid]) {
+            $keys = explode('.', $path);
+            $leaf = array_pop($keys);
+            $cursor = &$response;
+            foreach ($keys as $key) {
+                if (!is_array($cursor[$key] ?? null) || array_is_list($cursor[$key]) && $cursor[$key] !== []) {
+                    continue 2;
+                }
+                $cursor = &$cursor[$key];
+            }
+            if (!array_key_exists($leaf, $cursor)) {
+                continue;
+            }
+            $value = $cursor[$leaf];
+            $chosen = is_string($value) || is_int($value) || is_float($value) ? (string) $value : null;
+            if ($chosen !== null && $valid($chosen)) {
+                $cursor[$leaf] = $chosen;
+                continue;
+            }
+            $warnings[] = 'theme/theme.json ' . $path . ': authored ' . Warnings::value($value)
+                . '; delivered ' . Warnings::value($default)
+                . '; disposition value outside the bounded typography choices replaced with the compiled default';
+            $cursor[$leaf] = $default;
+            unset($cursor);
+        }
+        return $response;
+    }
+
+    /** Weights the direction committed for one type slot, as theme.json strings. */
+    private static function committedWeights(array $direction, string $slot): array
+    {
+        $weights = [];
+        foreach ($direction['type'][$slot]['weights'] ?? [] as $weight) {
+            if (is_int($weight) && $weight >= 100 && $weight <= 900 && $weight % 100 === 0) {
+                $weights[] = (string) $weight;
+            }
+        }
+        return array_values(array_unique($weights));
+    }
+
+    /**
+     * Keep the model response small and constrain its free typography choices.
+     * The model still owns the vertical rhythm, the heading weight among the
+     * committed weights, and the button case and tracking.
+     */
+    private static function typographySchema(array $direction): array
+    {
+        $object = static fn (array $properties): array => [
+            'type' => 'object', 'properties' => $properties,
+            'required' => array_keys($properties), 'additionalProperties' => false,
+        ];
+        $choice = static fn (array $values): array => ['type' => 'string', 'enum' => $values];
+        $weights = ['400', '500', '600', '700'];
+        $button = $object(['typography' => $object([
+            'fontWeight' => $choice($weights),
+            'textTransform' => $choice(['none', 'uppercase', 'lowercase']),
+            'letterSpacing' => $choice(['0', '0.02em', '0.05em', '0.1em']),
+        ])]);
+        $navigation = $object(['typography' => $object(['fontWeight' => $choice($weights)])]);
+        return $object(['styles' => $object([
+            'typography' => $object(['lineHeight' => $choice(['1.5', '1.6', '1.7'])]),
+            'spacing' => $object(['blockGap' => $choice(array_slice(self::ROOT_BLOCK_GAP_REFERENCES, 0, 6))]),
+            'elements' => $object([
+                'heading' => $object(['typography' => $object([
+                    'lineHeight' => $choice(['1.05', '1.1', '1.15', '1.2']),
+                    'fontWeight' => $choice(self::committedWeights($direction, 'heading') ?: $weights),
+                ])]),
+                'button' => $button,
+            ]),
+            'blocks' => $object(['core/navigation' => $navigation]),
+        ])]);
     }
 
     public function run(Project $project): void
