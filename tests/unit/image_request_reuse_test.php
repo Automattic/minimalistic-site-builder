@@ -89,6 +89,23 @@ test('a failed equivalent request removes only its references and preserves a di
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('reused warnings copy only rows about the source asset path', function () {
+    [$project, $tmp] = reuse_fixture();
+    $specs = $project->readJson('images.json');
+    $specs[] = array_replace($specs[0], ['filename' => 'about-hero.jpg', 'src' => 'theme:./assets/about-hero.jpg', 'subject' => 'A lake']);
+    $project->writeJson('images.json', $specs);
+    $images = new FakeImageClient('JPEGDATA');
+    $images->failPromptSubstrings = ['A lake'];
+    (new GenerateImagesStep($images, inspectImages: false))->run($project);
+    $specs = $project->readJson('images.json');
+    assert_eq(['completed', 'completed', 'failed'], array_column($specs, 'status'));
+    assert_eq('hero.jpg', $specs[1]['reused_from']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('theme/assets/about-hero.jpg', $warnings);
+    assert_true(!str_contains($warnings, 'about-hero-copy.jpg'), 'a sibling name that contains the source name is not copied');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('different subjects and crops keep independent image requests', function () {
     foreach (['subject' => 'A lake', 'aspectRatio' => 'portrait', 'pageContext' => 'A close crop of the same scene'] as $key => $value) {
         [$project, $tmp] = reuse_fixture();

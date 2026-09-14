@@ -448,9 +448,12 @@ final class GenerateImagesStep implements Step
                 unset($specs[$i]['role']);
             }
             $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+            // Copy only rows about the source asset path. A substring match
+            // would also catch a sibling whose name contains the source name.
+            $sourcePath = 'theme/assets/' . $sourceFilename;
             foreach ($warnings[$this->id()] ?? [] as $warning) {
-                if (str_contains($warning, $sourceFilename)) {
-                    $project->addWarnings($this->id(), [str_replace($sourceFilename, $filename, $warning)]);
+                if (preg_match('/' . preg_quote($sourcePath, '/') . '(?![\w.-])/', $warning) === 1) {
+                    $project->addWarnings($this->id(), [str_replace($sourcePath, 'theme/assets/' . $filename, $warning)]);
                 }
             }
             Narrator::write("    reused {$sourceFilename} as {$filename}\n");
