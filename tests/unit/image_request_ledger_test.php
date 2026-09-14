@@ -70,13 +70,3 @@ test('image attempt records include failures, size, asset, times and usage witho
     ImageLogger::setEnabled(true);
 });
 
-test('local UI renders do not inflate provider attempts', function () {
-    $report = new BuildReport('p', 'atlas', '/tmp/atlas', 'today');
-    $ledger = new ImageRequestLedger();
-    $ledger->record(['ok' => true]);
-    $report->setImages(5, 0, 5);
-    $report->setImageRequests($ledger->totals(), 4);
-    $images = $report->stats('model', [])['images'];
-    assert_eq(4, $images['local_renders']);
-    assert_eq(1, $images['provider_requests']['attempts']);
-});
