@@ -15,9 +15,9 @@ test('cache gate releases only after a complete message start or its deadline', 
     $gate->observe($start . "\n\n");
     assert_eq(true, $gate->ready());
     $other = new PromptCacheGate(static function () use (&$now): float { return $now; });
-    $now = 9.9;
+    $now = PromptCacheGate::DEFAULT_DEADLINE_SECONDS - 0.1;
     assert_eq(false, $other->ready());
-    $now = 10.0;
+    $now = PromptCacheGate::DEFAULT_DEADLINE_SECONDS;
     assert_eq(true, $other->ready());
 });
 
@@ -74,4 +74,24 @@ test('router uses the primed capability and preserves keys and degradation notes
     assert_eq(1, $transport->primed);
     assert_eq(['part' => '<p>Done</p>'], $result->texts);
     assert_eq(['Retained output after a limit.'], $result->notesFor('part'));
+});
+
+test('cache gate deadline comes from the environment with a bounded default', function () {
+    $now = 100.0;
+    $clock = static function () use (&$now): float { return $now; };
+    putenv(PromptCacheGate::DEADLINE_ENV . '=5');
+    $short = new PromptCacheGate($clock);
+    putenv(PromptCacheGate::DEADLINE_ENV . '=nonsense');
+    $default = new PromptCacheGate($clock);
+    putenv(PromptCacheGate::DEADLINE_ENV);
+    $explicit = new PromptCacheGate($clock, 1.0);
+    assert_eq(PromptCacheGate::DEFAULT_DEADLINE_SECONDS, PromptCacheGate::configuredDeadline());
+    $now = 104.0;
+    assert_true(!$short->ready());
+    assert_true($explicit->ready());
+    $now = 106.0;
+    assert_true($short->ready());
+    assert_true(!$default->ready());
+    $now = 100.0 + PromptCacheGate::DEFAULT_DEADLINE_SECONDS;
+    assert_true($default->ready());
 });
