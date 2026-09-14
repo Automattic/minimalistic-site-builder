@@ -63,20 +63,24 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     use LlmOptions;
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
-    private const ROOT_BLOCK_GAP_FALLBACK = 'var:preset|spacing|md';
+    /**
+     * The root sibling rhythm (styles.spacing.blockGap) is compiled, not
+     * chosen by the model. It separates every adjacent block pair inside a
+     * layout container: heading to paragraph, paragraph to paragraph. `sm`
+     * is the component text-rhythm role, and the committed density already
+     * scales it (COMPONENT_SPACING_PROFILES), so the page's paragraph gap
+     * follows density with no second choice. A model-authored section role
+     * (`lg`/`xl`/`xxl`) here put section padding between paragraphs.
+     */
+    public const ROOT_BLOCK_GAP = 'var:preset|spacing|sm';
+    /** Component-role references an authored root gap may keep. */
     private const ROOT_BLOCK_GAP_REFERENCES = [
         'var:preset|spacing|xs',
         'var:preset|spacing|sm',
         'var:preset|spacing|md',
-        'var:preset|spacing|lg',
-        'var:preset|spacing|xl',
-        'var:preset|spacing|xxl',
         'var(--wp--preset--spacing--xs)',
         'var(--wp--preset--spacing--sm)',
         'var(--wp--preset--spacing--md)',
-        'var(--wp--preset--spacing--lg)',
-        'var(--wp--preset--spacing--xl)',
-        'var(--wp--preset--spacing--xxl)',
     ];
 
     /**
@@ -165,8 +169,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * Density-owned component spacing (BIGR-954). xs is the tight
      * intra-component text rhythm (an eyebrow/heading/line stack inside one
-     * card or list row — BIGR-777); sm/md are component-level insets and gaps,
-     * and md also feeds ROOT_GUTTER, so the page's inline gutter follows the
+     * card or list row — BIGR-777); sm is the root sibling rhythm
+     * (ROOT_BLOCK_GAP) and a component gap; md is the component inset, and
+     * md also feeds ROOT_GUTTER, so the page's inline gutter follows the
      * committed density with no extra wiring. The swing is deliberately
      * smaller than the section ramp's (~±25%): component spacing must stay
      * readable at both extremes. `measured` keeps the historical fixed values.
@@ -563,11 +568,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 : null,
         );
 
-        // A default vertical rhythm between sibling blocks: without it, per-block
-        // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
-        // title/tagline stack) renders editor-only and the frontend falls back
-        // to browser default margins. (settings.spacing.blockGap is already
-        // forced non-null by normalizeSpacingSettings above.)
+        // A compiled vertical rhythm between sibling blocks (ROOT_BLOCK_GAP):
+        // without it, per-block "blockGap" the parts set (e.g. the
+        // branded-lockup header's zero-gap title/tagline stack) renders
+        // editor-only and the frontend falls back to browser default margins.
+        // (settings.spacing.blockGap is already forced non-null by
+        // normalizeSpacingSettings above.)
         if (array_key_exists('styles', $theme)
             && (!is_array($theme['styles'])
                 || ($theme['styles'] !== [] && array_is_list($theme['styles'])))) {
@@ -586,7 +592,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     && array_is_list($theme['styles']['spacing'])))) {
             $warnings[] = 'theme/theme.json styles.spacing: authored '
                 . Warnings::value($theme['styles']['spacing'])
-                . '; delivered {"blockGap":"var:preset|spacing|md"}'
+                . '; delivered {"blockGap":"' . self::ROOT_BLOCK_GAP . '"}'
                 . '; disposition replaced malformed shape before normalization';
             $theme['styles']['spacing'] = [];
         }
@@ -750,6 +756,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ],
             'styles' => [
                 'typography' => ['fontWeight' => self::compiledWeight($direction, 'body', '400')],
+                'spacing' => ['blockGap' => self::ROOT_BLOCK_GAP],
                 'elements' => [
                     'heading' => ['typography' => [
                         'fontWeight' => self::compiledWeight($direction, 'heading', '600'),
@@ -846,8 +853,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     /**
      * Keep the model response small and constrain its free typography choices.
-     * The model still owns the vertical rhythm, the heading weight among the
-     * committed weights, and the button case and tracking.
+     * The model still owns the line heights, the heading weight among the
+     * committed weights, and the button case and tracking. The root block gap
+     * is compiled from the committed density (ROOT_BLOCK_GAP), so it is not
+     * offered here.
      */
     private static function typographySchema(array $direction): array
     {
@@ -865,7 +874,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $navigation = $object(['typography' => $object(['fontWeight' => $choice($weights)])]);
         return $object(['styles' => $object([
             'typography' => $object(['lineHeight' => $choice(['1.5', '1.6', '1.7'])]),
-            'spacing' => $object(['blockGap' => $choice(array_slice(self::ROOT_BLOCK_GAP_REFERENCES, 0, 6))]),
             'elements' => $object([
                 'heading' => $object(['typography' => $object([
                     'lineHeight' => $choice(['1.05', '1.1', '1.15', '1.2']),
@@ -962,10 +970,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Keep the root sibling rhythm on the bounded spacing scale the build
-     * installs. A copied prompt placeholder or invented slug would otherwise
-     * survive as an unresolved CSS variable and remove block spacing across
-     * the delivered theme.
+     * Keep the root sibling rhythm on a component role of the spacing scale
+     * the build installs. A missing gap takes ROOT_BLOCK_GAP. An authored
+     * component role (`xs`/`sm`/`md`) is kept for the HTML-first and legacy
+     * paths. A section role (`lg`/`xl`/`xxl`) is replaced with a warning:
+     * it would put section padding between paragraphs. A copied prompt
+     * placeholder or invented slug would otherwise survive as an unresolved
+     * CSS variable and remove block spacing across the delivered theme.
      *
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>}
@@ -982,7 +993,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!array_key_exists('blockGap', $theme['styles']['spacing'])
             || $theme['styles']['spacing']['blockGap'] === null
         ) {
-            $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP_FALLBACK;
+            $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP;
             return [$theme, []];
         }
 
@@ -991,12 +1002,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return [$theme, []];
         }
 
-        $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP_FALLBACK;
+        $sectionRole = is_string($authored)
+            && preg_match('/^(?:var:preset\|spacing\||var\(--wp--preset--spacing--)(?:lg|xl|xxl)\)?$/', $authored) === 1;
+        $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP;
         return [$theme, [
             'theme/theme.json styles.spacing.blockGap: authored ' . Warnings::value($authored)
-                . '; delivered ' . Warnings::value(self::ROOT_BLOCK_GAP_FALLBACK)
-                . '; disposition=unresolved or unsupported spacing preset reference replaced '
-                . 'with the canonical default',
+                . '; delivered ' . Warnings::value(self::ROOT_BLOCK_GAP)
+                . ($sectionRole
+                    ? '; disposition=section-padding preset replaced with the compiled '
+                        . 'root text rhythm (the committed density already scales it)'
+                    : '; disposition=unresolved or unsupported spacing preset reference replaced '
+                        . 'with the canonical default'),
         ]];
     }
 

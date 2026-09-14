@@ -44,17 +44,14 @@ test('theme compiler leaves rhythm, heading weight, and button case to the model
     $step = new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')));
     $request = $step->requests($project)['theme-json'];
     $styles = $request['json_schema']['schema']['properties']['styles']['properties'];
-    assert_eq(
-        ['var:preset|spacing|xs', 'var:preset|spacing|sm', 'var:preset|spacing|md',
-            'var:preset|spacing|lg', 'var:preset|spacing|xl', 'var:preset|spacing|xxl'],
-        $styles['spacing']['properties']['blockGap']['enum'],
-    );
+    assert_true(!array_key_exists('spacing', $styles), 'the root block gap is compiled, not offered to the model');
     assert_eq(['700', '900'], $styles['elements']['properties']['heading']['properties']['typography']['properties']['fontWeight']['enum']);
     $button = $styles['elements']['properties']['button']['properties']['typography']['properties'];
     assert_eq(['none', 'uppercase', 'lowercase'], $button['textTransform']['enum']);
     assert_eq(['0', '0.02em', '0.05em', '0.1em'], $button['letterSpacing']['enum']);
     assert_contains('committed heading weights: `700`, `900`', $request['prompt']);
-    assert_contains('`packed` and `dense` use `xs` or `sm`', $request['prompt']);
+    assert_true(!str_contains($request['prompt'], 'blockGap'), 'the prompt does not ask for a block gap');
+    assert_true(!str_contains($request['prompt'], '`packed` and `dense` use'));
 
     $choices = ['styles' => [
         'typography' => ['lineHeight' => '1.6'],
@@ -67,7 +64,11 @@ test('theme compiler leaves rhythm, heading weight, and button case to the model
     ]];
     $step->consume($project, ['theme-json' => $choices]);
     $theme = $project->readJson('theme/theme.json');
-    assert_eq('var:preset|spacing|lg', $theme['styles']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|sm', $theme['styles']['spacing']['blockGap'], 'a section-role gap is replaced');
+    $warnings = implode("\n", $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('styles.spacing.blockGap: authored "var:preset|spacing|lg"', $warnings);
+    assert_contains('delivered "var:preset|spacing|sm"', $warnings);
+    assert_contains('section-padding preset replaced', $warnings);
     assert_eq('900', $theme['styles']['elements']['heading']['typography']['fontWeight']);
     assert_eq('uppercase', $theme['styles']['elements']['button']['typography']['textTransform']);
     assert_eq('0.05em', $theme['styles']['elements']['button']['typography']['letterSpacing']);
@@ -254,7 +255,7 @@ test('theme compiler replaces invalid typography choices with defaults and warni
     assert_eq('600', $theme['styles']['elements']['button']['typography']['fontWeight']);
     assert_eq('uppercase', $theme['styles']['elements']['button']['typography']['textTransform']);
     assert_eq('0', $theme['styles']['elements']['button']['typography']['letterSpacing']);
-    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap'], 'the existing block gap repair supplies the default');
+    assert_eq('var:preset|spacing|sm', $theme['styles']['spacing']['blockGap'], 'the compiled root block gap supplies the default');
     assert_eq('400', $theme['styles']['typography']['fontWeight'], 'body weight prefers the committed weight nearest 400');
     $warnings = implode("\n", $project->readJson('warnings.json')['theme-json']);
     foreach ([
