@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\ImageAltText;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -67,6 +68,8 @@ final class AssemblePagesStep implements Step
                 'plugin/pages.json',
                 'plugin/images.json',
                 'theme/parts/header.html',
+                'theme/parts/footer.html',
+                'logs/assemble-pages.log',
                 'theme/templates/page.html',
                 'theme/templates/index.html',
                 'theme/theme.json',
@@ -102,6 +105,7 @@ final class AssemblePagesStep implements Step
         // the nav is worse than an absent one) — except the front page, which
         // the templates and the seeder rely on.
         $contents = [];
+        $altReport = [];
         $manifest = [];
         foreach ($pages as $page) {
             $slug = (string) ($page['slug'] ?? '');
@@ -122,7 +126,9 @@ final class AssemblePagesStep implements Step
             if ($markups === []) {
                 $warnings[] = "front page '{$slug}': no section markup survived; empty front page delivered";
             }
-            $contents[$slug] = self::pageContent($markups);
+            $contents[$slug] = self::cleanImageAltText(
+                self::pageContent($markups), "plugin/pages/{$slug}.html", $altReport, $warnings,
+            );
             $manifest[] = [
                 'slug'       => $slug,
                 'title'      => (string) ($page['title'] ?? ''),
@@ -141,6 +147,20 @@ final class AssemblePagesStep implements Step
             }
         }
         unset($entry);
+        foreach (['header', 'footer'] as $area) {
+            $path = "theme/parts/{$area}.html";
+            if (!$project->exists($path)) {
+                continue;
+            }
+            $original = $project->readText($path);
+            $cleaned = self::cleanImageAltText($original, $path, $altReport, $warnings);
+            if ($cleaned !== $original) {
+                $project->writeText($path, $cleaned);
+            }
+        }
+        if ($altReport !== []) {
+            $project->writeText('logs/assemble-pages.log', implode("\n", $altReport) . "\n");
+        }
         $project->addWarnings($this->id(), $warnings);
 
         foreach ($contents as $slug => $content) {
@@ -167,6 +187,22 @@ final class AssemblePagesStep implements Step
                 @unlink($project->themePath("parts/{$part}.html"));
             }
         }
+    }
+
+    /** @param list<string> $report @param list<string> $warnings */
+    private static function cleanImageAltText(string $markup, string $file, array &$report, array &$warnings): string
+    {
+        $result = ImageAltText::clean($markup);
+        foreach ($result['repairs'] as $repair) {
+            $row = 'file=' . Warnings::value($file) . '; block="img[' . $repair['index'] . '].alt"; authored='
+                . Warnings::value($repair['authored']) . '; delivered=' . Warnings::value($repair['delivered'])
+                . '; disposition=removed image request metadata from the alt text; retained the subject';
+            $report[] = $row;
+            if ($repair['delivered'] === '') {
+                $warnings[] = $row . '; no subject was available for the image description';
+            }
+        }
+        return $result['markup'];
     }
 
     /**

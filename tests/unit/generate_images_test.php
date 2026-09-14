@@ -124,7 +124,7 @@ test('I-G9 a preconstructed image client still powers post-build generation', fu
     }
 });
 
-test('generate-images aligns source ratio and prompt composition with image_crop', function () {
+test('generate-images keeps the real cover wide when its scene context names a card', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('designDirection.json', ['image_crop' => 'portrait']);
     $specs = $project->readJson('images.json');
@@ -135,7 +135,7 @@ test('generate-images aligns source ratio and prompt composition with image_crop
 
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq('4:5', $images->calls[0]['opts']['aspect_ratio']);
+    assert_eq('16:9', $images->calls[0]['opts']['aspect_ratio']);
     assert_contains('Site-wide crop direction:', $images->calls[0]['prompt']);
     assert_contains('central portrait safe area', $images->calls[0]['prompt']);
 
@@ -1866,5 +1866,69 @@ test('generate-images retries a rotated screen or object and records the residua
         } finally {
             remove_tree($tmp);
         }
+    }
+});
+
+test('generate-images checks independent assets together and pools only their failed replacements', function () {
+    [$project, $tmp] = generate_fixture();
+    $first = $project->readJson('images.json')[0];
+    $specs = [$first];
+    foreach (['hero-other.jpg' => 'A park at dawn', 'hero-pass.jpg' => 'A lake at dawn'] as $filename => $subject) {
+        $specs[] = array_replace($first, ['filename' => $filename, 'src' => 'theme:./assets/' . $filename, 'subject' => $subject]);
+    }
+    $project->writeJson('images.json', $specs);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new class implements \Automattic\SiteBuild\VisionBatchLlm {
+        public array $imageCalls = [];
+        public function complete(string $prompt, array $opts = []): string { throw new RuntimeException('Unexpected request'); }
+        public function completeJson(string $prompt, array $opts = []): array { throw new RuntimeException('Unexpected request'); }
+        public function completeJsonBatch(array $requests): array { throw new RuntimeException('Unexpected request'); }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult { throw new RuntimeException('Unexpected request'); }
+        public function completeWithImage(string $prompt, string $imageBytes, string $mime, array $opts = []): string { throw new RuntimeException('Unexpected request'); }
+        public array $checks = [];
+        public function completeImageBatch(array $requests): array
+        {
+            $this->checks[] = $requests;
+            if (count($this->checks) === 1) {
+                return [0 => GI_QA_ROTATED, 1 => GI_QA_ROTATED, 2 => GI_QA_PASS];
+            }
+            return [0 => GI_QA_PASS, 1 => null];
+        }
+    };
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq([3, 2], array_map('count', $llm->checks));
+    assert_eq([3, 2], array_map('count', $images->batches));
+    assert_eq('image-qa-hero-other.jpg', $llm->checks[0][1]['log_label']);
+    assert_eq(0, count($llm->imageCalls));
+    assert_true(!$project->exists('warnings.json'));
+    $rows = $project->readJson('images.json');
+    assert_eq(true, $rows[0]['qa']['regenerated']);
+    assert_eq(true, $rows[1]['qa']['regenerated']);
+    assert_true(!isset($rows[2]['qa']));
+    $before = $project->readText('theme/assets/hero-pass.jpg');
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(2, count($images->batches));
+    assert_eq($before, $project->readText('theme/assets/hero-pass.jpg'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+
+test('generate-images keeps a square card at 1K without scene-based QA', function () {
+    [$project, $tmp] = generate_fixture();
+    try {
+        $markup = '<!-- wp:image {"className":"card-media"} --><figure class="card-media"><img src="theme:./assets/dish.jpg" alt="AI_IMAGE: Churchkhela | square dish card; background dissolving into darkness | photo | square"/></figure><!-- /wp:image -->';
+        $project->writeText('theme/parts/hero.html', $markup);
+        $project->writeText('theme/templates/page.html', $markup);
+        $project->writeJson('designDirection.json', ['image_crop' => 'square']);
+        (new CollectImagesStep())->run($project);
+        $images = new FakeImageClient();
+        $llm = new FakeLlm();
+        (new GenerateImagesStep($images, $llm))->run($project);
+        assert_eq('1:1', $images->calls[0]['opts']['aspect_ratio']);
+        assert_eq('1K', $images->calls[0]['opts']['sample_image_size']);
+        assert_eq(0, count($llm->imageCalls));
+        assert_eq('card', $project->readJson('images.json')[0]['image_slot']);
+    } finally {
+        remove_tree($tmp);
     }
 });

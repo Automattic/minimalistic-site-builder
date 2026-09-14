@@ -12,7 +12,7 @@ function section_unit_input(): array
     return [
         'site_spec'        => '{"name":"UNIT-SPEC-SENTINEL"}',
         'language'         => 'unit-language-sentinel',
-        'theme_json'       => '{"unit-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"unit-theme-sentinel":true}}}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
         'card_style'       => 'flush',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
@@ -47,6 +47,19 @@ function section_unit_request_text(array $request): string
 {
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
+
+test('SectionUnit gives supplied facts priority after the complete section brief', function () {
+    $request = (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strpos($request['prompt'], 'UNIT-NOTES-SENTINEL'));
+    assert_contains('Page purposes, section lists, and action instructions in SITE SPEC name topics; they do not supply facts.', $prompt);
+    assert_contains('use a truthful title and a shorter section about the supplied facts', $request['prompt']);
+    assert_contains('Preserve the assigned anchor, layout, image count, image subjects, and valid links.', $request['prompt']);
+    assert_true(!str_contains($prompt, 'a relative or qualitative phrase in your own words'));
+    assert_true(strpos($request['prompt'], 'FACT PRIORITY:') > strrpos($request['prompt'], 'UNIT-TITLE-SENTINEL'));
+    assert_true(str_ends_with($request['prompt'], 'Omit unsupported fields and empty placeholders from headings and copy.'));
+});
 
 test('section prompt keeps dash-free headings semantically lossless', function () {
     $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
@@ -186,7 +199,7 @@ test('SectionUnit request preparation does not call the LLM', function () {
     $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
     $input = section_unit_input();
     $input['site_spec'] = ['name' => 'DECODED-SPEC-SENTINEL'];
-    $input['theme_json'] = ['decoded-theme-sentinel' => true];
+    $input['theme_json'] = ['settings' => ['custom' => ['decoded-theme-sentinel' => true]]];
 
     $request = $unit->request($input);
 
@@ -337,7 +350,8 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
-            'theme_json'       => $input['theme_json'],
+            'action_capabilities' => \Automattic\SiteBuild\ActionCapabilities::prompt(json_decode($input['site_spec'], true)),
+            'theme_json' => \Automattic\SiteBuild\MarkupContext::theme(json_decode($input['theme_json'], true)),
             'design_direction' => $input['design_direction'],
         ]), "\r\n"),
         'language'          => $input['language'],
@@ -355,7 +369,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'composition'       => $composition,
         'item_pattern_assignment' => 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.',
         'header_contract'   => $input['header_contract'],
-        'image_instructions' => $renderer->render('image-generation.md', []),
+        'image_instructions' => rtrim($renderer->render('image-markup.md', [])),
         'form_instructions'  => $renderer->render('no-forms.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),
@@ -462,4 +476,19 @@ test('SectionUnit renders the pin directive for an asymmetric-split with an item
         !str_contains($quiet, '"className":"' . SectionComposition::PIN_CLASS . '"'),
         'the pin authoring instruction never leaks into a prompt that must not pin',
     );
+});
+
+test('section requests carry the image count and omit media rules at zero', function () {
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = section_unit_input();
+    $input['section']['layout_archetype'] = 'equal-card-grid';
+    $input['section']['image_count'] = 0;
+    $zero = section_unit_request_text($unit->request($input));
+    assert_contains('Image count: 0.', $zero);
+    assert_contains('This section permits no media.', $zero);
+    assert_true(!str_contains($zero, 'AI_IMAGE:'));
+    $input['section']['image_count'] = 6;
+    $six = section_unit_request_text($unit->request($input));
+    assert_contains('Image count: 6.', $six);
+    assert_contains('AI_IMAGE:', $six);
 });

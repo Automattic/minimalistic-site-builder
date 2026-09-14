@@ -113,6 +113,7 @@ final class SectionUnit extends AbstractPageSectionUnit
             ),
         ]);
 
+        $imageCount = isset($section['image_count']) ? max(0, min(12, (int) $section['image_count'])) : null;
         $rules = new SectionPromptRules($this->renderer);
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
             'card_instructions' => $rules->card($cardStyle),
@@ -126,7 +127,8 @@ final class SectionUnit extends AbstractPageSectionUnit
             'section_role'      => $role,
             'section_type'      => $this->sectionString($section, 'type', 'content'),
             'section_purpose'   => $this->sectionString($section, 'purpose'),
-            'content_notes'     => $this->sectionString($section, 'content_notes'),
+            'content_notes'     => $this->sectionString($section, 'content_notes')
+                . ($imageCount === null ? '' : "\n  Image count: {$imageCount}. This count includes all image and cover assets. Preserve the planned subjects."),
             'composition'       => $composition,
             'item_pattern_assignment' => $itemPattern === null
                 ? 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.'
@@ -139,7 +141,9 @@ final class SectionUnit extends AbstractPageSectionUnit
                     ),
                 ]),
             'header_contract'   => $this->inputString($input, 'header_contract'),
-            'image_instructions' => $this->renderer->render('image-generation.md', []),
+            'image_instructions' => SectionComposition::metadata($archetype)['max_images'] > 0 && $imageCount !== 0
+                ? rtrim($this->renderer->render('image-markup.md', []))
+                : 'This section permits no media. Emit no image placeholders.',
             'form_instructions'  => $this->renderer->render(
                 ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
                 [],
@@ -192,6 +196,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         }
         $markup = GeneratedMarkup::stripStepPlatePaint($markup, $this->key($input), $repairs);
         $markup = GeneratedMarkup::demotePricelessFigure($markup, $this->key($input), $repairs, $warnings);
+        $markup = SectionImageContract::enforce($markup, $this->key($input), $input['section']['image_count'] ?? null, $repairs, $warnings);
         $markup = GeneratedMarkup::stripMediaOffNoImageArchetype($markup, $this->key($input), $archetype, $repairs, $warnings);
         $markup = GeneratedMarkup::stripMediaOverBudget($markup, $this->key($input), $archetype, $repairs, $warnings);
         $markup = GeneratedMarkup::ownLedgerFigureScale($markup, $this->key($input), $archetype, $repairs);
@@ -230,6 +235,8 @@ final class SectionUnit extends AbstractPageSectionUnit
                     . '"; delivered=unchanged; disposition=the span holds a second title, not the quieter clause of one sentence; the copy is left as authored';
             }
         }
+        $markup = SectionReadabilityContract::enforce($markup, $input, $this->key($input), $repairs, $warnings);
+        $markup = CardPreparation::enforce($markup, $cardStyle, $this->key($input), $repairs, $warnings, $input['theme_json'] ?? null);
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,

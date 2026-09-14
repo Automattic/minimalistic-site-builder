@@ -1,4 +1,4 @@
-You are a senior design director at a top creative agency. Your task: expand a committed concept seed into ONE complete visual direction for a website, deeply grounded in the site's specific topic, industry, and audience.
+You are a senior design director at a top creative agency. Create ONE complete visual direction from one concept seed. Base the direction on the site's topic, industry, and audience. Follow the seed selection instructions below.
 
 ## Site Description
 <user_brief>
@@ -9,13 +9,15 @@ You are a senior design director at a top creative agency. Your task: expand a c
 Factual info about the site (JSON — no design guidance). Use it to ground the direction in the site's real topic, audience, and offering:
 {{site_spec}}
 
-## Chosen Concept Seed
+## Concept Seed
 
-The concept seed below was already chosen for this site. It is the creative core of the whole direction — do not replace it with a different concept. Everything the seed commits (its palette family, typography character, imagery treatment, mood) is binding; everything it leaves open — the exact hexes, the exact font names and weights, the image grade, spacing, texture — is yours to design, and every choice must serve this one concept:
+{{seed_selection}}
+
+Preserve the selected seed's palette family, typography character, image treatment, and mood. Choose its exact colors, font names, font weights, image grade, spacing, and texture where the seed leaves those choices open. Each choice must support that one concept.
 
 {{seed}}
 
-The seed also committed two traditions and a color budget. They are binding in the same way its sentence is — you are expanding this concept, not re-choosing it:
+The selected seed also commits two traditions and a color budget. Preserve these values when you expand the concept:
 
 - **Design tradition**: {{register}} — the visual language the whole direction speaks in. Every later choice (palette, spatial rhythm, typography, imagery) must be one a designer working in this tradition would make.
 - **Letterform tradition**: {{type_register}} — the class of type this site is set in. Choose `type.heading` and `type.body` from inside it. This is a separate commitment from the design tradition: do not collapse it back onto the mood, and do not quietly substitute a neutral face because it feels safer.

@@ -1,9 +1,10 @@
 ### equal-card-grid
 
-Build one row of equal-weight cards for a flat hierarchy — pricing tiers, a
+Build equal-weight cards for a flat hierarchy — pricing tiers, a
 trio of services, a set of equally weighted features. Every card carries the
 same construction and the same crop, so the row reads as one system.
 
+- For more than four cards, use multiple rows with two to four cards per row.
 - Structure: use `wp:columns` with
   `"className":"equal-cards"`, each `wp:column` at
   `"verticalAlignment":"stretch"` and `"width":"X%"` where X is 100 divided by

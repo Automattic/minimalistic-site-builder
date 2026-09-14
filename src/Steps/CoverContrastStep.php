@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\CtaStyleMarkup;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Step;
@@ -46,6 +47,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 final class CoverContrastStep implements Step
 {
     private const REPORT_FILE = 'cover-contrast-report.txt';
+    private bool $unboxedButtons = false;
 
     /** Above this the image is more curtain than picture. */
     public const MAX_DIM = 80;
@@ -62,7 +64,7 @@ final class CoverContrastStep implements Step
     /** Minimum effective overlay opacity (stop alpha × dim) behind text on a busy region. */
     public const BUSY_MIN_ALPHA = 0.35;
 
-    public function __construct(private BlockFixer $fixer) {}
+    public function __construct(private BlockFixer $fixer, private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -108,6 +110,17 @@ final class CoverContrastStep implements Step
             return;
         }
         $themeJson = $project->readJson('theme/theme.json');
+        $buttonStyle = $themeJson['styles']['elements']['button'] ?? [];
+        $buttonColor = $buttonStyle['color'] ?? [];
+        $this->unboxedButtons = !$this->htmlFirst
+            && ($buttonColor['background'] ?? null) === 'transparent'
+            && ($buttonColor['text'] ?? null) === 'inherit';
+        // Outline buttons own a filled surface on interaction. Keep that separate contract.
+        foreach ([':hover', ':focus', ':active'] as $state) {
+            $this->unboxedButtons = $this->unboxedButtons
+                && ($buttonStyle[$state]['color']['background'] ?? null) === 'transparent'
+                && ($buttonStyle[$state]['color']['text'] ?? null) === 'inherit';
+        }
         $palette = ContrastFixStep::paletteMap($themeJson);
         $gradients = ContrastFixStep::gradientMap($themeJson);
         $globalLink = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
@@ -389,6 +402,12 @@ final class CoverContrastStep implements Step
                     continue;
                 }
                 $textAttrs['textColor'] = $slug;
+                if ($doc->name($textIndex) === 'button') {
+                    // The mobile panel owns this button's ink when the copy leaves the photograph.
+                    $classes = preg_split('/\s+/', trim((string) ($textAttrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $classes[] = CtaStyleMarkup::COVER_CONTRAST_CLASS;
+                    $textAttrs['className'] = implode(' ', array_unique($classes));
+                }
                 unset($textAttrs['style']['color']['text']);
                 ContrastFix::pruneEmpty($textAttrs);
                 $doc->setAttrs($textIndex, $textAttrs);
@@ -607,7 +626,8 @@ final class CoverContrastStep implements Step
                 continue;
             }
             $name = $doc->name($child);
-            if (in_array($name, ['paragraph', 'heading', 'list', 'quote', 'pullquote', 'verse', 'site-title'], true)
+            if ((in_array($name, ['paragraph', 'heading', 'list', 'quote', 'pullquote', 'verse', 'site-title'], true)
+                    || ($this->unboxedButtons && $name === 'button'))
                 && ContrastFix::visibleText($doc->innerHtml($child)) !== '') {
                 $ownSlug = is_string($childAttrs['textColor'] ?? null)
                     && $helper->rgbFor($childAttrs['textColor']) !== null
@@ -617,7 +637,8 @@ final class CoverContrastStep implements Step
                     'rgb'       => $this->coverTextColor($doc, $child, $helper, $inherited),
                     'ownSlug'   => $ownSlug,
                     'threshold' => $helper->textThreshold($name, $childAttrs),
-                    'hasAnchor' => stripos($doc->innerHtml($child), '<a ') !== false,
+                    // Button ink follows its construction, not the global link color.
+                    'hasAnchor' => $name !== 'button' && stripos($doc->innerHtml($child), '<a ') !== false,
                 ];
             }
             $rows = array_merge($rows, $this->coverTexts($doc, $child, $helper, $inherited));

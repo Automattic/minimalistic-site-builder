@@ -1130,9 +1130,13 @@ final class ThemeValidator
             }
         }
         $sizeBySlug = [];
+        $authoredSizes = [];
         foreach ($theme['settings']['typography']['fontSizes'] ?? [] as $entry) {
             if (isset($entry['slug'], $entry['size'])) {
                 $sizeBySlug[$entry['slug']] = self::sizeToPx((string) $entry['size']);
+                if (is_string($entry['size'])) {
+                    $authoredSizes[$entry['size']] = true;
+                }
             }
         }
 
@@ -1146,7 +1150,15 @@ final class ThemeValidator
             // var:preset reference is fine; "1.25rem" / "clamp(...)" is not).
             // Inline font-size styles mirror this attribute, so counting the
             // attribute counts each hardcoded size once.
-            $count = preg_match_all('/"fontSize"\s*:\s*"(?:clamp\(|[0-9.]+(?:r?em|px|vw|vh|%))/', $markup);
+            preg_match_all('/"fontSize"\s*:\s*("(?:[^"\\\\]|\\\\.)*")/', $markup, $sizes);
+            $count = 0;
+            foreach ($sizes[1] as $encoded) {
+                $size = json_decode($encoded, true);
+                if (is_string($size) && !isset($authoredSizes[$size])
+                    && preg_match('/^(?:clamp\(|[0-9.]+(?:r?em|px|vw|vh|%))/', $size)) {
+                    $count++;
+                }
+            }
             if ($count > 0) {
                 $hardcoded[] = basename($file) . " ({$count})";
             }
@@ -1282,7 +1294,10 @@ final class ThemeValidator
         $count = 0;
         foreach ($matches as $m) {
             $attrs = json_decode($m[1], true);
-            $px = $sizeBySlug[$attrs['fontSize'] ?? ''] ?? null;
+            $slug = $attrs['fontSize'] ?? '';
+            $rawSize = $attrs['style']['typography']['fontSize'] ?? null;
+            $px = is_string($rawSize) ? self::sizeToPx($rawSize)
+                : (is_string($slug) ? ($sizeBySlug[$slug] ?? null) : null);
             $text = trim(strip_tags($m[2]));
             if ($px === null || mb_strlen($text) <= 120) {
                 continue;

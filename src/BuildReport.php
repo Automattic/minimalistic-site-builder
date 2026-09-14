@@ -45,6 +45,11 @@ final class BuildReport
     private int $imagesTotal = 0;
     private int $imagePlaceholders = 0;
 
+    private ?array $imageRequests = null;
+    private int $preparedImageReuse = 0;
+    private int $localImages = 0;
+    private int $imagesReused = 0;
+
     private bool $hasPatterns = false;
     private int $sectionPatternsWritten = 0;
     private int $componentPatternsWritten = 0;
@@ -116,6 +121,22 @@ final class BuildReport
         $this->imagesFailed = $failed;
         $this->imagesTotal = $total;
         $this->imagePlaceholders = $placeholders;
+    }
+
+    /** Record actual provider attempts separately from local assets. */
+    public function setImageRequests(?array $requests, int $localImages = 0): void
+    {
+        $this->imageRequests = $requests;
+        $this->localImages = $localImages;
+    }
+
+    /** Record raw results consumed without a new provider request. */
+    public function setPreparedImageReuse(int $count): void { $this->preparedImageReuse = $count; }
+
+    /** Record separate assets that share an equivalent provider request. */
+    public function setImageReuse(int $reused): void
+    {
+        $this->imagesReused = $reused;
     }
 
     /** Record the reusable-pattern tally (only when patterns.json exists). */
@@ -306,7 +327,11 @@ final class BuildReport
             $this->imagesGenerated,
             $this->imagesFailed,
             $this->imagesTotal
-        ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '');
+        ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '')
+            . ($this->localImages > 0 ? sprintf(', %d local renders', $this->localImages) : '')
+            . ($this->imageRequests !== null ? sprintf(', %d provider attempts', $this->imageRequests['attempts']) : '')
+
+            . ($this->imagesReused > 0 ? sprintf(', %d reused assets', $this->imagesReused) : '');
     }
 
     /** The patterns summary line, or null when no pattern manifest exists. Pure. */
@@ -391,6 +416,16 @@ final class BuildReport
             'model'         => $defaultModel,
             'step_models'   => $stepModels,
             'built_at'      => $this->builtAt,
+            'images' => $this->hasImages ? [
+                'delivered_assets' => $this->imagesGenerated,
+                'failed_assets' => $this->imagesFailed,
+                'total_assets' => $this->imagesTotal,
+                'placeholders' => $this->imagePlaceholders,
+                'local_renders' => $this->localImages,
+                'provider_requests' => $this->imageRequests,
+                'prepared_results_consumed' => $this->preparedImageReuse,
+            ] : null,
+            'images_reused' => $this->imagesReused,
             'steps'         => array_map(
                 static fn (array $r): array => [
                     'id'            => $r['id'],

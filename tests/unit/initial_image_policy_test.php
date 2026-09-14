@@ -89,8 +89,17 @@ test('initial generation delivers homepage and interior heroes, local placeholde
                 'page-contact--map' => 'map.png',
                 'footer' => 'footer.jpg',
             ];
+            $subjects = [
+                'front.jpg' => 'A quiet landscape beside a lake',
+                'shared.jpg' => 'A quiet landscape beside an orchard',
+                'about.jpg' => 'A quiet landscape in a valley',
+                'team.jpg' => 'A quiet landscape near a mountain',
+                'map.png' => 'A quiet landscape on an island',
+                'footer.jpg' => 'A quiet landscape beside a beach',
+            ];
             foreach ($slots as $part => $filename) {
-                $alt = $htmlFirst ? 'A quiet landscape' : 'AI_IMAGE: A quiet landscape | card | photo | portrait';
+                $subject = $subjects[$filename];
+                $alt = $htmlFirst ? $subject : 'AI_IMAGE: ' . $subject . ' | card | photo | portrait';
                 $project->writeText('theme/parts/' . $part . '.html', '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/' . $filename . '" alt="' . $alt . '"/></figure><!-- /wp:image -->');
             }
             $project->writeText('theme/parts/page-contact--opening.html', '<!-- wp:heading --><h2>Contact us</h2><!-- /wp:heading -->');
@@ -105,7 +114,7 @@ test('initial generation delivers homepage and interior heroes, local placeholde
             $step = new GenerateImagesStep($client, $llm);
             $step->run($project);
             assert_eq(4, count($client->calls), 'homepage images, about hero, and shared footer only');
-            assert_eq(0, count($llm->imageCalls), 'deferred images never spend a vision call');
+            assert_eq(2, count($llm->imageCalls), 'only the planned heroes receive QA');
             $specs = array_column($project->readJson('images.json'), null, 'filename');
             foreach (['front.jpg', 'shared.jpg', 'about.jpg', 'footer.jpg'] as $filename) {
                 assert_eq('completed', $specs[$filename]['status'], $filename);

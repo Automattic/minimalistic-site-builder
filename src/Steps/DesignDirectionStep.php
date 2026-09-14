@@ -55,24 +55,13 @@ use Automattic\SiteBuild\Warnings;
  *         repeated-item idiom, and a separately consumed structured front-page
  *         hero blueprint).
  *
- * Three calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * THREE concept seeds — each an object: an evocative title plus one vivid
- * sentence committing the seed's visual world (palette family, typography
- * character, imagery treatment, mood), plus ground/register/accent
- * coordinates — with divergence across the set enforced in the prompt and
- * checked after. Second, a judge call (large model, cold) reads the brief,
- * the spec, and the distinct round, and picks the seed that honors what the
- * brief fixed, belongs to this subject, and is not the category's reflex
- * (prompts/design-seed-judge.md). Then the main call expands ONLY that seed
- * into the full direction. The divergent seed spread is still the pipeline's
- * variety injection; the judge is the taste that used to be a uniform random
- * pick — the audited failure was a brief asking for "not boring" and the coin
- * landing on the cool-grey corporate report. A judge that fails or answers
- * off the ballot degrades to that random pick with a durable warning, so
- * taste never costs a build. The DESIGN_DIRECTION_CHOICE env var forces seed
- * N (1-based) for reproducible evals and bypasses the judge, and a failed seed
- * call degrades to a built-in "invent one bold concept" seed instead of
- * aborting the build.
+ * The small model proposes three concept seeds. The design model selects one
+ * seed and expands it in one request. Code prepares each candidate's recipe,
+ * media axes, and font shortlist before that request.
+ * A failed or invalid selection permits a random choice and one separate
+ * expansion. The warning records that loss. DESIGN_DIRECTION_CHOICE forces
+ * a seed index and bypasses selection. A failed seed request uses a fixed
+ * fallback seed unless the caller requires a specific index.
  *
  * The expansion also commits two prose facts the bounded fields cannot carry:
  * `subject_anchor`, which palette roles are taken literally from the subject's
@@ -180,8 +169,6 @@ final class DesignDirectionStep implements Step
         private ?string $model = null,
         private ?float $temperature = null,
         private ?string $seedModel = null,
-        private ?string $judgeModel = null,
-        private float $judgeTemperature = 0.0,
     ) {}
 
     public function id(): string
@@ -232,6 +219,7 @@ final class DesignDirectionStep implements Step
         $fontCatalog = FontCatalog::load();
 
         $warnings = [];
+        $chosen = $this->chooseSeed($prompt, $spec, $warnings, $meta, (string) ($specData['slug'] ?? $project->slug()), $fontCatalog);
         [
             'text'          => $seed,
             'ground'        => $seedGround,
@@ -240,73 +228,12 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister,
             'color_economy' => $seedColorEconomy,
             'choice'        => $seedChoice,
-        ] = $this->chooseSeed($prompt, $spec, $warnings);
-        $recipe = self::selectHeroRecipe(
-            $meta,
-            (string) ($specData['slug'] ?? $project->slug()),
-            $seed,
-            $warnings,
-        );
-        // The recipe is code-owned and seeded, and so are its media axes
-        // (BIGR-912). The prompt below tells the model to preserve the defaults
-        // it is handed, so handing every site the same aspect and weight would
-        // make the merged contained-split recipe draw one composition forever.
-        $blueprintDefaults = array_merge(
-            HeroBlueprint::defaultFor($recipe, $constraints),
-            HeroComposition::selectMediaAxes(
-                (string) ($specData['slug'] ?? $project->slug()),
-                $seed,
-                $recipe,
-            ),
-        );
-        $heroComposition = $this->renderer->render('hero-composition.md', [
-            'recipe' => $recipe,
-            'blueprint_defaults' => json_encode(
-                $blueprintDefaults,
-                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
-            ),
-            'composition_recipe' => $this->renderer->render(
-                HeroComposition::recipeTemplate($recipe),
-                [],
-            ),
-        ]);
-
-        $rendered = $this->renderer->render('design-direction.md', [
-            'user_prompt' => $prompt,
-            'site_spec'   => $spec,
-            'seed'        => $seed,
-            // Empty when a degraded seed committed no light/dark coordinate.
-            'ground_key'  => $seedGround === ''
-                ? 'not committed by the seed — choose one and say which'
-                : $seedGround,
-            // Empty when the seed round degraded and committed no ground; the
-            // prompt then asks for the field without naming a family, and
-            // normalize() enforces the direction's own answer instead.
-            'ground_tint' => $seedTint === '' ? 'not committed by the seed — choose one and say which' : $seedTint,
-            // Same degradation as the ground: a seed that named no tradition
-            // asks the expansion to pick one rather than pretending it did.
-            'register' => $seedRegister === ''
-                ? 'not committed by the seed — read the tradition off the seed sentence'
-                : $seedRegister,
-            'type_register' => $seedTypeRegister === ''
-                ? 'not committed by the seed — read the letterform tradition off the seed sentence'
-                : $seedTypeRegister,
-            'color_economy' => $seedColorEconomy === ''
-                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
-                : $seedColorEconomy,
-            // A rotating per-site shortlist of real families in the committed
-            // tradition. Naming the tradition alone lands every build on its
-            // one famous face (BIGR-920); empty for a degraded seed.
-            'type_candidates' => FontShortlist::promptParagraph(
-                $seedTypeRegister,
-                (string) ($specData['slug'] ?? $project->slug()),
-                $fontCatalog,
-                $seedRegister,
-            ),
-            'hero_composition' => $heroComposition,
-        ]);
+        ] = $chosen;
+        $prepared = $this->prepareExpansion($meta, $spec, (string) ($specData['slug'] ?? $project->slug()), $fontCatalog, $chosen, $warnings);
+        $recipe = $prepared['recipe'];
+        $rendered = $this->renderer->render('design-direction.md', $prepared['vars']);
         try {
-            $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+            $payload = $chosen['payload'] ?? $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
         } catch (GeneratedJsonException $e) {
             // A syntactically unusable generated direction is content drift,
             // not an operational failure. Plain RuntimeExceptions still
@@ -480,33 +407,87 @@ final class DesignDirectionStep implements Step
         ];
     }
 
-    /**
-     * Brainstorm three concept titles on the cheap model and pick ONE, rendered
-     * as the text block the expansion prompt consumes.
-     *
-     * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
-     * out of range — including a failed seed call — fails loud, because a
-     * forced eval must not silently drift, so it indexes the round as the
-     * model wrote it, and it bypasses the judge); otherwise the judge picks
-     * over the DISTINCT seeds (see judgeSeed), and only when the judge fails
-     * or answers off the ballot does the pick fall to uniform random — over
-     * the distinct seeds, since a world the model described twice would
-     * otherwise be twice as likely to win (see ConceptSeeds). A round with one
-     * distinct seed has nothing to judge and spends no call on it.
-     * Without a forced choice, any seed failure (transport error, no usable
-     * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
-     * The step's hot temperature is applied to the seed call: the seed spread
-     * is the pipeline's variety source, and the small models still support
-     * sampling. The judge runs cold.
-     *
-     * The returned `choice` is the report's account of the pick: how it was
-     * made and, for a judged pick, the judge's one-line reason, so a cohort
-     * audit can read which worlds lost and why without replaying the build.
-     *
-     * @param list<string> $warnings
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string,choice:list<string>}
-     */
-    private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
+    /** Prepare one candidate without a model request. */
+    private function prepareExpansion(array $meta, string $spec, string $slug, FontCatalog $fontCatalog, array $chosen, array &$warnings): array
+    {
+        $prompt = (string) $meta['prompt'];
+        $constraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        $seed = $chosen['text'];
+        $seedGround = $chosen['ground'];
+        $seedTint = $chosen['tint'];
+        $seedRegister = $chosen['register'];
+        $seedTypeRegister = $chosen['type_register'];
+        $seedColorEconomy = $chosen['color_economy'];
+        $recipe = self::selectHeroRecipe(
+            $meta,
+            $slug,
+            $seed,
+            $warnings,
+        );
+        // The recipe is code-owned and seeded, and so are its media axes
+        // (BIGR-912). The prompt below tells the model to preserve the defaults
+        // it is handed, so handing every site the same aspect and weight would
+        // make the merged contained-split recipe draw one composition forever.
+        $blueprintDefaults = array_merge(
+            HeroBlueprint::defaultFor($recipe, $constraints),
+            HeroComposition::selectMediaAxes(
+                $slug,
+                $seed,
+                $recipe,
+            ),
+        );
+        $heroComposition = $this->renderer->render('hero-composition.md', [
+            'recipe' => $recipe,
+            'blueprint_defaults' => json_encode(
+                $blueprintDefaults,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
+            'composition_recipe' => $this->renderer->render(
+                HeroComposition::recipeTemplate($recipe),
+                [],
+            ),
+        ]);
+
+        $vars = [
+            'user_prompt' => $prompt,
+            'site_spec'   => $spec,
+            'seed'        => $seed,
+            'seed_selection' => 'The concept seed below is already selected for this site. Expand it without a new selection.',
+            // Empty when a degraded seed committed no light/dark coordinate.
+            'ground_key'  => $seedGround === ''
+                ? 'not committed by the seed — choose one and say which'
+                : $seedGround,
+            // Empty when the seed round degraded and committed no ground; the
+            // prompt then asks for the field without naming a family, and
+            // normalize() enforces the direction's own answer instead.
+            'ground_tint' => $seedTint === '' ? 'not committed by the seed — choose one and say which' : $seedTint,
+            // Same degradation as the ground: a seed that named no tradition
+            // asks the expansion to pick one rather than pretending it did.
+            'register' => $seedRegister === ''
+                ? 'not committed by the seed — read the tradition off the seed sentence'
+                : $seedRegister,
+            'type_register' => $seedTypeRegister === ''
+                ? 'not committed by the seed — read the letterform tradition off the seed sentence'
+                : $seedTypeRegister,
+            'color_economy' => $seedColorEconomy === ''
+                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
+                : $seedColorEconomy,
+            // A rotating per-site shortlist of real families in the committed
+            // tradition. Naming the tradition alone lands every build on its
+            // one famous face (BIGR-920); empty for a degraded seed.
+            'type_candidates' => FontShortlist::promptParagraph(
+                $seedTypeRegister,
+                $slug,
+                $fontCatalog,
+                $seedRegister,
+            ),
+            'hero_composition' => $heroComposition,
+        ];
+        return ['recipe' => $recipe, 'vars' => $vars, 'blueprint' => $blueprintDefaults];
+    }
+
+    /** Keep forced choices and seed fallbacks; otherwise select and expand together. */
+    private function chooseSeed(string $brief, string $spec, array &$warnings, array $meta, string $slug, FontCatalog $fontCatalog): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
@@ -593,12 +574,12 @@ final class DesignDirectionStep implements Step
             }
         }
 
-        $verdict = $this->judgeSeed($brief, $spec, $pool, $warnings);
+        $verdict = $this->judgeSeed($brief, $spec, $pool, $warnings, $meta, $slug, $fontCatalog);
         if ($verdict['index'] !== null) {
             $index = $verdict['index'];
             $choice[] = 'Seed choice: judge picked [' . $index . '] ' . $pool[$index]['text']
                 . ($verdict['why'] === '' ? '' : ' — ' . $verdict['why']);
-            return self::chosen($pool[$index], $choice);
+            return self::chosen($pool[$index], $choice) + ['payload' => $verdict['payload']];
         }
         $index = random_int(0, count($pool) - 1);
         $choice[] = 'Seed choice: random pick [' . $index . '] ' . $pool[$index]['text']
@@ -625,37 +606,44 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * Ask the judge which distinct seed becomes the site. Returns the ballot
-     * index and the judge's one-line reason, or a null index when no usable
-     * verdict came back — a transport failure, unusable JSON, or an answer
-     * naming no printed candidate. Each of those is recorded as a durable
-     * warning (rung 4: the pick then falls to uniform random, so the build
-     * loses taste, not the site) and never aborts the build.
+     * Select a candidate and expand it in one request.
+     * An invalid selection permits one separate expansion after a random choice.
      *
-     * The judge runs cold: it sends temperature 0 (overridable only via
-     * LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE) and never inherits the step's
-     * hot sampling temperature or the seed model. Its own model comes from
-     * the design-direction-judge tier.
-     *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
      * @param list<string> $warnings
-     * @return array{index:?int,why:string}
+     * @return array{index:?int,why:string,payload?:array}
      */
-    private function judgeSeed(string $brief, string $spec, array $pool, array &$warnings): array
+    private function judgeSeed(string $brief, string $spec, array $pool, array &$warnings, array $meta, string $slug, FontCatalog $fontCatalog): array
     {
         try {
-            $rendered = $this->renderer->render(
-                'design-seed-judge.md',
-                ConceptSeeds::judgePromptVars($brief, $spec, $pool),
-            );
-            $opts = [
-                'log_label'   => 'design-direction-judge',
-                'temperature' => $this->judgeTemperature,
-            ];
-            if ($this->judgeModel !== null) {
-                $opts['model'] = $this->judgeModel;
+            $candidates = [];
+            $recipes = [];
+            foreach ($pool as $index => $candidate) {
+                $candidateWarnings = [];
+                $prepared = $this->prepareExpansion($meta, $spec, $slug, $fontCatalog, self::chosen($candidate, []), $candidateWarnings);
+                $vars = $prepared['vars'];
+                $recipe = $prepared['recipe'];
+                // The first paragraph describes the composition. Later paragraphs teach markup.
+                $fragment = $this->renderer->render(HeroComposition::recipeTemplate($recipe), []);
+                $paragraphs = preg_split('/\R\s*\R/', trim($fragment), 3);
+                $recipes[$recipe] = $paragraphs[1] ?? $fragment;
+                $candidates[] = '[' . $index . '] ' . $candidate['text'] . "\n"
+                    . json_encode(array_intersect_key($vars, array_flip(['ground_key', 'ground_tint', 'register', 'type_register', 'color_economy'])), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+                    . "\n" . $vars['type_candidates'] . "\nBlueprint: "
+                    . json_encode($prepared['blueprint'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             }
-            $payload = $this->llm->completeJson($rendered, $opts);
+            $vars['seed'] = implode("\n\n", $candidates);
+            $vars['seed_selection'] = 'Select one candidate below with the criteria above. Expand only that candidate. No candidate is selected yet.';
+            foreach (['ground_key', 'ground_tint', 'register', 'type_register', 'color_economy'] as $field) {
+                $vars[$field] = 'the selected candidate value for ' . $field;
+            }
+            $vars['type_candidates'] = 'Use only the selected candidate font shortlist above.';
+            $vars['hero_composition'] = "Preserve every selected blueprint value above. Its composition summary appears below.\n\n";
+            foreach ($recipes as $recipe => $instructions) {
+                $vars['hero_composition'] .= "## Recipe: {$recipe}\n{$instructions}\n";
+            }
+            $rendered = $this->renderer->render('design-direction-selection.md', []) . "\n\n"
+                . $this->renderer->render('design-direction.md', $vars);
+            $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
         } catch (\Throwable $e) {
             $warnings[] = 'design-direction: seed judge failed (' . $e->getMessage() . '); picked uniformly at random from the '
                 . count($pool) . ' distinct seeds; disposition fallback';
@@ -669,7 +657,7 @@ final class DesignDirectionStep implements Step
                 . '); picked uniformly at random from the distinct seeds; disposition fallback';
             return ['index' => null, 'why' => ''];
         }
-        return ['index' => $index, 'why' => ConceptSeeds::judgedWhy($payload)];
+        return ['index' => $index, 'why' => ConceptSeeds::judgedWhy($payload), 'payload' => $payload];
     }
 
     /**

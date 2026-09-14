@@ -4,8 +4,11 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CooperativeTransport;
+use Automattic\SiteBuild\ImageTransportScheduler;
 use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\UiMockupImage;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\ImagePlaceholder;
@@ -13,6 +16,7 @@ use Automattic\SiteBuild\InitialImagePolicy;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
+use Automattic\SiteBuild\ImageRequestReuse;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
@@ -25,6 +29,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
 use Automattic\SiteBuild\VisionLlm;
+use Automattic\SiteBuild\VisionBatchLlm;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -68,6 +73,9 @@ final class GenerateImagesStep implements Step
 
     /** The opaque square derived from the keyed mark, for `site_icon` only. */
     public const SITE_ICON_FILE = 'site-icon.png';
+
+    public const MAX_QA_IMAGES = 10;
+    public const MAX_QA_BYTES = 16 * 1024 * 1024;
 
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
@@ -217,7 +225,7 @@ final class GenerateImagesStep implements Step
             return; // collect-images never ran or wrote nothing
         }
 
-        $specs = $project->readJson('images.json');
+        $specs = \Automattic\SiteBuild\ImageSlot::annotate($project, $project->readJson('images.json'));
         // Keep the image kind on each row for generation, repair, and request logs.
         $imageKind = DesignDirectionStep::imageKindFor($project);
         // A ui-mockup interface follows the page ground and accent.
@@ -264,14 +272,58 @@ final class GenerateImagesStep implements Step
             $project->exists('pages.json') ? $project->readJson('pages.json') : null,
             $this->generateAllImages,
         );
+        $markup = $project->exists('plugin/pages.json')
+            ? \Automattic\SiteBuild\PreparedImageBatch::finalMarkup($project) : null;
+        $requestKeys = [];
+        $available = [];
+        $sourceScores = [];
+        foreach ($specs as $i => $spec) {
+            if ($markup !== null && !\Automattic\SiteBuild\PreparedImageBatch::referenced($spec, $markup)) {
+                $specs[$i]['status'] = 'unreferenced';
+                continue;
+            }
+            if (($spec['status'] ?? '') === 'unreferenced') {
+                $specs[$i]['status'] = 'pending';
+            }
+            $key = ImageRequestReuse::key($spec, self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop));
+            $requestKeys[$i] = $key;
+            $eligibleSource = false;
+            if (($spec['status'] ?? '') === 'completed') {
+                $file = 'theme/assets/' . $spec['filename'];
+                if (($spec['request_fingerprint'] ?? '') === $key && $project->exists($file)
+                    && GeminiImage::mimeFromBytes($project->readText($file)) === GeminiImage::mimeForFilename($spec['filename'])) {
+                    $eligibleSource = true;
+                }
+            } elseif ($policy->shouldGenerate($spec)) {
+                $eligibleSource = true;
+            }
+            $completed = ($spec['status'] ?? '') === 'completed';
+            $score = (ImageQa::applies($spec) && (!$completed || !empty($spec['qa_checked'])) ? 2 : 0) + ($completed ? 1 : 0);
+            if ($eligibleSource && (!isset($available[$key]) || $score > $sourceScores[$key])) {
+                $available[$key] = $i;
+                $sourceScores[$key] = $score;
+            }
+        }
+        $freeAliases = [];
         $placeholderWarnings = [];
         $unplanned = [];
 
         // Already-completed images need no work — just record them for the rewrite.
         $pending = [];
         foreach ($specs as $i => $spec) {
+            if (($spec['status'] ?? '') === 'unreferenced') {
+                continue;
+            }
             if (($spec['status'] ?? 'pending') === 'completed') {
                 $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
+                continue;
+            }
+            $source = $available[$requestKeys[$i]] ?? null;
+            if ($source !== null && $source !== $i
+                && (($specs[$source]['status'] ?? '') === 'completed' || !$policy->shouldGenerate($spec))
+                && (!ImageQa::applies($spec) || !empty($specs[$source]['qa_checked'])
+                    || (($specs[$source]['status'] ?? '') !== 'completed' && ImageQa::applies($specs[$source])))) {
+                $freeAliases[$i] = $source;
                 continue;
             }
             if (!$policy->shouldGenerate($spec)) {
@@ -294,7 +346,8 @@ final class GenerateImagesStep implements Step
             if ($policy->unplaced($spec)) {
                 $unplanned[] = 'theme/assets/' . $spec['filename'];
             }
-            $pending[$i] = $spec; // preserve the original images.json index
+            $specs[$i]['request_fingerprint'] = $requestKeys[$i];
+            $pending[$i] = $specs[$i]; // preserve the original images.json index
         }
         if ($placeholderWarnings !== []) {
             $project->addWarnings($this->id(), $placeholderWarnings);
@@ -305,6 +358,37 @@ final class GenerateImagesStep implements Step
             $project->addWarnings($this->id(), ['file=' . Warnings::value(implode(', ', $unplanned))
                 . '; delivered=generated; disposition=' . count($unplanned) . ' image(s) whose source parts'
                 . ' pages.json does not name, generated rather than deferred by a policy that cannot place them']);
+        }
+
+        // Draw supported interface illustrations before the network batch.
+        $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
+        foreach ($pending as $i => $spec) {
+            if (UiMockupImage::layout($spec) === null
+                || GeminiImage::mimeForFilename((string) $spec['filename']) !== 'image/jpeg'
+            ) {
+                continue;
+            }
+            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
+            $bytes = UiMockupImage::render($spec, $genSpec['aspect_ratio'], $theme);
+            if ($bytes === null) {
+                continue;
+            }
+            $this->finish($project, $specs, $i, $genSpec,
+                ['ok' => true, 'bytes' => $bytes, 'renderer' => 'native-ui', 'model' => 'native-ui'],
+                $resolved, $imageGrade, $imageCrop);
+            if (($specs[$i]['status'] ?? '') !== 'completed') {
+                continue;
+            }
+            $specs[$i]['renderer'] = 'native-ui';
+            $project->addWarnings($this->id(), [
+                'file=' . Warnings::value('theme/assets/' . $spec['filename'])
+                . '; block=' . Warnings::value(implode(', ', (array) ($spec['sources'] ?? [])))
+                . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                . '; delivered=' . Warnings::value(UiMockupImage::layout($spec) . ' interface illustration')
+                . '; disposition=local layout uses placeholder bars and geometric tiles; exact screen details and photos are omitted',
+            ]);
+            unset($pending[$i]);
+            $project->writeJsonAtomic('images.json', $specs);
         }
 
         // Generate every pending image through ONE pooled batch: concurrency
@@ -325,12 +409,17 @@ final class GenerateImagesStep implements Step
                 $project->addWarnings($this->id(), $gradeNotes);
             }
 
-            // Map original images.json indices to generation specs (order kept).
-            $indices = array_keys($pending);
-            $batchSpecs = array_map(
-                fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop),
-                array_values($pending)
-            );
+            $requests = [];
+            foreach ($pending as $i => $spec) {
+                $requests[$i] = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop);
+            }
+            $aliases = ImageRequestReuse::aliases($pending, $requests);
+            $representatives = array_diff_key($pending, $aliases);
+            $indices = array_keys($representatives);
+            foreach ($indices as $i) {
+                unset($specs[$i]['reused_from']);
+            }
+            $batchSpecs = array_values(array_intersect_key($requests, $representatives));
 
             $repairs = []; // original index => the filtered failure's error
 
@@ -340,61 +429,119 @@ final class GenerateImagesStep implements Step
             // pass below instead of marking it failed outright. Everything
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
-            $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs
-            ): void {
-                $i = $indices[$pos];
-                $filename = (string) $specs[$i]['filename'];
+            $overlap = $this->inspectImages && $this->llm instanceof VisionBatchLlm
+                && $this->llm instanceof CooperativeTransport
+                && $this->images instanceof CooperativeTransport
+                && $this->images->supportsCooperativeRequests()
+                && $this->llm->supportsCooperativeRequests($this->repairModel === null ? [] : ['model' => $this->repairModel]);
+            $ready = [];
+            $queued = [];
+            $done = false;
+            $enqueue = function (int $i) use ($overlap, &$ready, &$queued, &$specs): void {
+                if ($overlap && !isset($queued[$i]) && ($specs[$i]['status'] ?? '') === 'completed' && ImageQa::applies($specs[$i])) {
+                    $ready[] = $i;
+                    $queued[$i] = true;
+                }
+            };
+            $produce = function () use ($project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop,
+                &$resolved, &$repairs, $siteContext, $enqueue, &$done): void {
+                $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
+                    $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs, $enqueue
+                ): void {
+                    $i = $indices[$pos];
+                    $filename = (string) $specs[$i]['filename'];
 
-                if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
-                    $error = (string) ($result['error'] ?? 'safety-filtered');
-                    Narrator::write("    FILTERED {$filename}: {$error}\n");
-                    ImageLogger::log($filename, $this->requestLog(
-                        $specs[$i],
+                    if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
+                        $error = (string) ($result['error'] ?? 'safety-filtered');
+                        Narrator::write("    FILTERED {$filename}: {$error}\n");
+                        ImageLogger::log($filename, $this->requestLog(
+                            $specs[$i],
+                            $batchSpecs[$pos],
+                            $imageGrade,
+                            $imageCrop,
+                        ), [], $error);
+                        $repairs[$i] = $error;
+                        return;
+                    }
+
+                    $this->finish(
+                        $project,
+                        $specs,
+                        $i,
                         $batchSpecs[$pos],
+                        $result,
+                        $resolved,
                         $imageGrade,
                         $imageCrop,
-                    ), [], $error);
-                    $repairs[$i] = $error;
-                    return;
+                    );
+                    $project->writeJsonAtomic('images.json', $specs);
+                    $enqueue($i);
+                });
+
+                if ($repairs !== []) {
+                    $this->repairFiltered(
+                        $project,
+                        $specs,
+                        $repairs,
+                        $siteContext,
+                        $imageGrade,
+                        $imageCrop,
+                        $resolved,
+                    );
                 }
 
-                $this->finish(
-                    $project,
-                    $specs,
-                    $i,
-                    $batchSpecs[$pos],
-                    $result,
-                    $resolved,
-                    $imageGrade,
-                    $imageCrop,
-                );
-                $project->writeJsonAtomic('images.json', $specs);
-            });
-
-            if ($repairs !== []) {
-                $this->repairFiltered(
-                    $project,
-                    $specs,
-                    $repairs,
-                    $siteContext,
-                    $imageGrade,
-                    $imageCrop,
-                    $resolved,
-                );
+                foreach ($indices as $i) {
+                    $enqueue($i);
+                }
+                $done = true;
+            };
+            if ($overlap) {
+                $scheduler = ImageTransportScheduler::current() ?? new ImageTransportScheduler();
+                $scheduler->run(function () use ($scheduler, $produce, &$ready, &$done, $project, &$specs,
+                    $siteContext, $imageGrade, $imageCrop): void {
+                    $scheduler->spawn($produce);
+                    for ($worker = 0; $worker < self::MAX_QA_IMAGES; $worker++) {
+                        $scheduler->spawn(function () use (&$ready, &$done, $project, &$specs, $siteContext, $imageGrade, $imageCrop): void {
+                            while (!$done || $ready !== []) {
+                                if ($ready === []) {
+                                    ImageTransportScheduler::pause();
+                                    continue;
+                                }
+                                $i = array_shift($ready);
+                                $this->inspectDelivered($project, $specs, [$i], $siteContext, $imageGrade, $imageCrop);
+                                $project->writeJsonAtomic('images.json', $specs);
+                            }
+                        });
+                    }
+                });
+            } else {
+                $produce();
+                if ($this->inspectImages && $this->llm instanceof VisionLlm) {
+                    $this->inspectDelivered($project, $specs, $indices, $siteContext, $imageGrade, $imageCrop);
+                    $project->writeJsonAtomic('images.json', $specs);
+                }
             }
+            $this->deliverReused($project, $specs, $aliases, $resolved);
+        }
 
-            if ($this->inspectImages && $this->llm instanceof VisionLlm) {
-                $this->inspectDelivered(
-                    $project,
-                    $specs,
-                    array_keys($pending),
-                    $siteContext,
-                    $imageGrade,
-                    $imageCrop,
-                );
-                $project->writeJsonAtomic('images.json', $specs);
+        // A deferred image keeps its local fallback if the shared provider request fails.
+        foreach ($freeAliases as $i => $source) {
+            while (isset($aliases[$source])) {
+                $source = $aliases[$source];
             }
+            if (($specs[$source]['status'] ?? '') === 'completed') {
+                $this->deliverReused($project, $specs, [$i => $source], $resolved);
+                continue;
+            }
+            $spec = $specs[$i];
+            $project->writeText('theme/assets/' . $spec['filename'], ImagePlaceholder::bytes($spec));
+            $specs[$i]['status'] = 'placeholder';
+            $specs[$i]['url'] = $this->servedUrl($project, $spec['filename']);
+            $resolved[$spec['src']] = $specs[$i]['url'];
+            $project->addWarnings($this->id(), ['file=' . Warnings::value('theme/assets/' . $spec['filename'])
+                . '; block=' . Warnings::value(implode(', ', $spec['sources'] ?? []))
+                . '; authored subject=' . Warnings::value($spec['subject'] ?? '')
+                . '; delivered=neutral local placeholder; disposition=equivalent image request failed']);
         }
 
         // A failed asset reference is dead UI. Remove only the safe media block
@@ -412,6 +559,49 @@ final class GenerateImagesStep implements Step
         $this->markComplete($project);
     }
 
+    /** Copy final representative bytes after its repair and QA steps finish. */
+    private function deliverReused(Project $project, array &$specs, array $aliases, array &$resolved): void
+    {
+        $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json') : [];
+        foreach ($aliases as $i => $representative) {
+            $source = $specs[$representative];
+            $filename = (string) $specs[$i]['filename'];
+            $sourceFilename = (string) $source['filename'];
+            if (($source['status'] ?? '') !== 'completed') {
+                $error = (string) ($source['error'] ?? 'equivalent image request failed');
+                $specs[$i]['status'] = 'failed';
+                $specs[$i]['error'] = $error;
+                unset($specs[$i]['reused_from']);
+                $this->warnFailure($project, $specs[$i], $i, GeminiImage::mimeForFilename($filename), $error);
+                continue;
+            }
+            $project->writeText('theme/assets/' . $filename, $project->readText('theme/assets/' . $sourceFilename));
+            $specs[$i]['status'] = 'completed';
+            $specs[$i]['url'] = $this->servedUrl($project, $filename);
+            $specs[$i]['reused_from'] = $sourceFilename;
+            foreach (['request_fingerprint', 'qa_checked'] as $field) {
+                if (isset($source[$field])) {
+                    $specs[$i][$field] = $source[$field];
+                }
+            }
+            unset($specs[$i]['error'], $specs[$i]['qa']);
+            if (isset($source['qa'])) {
+                $specs[$i]['qa'] = $source['qa'];
+            }
+            if (isset($specs[$i]['role']) && !isset($source['role'])) {
+                unset($specs[$i]['role']);
+            }
+            $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+            foreach ($warnings[$this->id()] ?? [] as $warning) {
+                if (str_contains($warning, $sourceFilename)) {
+                    $project->addWarnings($this->id(), [str_replace($sourceFilename, $filename, $warning)]);
+                }
+            }
+            Narrator::write("    reused {$sourceFilename} as {$filename}\n");
+            $project->writeJsonAtomic('images.json', $specs);
+        }
+    }
+
     /**
      * Copy every generated asset the content plugin's manifest lists into
      * plugin/images/, so the seeder can import them into the media library at
@@ -425,9 +615,13 @@ final class GenerateImagesStep implements Step
             return; // theme-only composition, or assemble-pages never ran
         }
         $roles = [];
+        $unreferenced = [];
         if ($project->exists('images.json')) {
             foreach ((array) $project->readJson('images.json') as $spec) {
                 if (is_array($spec) && isset($spec['filename'])) {
+                    if (($spec['status'] ?? '') === 'unreferenced') {
+                        $unreferenced[(string) $spec['filename']] = true;
+                    }
                     $roles[(string) $spec['filename']] = (string) ($spec['role'] ?? '');
                 }
             }
@@ -440,7 +634,7 @@ final class GenerateImagesStep implements Step
                 continue;
             }
             $filename = (string) ($image['filename'] ?? '');
-            if ($filename === '') {
+            if ($filename === '' || isset($unreferenced[$filename])) {
                 continue;
             }
             if (($image['role'] ?? '') === 'site-logo' && ($roles[$filename] ?? '') !== 'site-logo') {
@@ -477,7 +671,7 @@ final class GenerateImagesStep implements Step
             $addedIcon = true;
         }
 
-        if ($droppedLogo || $addedIcon) {
+        if ($droppedLogo || $addedIcon || $unreferenced !== []) {
             $project->writeJson('plugin/images.json', ['images' => $kept]);
         }
     }
@@ -590,17 +784,19 @@ final class GenerateImagesStep implements Step
      * @param array<string,mixed> $spec one images.json row
      * @return array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}
      */
-    private static function generationSpec(
+    public static function generationSpec(
         array $spec,
         string $siteContext,
         string $imageGrade,
         string $imageCrop = '',
         ?string $subject = null,
     ): array {
-        $ratio = ImageCrop::generationRatio(
+        $isSiteLogo = ($spec['role'] ?? '') === 'site-logo';
+        $ratio = $isSiteLogo ? '1:1' : ImageCrop::generationRatio(
             $imageCrop,
             (string) ($spec['aspectRatio'] ?? 'landscape'),
             (string) ($spec['pageContext'] ?? ''),
+            $spec['image_slot'] ?? null,
         );
         // A .png placeholder is a transparent-background asset: request PNG
         // bytes, prompt for a flat white background (the image model cannot render
@@ -614,16 +810,14 @@ final class GenerateImagesStep implements Step
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
-                imageCrop: $imageCrop,
+                imageCrop: $isSiteLogo ? '' : $imageCrop,
                 imageKind: ($spec['role'] ?? '') === 'site-logo' ? 'photo' : (string) ($spec['image_kind'] ?? ''),
                 screenTheme: (string) ($spec['screen_theme'] ?? ''),
             ),
             'aspect_ratio'      => $ratio,
-            // Wide images are the full-bleed ones (heroes, banners) — render
-            // those at 2K so they stay sharp past ~1366px. Transparent
-            // decoratives render small on the page and stay at 1K whatever
-            // their ratio.
-            'sample_image_size' => GeminiImage::sampleImageSize($ratio, $mime === 'image/png'),
+            // Small slots stay at 1K when the crop system selects a wide ratio.
+            'sample_image_size' => GeminiImage::sampleImageSizeForSlot($spec, $ratio, $mime === 'image/png'),
+            'asset' => (string) ($spec['filename'] ?? ''),
             'mime'              => $mime,
         ];
     }
@@ -770,6 +964,10 @@ final class GenerateImagesStep implements Step
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
+        if (isset($result['renderer'])) {
+            $logRequest['renderer'] = $result['renderer'];
+            $logRequest['model'] = $result['model'] ?? $result['renderer'];
+        }
         $iconBytes = null;
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
@@ -877,17 +1075,7 @@ final class GenerateImagesStep implements Step
         return ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed];
     }
 
-    /**
-     * Look at every hero / full-frame image this run delivered (BIGR-979).
-     * The ladder per image: a failing verdict earns one regeneration with a
-     * corrected subject and a second look; an image that still fails, or
-     * whose regeneration failed, is kept and recorded in warnings.json. No
-     * verdict (transport error, unreadable answer) delivers the image as is
-     * with a narration line only: nothing about the delivered output changed.
-     *
-     * @param array<int,array<string,mixed>> $specs   images.json rows, mutated in place
-     * @param list<int>                      $indices rows this run generated
-     */
+    /** Check independent assets together. Preserve each asset's retry order. */
     private function inspectDelivered(
         Project $project,
         array &$specs,
@@ -896,166 +1084,184 @@ final class GenerateImagesStep implements Step
         string $imageGrade,
         string $imageCrop,
     ): void {
+        $active = [];
         foreach ($indices as $i) {
             $spec = $specs[$i];
-            if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec)) {
-                continue;
+            if (($spec['status'] ?? '') === 'completed' && ImageQa::applies($spec)
+                && $project->exists('theme/assets/' . $spec['filename'])) {
+                $active[$i] = ['attempts' => 0, 'budget' => null, 'finding' => ''];
             }
-            $filename = (string) $spec['filename'];
-            $rel = 'theme/assets/' . $filename;
-            if (!$project->exists($rel)) {
-                continue;
-            }
-
-            $verdict = $this->inspect($project, $spec, $rel);
-            if ($verdict === null || $verdict['ok']) {
-                if ($verdict !== null) {
-                    Narrator::write("    QA {$filename}: upright, no text, on subject\n");
+        }
+        while ($active !== []) {
+            $verdicts = $this->inspectBatch($project, array_intersect_key($specs, $active));
+            $regenerations = [];
+            $subjects = [];
+            foreach ($active as $i => &$state) {
+                $spec = $specs[$i];
+                $filename = (string) $spec['filename'];
+                $verdict = $verdicts[$i] ?? null;
+                $specs[$i]['qa_checked'] = $verdict !== null;
+                if ($state['attempts'] > 0) {
+                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $state['finding']];
                 }
+                if ($verdict === null || $verdict['ok']) {
+                    Narrator::write("    QA {$filename}: " . ($verdict === null ? 'unverified' : 'passes') . "\n");
+                    unset($active[$i]);
+                    continue;
+                }
+                $state['finding'] = implode('; ', $verdict['findings']);
+                $state['budget'] ??= ImageKind::regenerationBudget(ImageKind::effectiveKind($spec), $verdict['findings']);
+                if ($state['attempts'] >= $state['budget']) {
+                    $specs[$i]['qa']['finding'] = $state['finding'];
+                    $plural = $state['budget'] === 1 ? 'one regeneration' : "{$state['budget']} regenerations";
+                    $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                        (string) ($spec['subject'] ?? ''), $verdict['findings'], "still failing after {$plural}")]);
+                    unset($active[$i]);
+                    continue;
+                }
+                $state['attempts']++;
+                $subjects[$i] = ImageQa::correctedSubject((string) ($spec['subject'] ?? ''), $verdict, ImageKind::effectiveKind($spec));
+                $regenerations[$i] = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subjects[$i]);
+                Narrator::write("    QA {$filename}: {$state['finding']}; regenerate {$state['attempts']} of {$state['budget']}\n");
+            }
+            unset($state);
+            if ($regenerations === []) {
                 continue;
             }
-            $kind = ImageKind::effectiveKind($spec);
-            $authored = (string) ($spec['subject'] ?? '');
-            // A product screen earns more than one retry. A reworded prompt
-            // does not move a painted-pixel defect (BIGR-956 measured the same
-            // thing on painted photo borders): an A/B over nine screens left
-            // the first-pass leak rate flat at 6 of 9 clean under both the old
-            // and the reworded clause. Each sample is an independent draw, so
-            // the lever that does move the delivered rate is the number of
-            // draws, and ImageQa reads every one of them.
-            $budget = ImageKind::regenerationBudget($kind, $verdict['findings']);
-            $finding = implode('; ', $verdict['findings']);
-            $attempts = 0;
-
-            while ($attempts < $budget) {
-                $attempts++;
-                $left = $budget - $attempts;
-                Narrator::write("    QA {$filename}: {$finding}; regenerating (attempt {$attempts} of {$budget})\n");
-
-                $subject = ImageQa::correctedSubject($authored, $verdict, $kind);
-                $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
-                $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
+            $this->drainBatch($regenerations, function (int $i, array $result) use (
+                $project, &$specs, &$active, $regenerations, $subjects, $imageGrade, $imageCrop, $verdicts
+            ): void {
+                $spec = $specs[$i];
+                $filename = (string) $spec['filename'];
+                $error = $this->deliverRegeneration($project, $spec, $regenerations[$i], $result,
+                    $imageGrade, $imageCrop, $subjects[$i], $active[$i]['finding']);
                 if ($error !== null) {
-                    Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the last image\n");
-                    $specs[$i]['qa'] = ['regenerated' => $attempts > 1, 'finding' => $finding];
-                    $project->addWarnings($this->id(), [ImageQa::warningRow(
-                        $filename,
-                        $authored,
-                        $verdict['findings'],
-                        "regeneration failed: {$error}",
-                    )]);
-                    continue 2;
+                    $specs[$i]['qa'] = ['regenerated' => $active[$i]['attempts'] > 1, 'finding' => $active[$i]['finding']];
+                    $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                        (string) ($spec['subject'] ?? ''), $verdicts[$i]['findings'], "regeneration failed: {$error}")]);
+                    unset($active[$i]);
                 }
+                $project->writeJsonAtomic('images.json', $specs);
+            });
+        }
+    }
 
-                $next = $this->inspect($project, $spec, $rel);
-                if ($next === null || $next['ok']) {
-                    Narrator::write("    QA {$filename}: regenerated image " . ($next === null ? 'unverified' : 'passes') . "\n");
-                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                    continue 2;
+    /** Limit image payload memory and preserve successful checks after a sibling fails. */
+    private function inspectBatch(Project $project, array $specs): array
+    {
+        $verdicts = [];
+        $chunks = [];
+        $chunk = [];
+        $bytes = 0;
+        foreach ($specs as $i => $spec) {
+            $filename = (string) $spec['filename'];
+            clearstatcache(true, $project->path('theme/assets/' . $filename));
+            $size = filesize($project->path('theme/assets/' . $filename));
+            if ($size === false) {
+                throw new \RuntimeException('Could not read the image size: ' . $filename);
+            }
+            if ($size > self::MAX_QA_BYTES) {
+                $project->addWarnings($this->id(), [ImageQa::warningRow($filename,
+                    (string) ($spec['subject'] ?? ''), ['QA payload exceeds the byte limit'], 'QA skipped; original image retained')]);
+                continue;
+            }
+            if ($chunk !== [] && (count($chunk) >= self::MAX_QA_IMAGES || $bytes + $size > self::MAX_QA_BYTES)) {
+                $chunks[] = $chunk;
+                $chunk = [];
+                $bytes = 0;
+            }
+            $chunk[$i] = $spec;
+            $bytes += $size;
+        }
+        if ($chunk !== []) {
+            $chunks[] = $chunk;
+        }
+        foreach ($chunks as $chunk) {
+            $scheduler = ImageTransportScheduler::current();
+            $reserved = 0;
+            foreach ($chunk as $spec) {
+                $reserved += (int) filesize($project->path('theme/assets/' . $spec['filename']));
+            }
+            $scheduler?->reserveImageBytes($reserved);
+            try {
+                $requests = [];
+                foreach ($chunk as $i => $spec) {
+                    $filename = (string) $spec['filename'];
+                    try {
+                        $prompt = $this->renderer->render('image-qa.md', [
+                            'subject' => (string) ($spec['subject'] ?? ''),
+                            'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
+                            'text_rule' => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
+                        ]);
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image check {$filename} unavailable: {$e->getMessage()}\n");
+                        continue;
+                    }
+                    $requests[$i] = [
+                        'prompt' => $prompt,
+                        'image_bytes' => $project->readText('theme/assets/' . $filename),
+                        'mime' => GeminiImage::mimeForFilename($filename),
+                        'max_tokens' => 300,
+                        'log_label' => 'image-qa-' . $filename,
+                    ] + ($this->repairModel !== null ? ['model' => $this->repairModel] : []);
                 }
-                $verdict = $next;
-                $finding = implode('; ', $next['findings']);
-                if ($left === 0) {
-                    $plural = $budget === 1 ? 'one regeneration' : "{$budget} regenerations";
-                    Narrator::write("    QA {$filename}: still failing ({$finding}); delivered with a warning\n");
-                    $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
-                    $project->addWarnings($this->id(), [ImageQa::warningRow(
-                        $filename,
-                        $authored,
-                        $next['findings'],
-                        "still failing after {$plural}",
-                    )]);
+                $answers = [];
+                if ($this->llm instanceof VisionBatchLlm) {
+                    try {
+                        $answers = $this->llm->completeImageBatch($requests);
+                    } catch (\Throwable $e) {
+                        Narrator::write("    Image checks unavailable: {$e->getMessage()}\n");
+                    }
+                } elseif ($this->llm instanceof VisionLlm) {
+                    foreach ($requests as $i => $req) {
+                        try {
+                            $answers[$i] = $this->llm->completeWithImage($req['prompt'], $req['image_bytes'], $req['mime'],
+                                array_diff_key($req, array_flip(['prompt', 'image_bytes', 'mime'])));
+                        } catch (\Throwable $e) {
+                            Narrator::write("    Image check {$req['log_label']} unavailable: {$e->getMessage()}\n");
+                        }
+                    }
                 }
+                foreach ($requests as $i => $_) {
+                    $verdicts[$i] = isset($answers[$i]) ? ImageQa::verdict($answers[$i]) : null;
+                }
+            } finally {
+                unset($requests);
+                $scheduler?->releaseImageBytes($reserved);
             }
         }
+        return $verdicts;
     }
 
-    /**
-     * One vision call over the delivered file. Null when there is no usable
-     * verdict; that is never treated as a defect.
-     *
-     * @param array<string,mixed> $spec
-     * @return array{ok:bool,findings:list<string>,note:string}|null
-     */
-    private function inspect(Project $project, array $spec, string $rel): ?array
-    {
-        if (!$this->llm instanceof VisionLlm) {
-            return null;
-        }
-        $filename = (string) ($spec['filename'] ?? '');
-        try {
-            $prompt = $this->renderer->render('image-qa.md', [
-                'subject'      => (string) ($spec['subject'] ?? ''),
-                'upright_rule' => ImageKind::qaUprightRule(ImageKind::effectiveKind($spec)),
-                'text_rule'    => ImageKind::qaTextRule(ImageKind::effectiveKind($spec)),
-            ]);
-            $answer = $this->llm->completeWithImage(
-                $prompt,
-                $project->readText($rel),
-                GeminiImage::mimeForFilename($filename),
-                ['max_tokens' => 300, 'log_label' => 'image-qa']
-                    + ($this->repairModel !== null ? ['model' => $this->repairModel] : []),
-            );
-        } catch (\Throwable $e) {
-            Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
-            return null;
-        }
-        $verdict = ImageQa::verdict($answer);
-        if ($verdict === null) {
-            Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
-        }
-        return $verdict;
-    }
-
-    /**
-     * Regenerate one image in place. On success the asset file is replaced
-     * and null is returned; on any failure the first image stays on disk and
-     * the error is returned. images.json is not touched here: the row is
-     * already completed, and a failed regeneration must not turn a delivered
-     * image into a removed one.
-     *
-     * @param array<string,mixed> $spec
-     * @param array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string} $genSpec
-     */
-    private function regenerate(
+    /** Keep the last usable bytes when a regeneration fails. */
+    private function deliverRegeneration(
         Project $project,
         array $spec,
-        string $rel,
         array $genSpec,
+        array $result,
         string $imageGrade,
         string $imageCrop,
         string $subject,
         string $finding,
     ): ?string {
-        $filename = (string) ($spec['filename'] ?? '');
-        $logRequest = $this->requestLog($spec, $genSpec, $imageGrade, $imageCrop, $subject)
-            + ['image_qa' => $finding];
-        $error = null;
-        $this->drainBatch([$genSpec], function (int $pos, array $result) use (
-            $project, $rel, $filename, $genSpec, $logRequest, $spec, &$error
-        ): void {
-            try {
-                if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
-                    throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
-                }
-                ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
-                    (string) $result['bytes'],
-                    $genSpec['mime'],
-                    ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
-                );
-            } catch (\Throwable $e) {
-                $error = $e->getMessage();
-                ImageLogger::log($filename, $logRequest, [], $error);
-                return;
+        $filename = (string) $spec['filename'];
+        $rel = 'theme/assets/' . $filename;
+        $logRequest = $this->requestLog($spec, $genSpec, $imageGrade, $imageCrop, $subject) + ['image_qa' => $finding];
+        try {
+            if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
+                throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
             }
-            $project->writeText($rel, $bytes);
-            ImageLogger::log($filename, $logRequest, [
-                'path'  => $rel,
-                'bytes' => strlen($bytes),
-                'border_trimmed' => $borderTrimmed,
-            ]);
-        });
-        return $error;
+            ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
+                (string) $result['bytes'], $genSpec['mime'],
+                ImageKind::keepsSolidCutout((string) ($spec['image_kind'] ?? '')) && ($spec['role'] ?? '') !== 'site-logo',
+            );
+        } catch (\Throwable $e) {
+            ImageLogger::log($filename, $logRequest, [], $e->getMessage());
+            return $e->getMessage();
+        }
+        $project->writeText($rel, $bytes);
+        ImageLogger::log($filename, $logRequest, ['path' => $rel, 'bytes' => strlen($bytes), 'border_trimmed' => $borderTrimmed]);
+        return null;
     }
 
     /**

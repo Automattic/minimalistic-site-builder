@@ -37,7 +37,7 @@ final class HeroUnit extends AbstractPageSectionUnit
         $blueprint = $context['blueprint'];
         $mobileTransformation = $context['mobile_transformation'];
         $imageInstructions = HeroComposition::usesGeneratedImages($blueprint)
-            ? $this->renderer->render('image-generation.md', [])
+            ? $this->renderer->render('image-markup.md', [])
             : '';
 
         return $this->siteLayeredRequest('hero.md', $this->commonVars($input) + [
@@ -142,6 +142,7 @@ final class HeroUnit extends AbstractPageSectionUnit
             $warnings,
             ...HeroComposition::markupWarnings($markup, $context['recipe'], $key, $context['blueprint']),
         );
+        $markup = SectionReadabilityContract::enforce($markup, $input, $key, $repairs, $warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 

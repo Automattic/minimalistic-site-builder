@@ -149,9 +149,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source includes the BIGR-1001 section budget before materialization',
         );
         assert_eq(
-            '7dba6aee066690a529ce8c866eeb0e55e0bb820d05011de54414ad25a529d420',
+            '1b2c96a9b24234953fca8680c1dacb81614206539c4a68738e21740d8ba4e75a',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
-            'assemble-pages source includes the reviewed transient overlay shells',
+            'assemble-pages source includes the reviewed overlay shells and image alt cleanup',
         );
         $llm = new FakeLlm();
         $llm->queueText(dp3_integration_preview());
@@ -164,8 +164,7 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
 
         $llm->queueJson(dp3_integration_site_spec());
         $llm->queueJson(['seeds' => ['Measured Folio', 'Studio Ledger', 'Northstar Index', 'Working Proof']]);
-        $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
-        $llm->queueJson(dp3_integration_direction());
+        $llm->queueJson(['winner' => 0, 'why' => 'The concept fits the subject.'] + dp3_integration_direction());
         $llm->queueJson(dp3_integration_theme());
         $llm->queueJson(['sections' => [
             dp3_integration_section('about-intro', 'About intro', 'bento-grid'),

@@ -216,9 +216,6 @@ final class StepDefaults
         return [
             'site-spec'                => self::temperature('SITE_SPEC', null),
             'design-direction'         => self::temperature('DESIGN_DIRECTION', 1.0),
-            // Cold on purpose: a global LLM_TEMPERATURE must not heat the
-            // judge. Only LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE overrides.
-            'design-direction-judge'   => self::temperature('DESIGN_DIRECTION_JUDGE', 0.0, inheritGlobal: false),
             'theme-json'               => self::temperature('THEME_JSON', null),
             'page-plan'                => self::temperature('PAGE_PLAN', null),
             'sections'                 => self::temperature('SECTIONS', 0.9),

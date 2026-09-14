@@ -32,6 +32,23 @@ final class LlmLogger
     /** Slug used when a label reduces to nothing. */
     private const SLUG_FALLBACK = 'request';
 
+    /** Append an event without a prompt, response, image, or credential. */
+    public static function eventIn(?string $directory, array $record): void
+    {
+        if (self::$disabled || $directory === null) {
+            return;
+        }
+        try {
+            if (!is_dir($directory) && !@mkdir($directory, 0777, true) && !is_dir($directory)) {
+                return;
+            }
+            @file_put_contents($directory . '/events.jsonl',
+                json_encode($record, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n", FILE_APPEND | LOCK_EX);
+        } catch (\Throwable) {
+            // An event log failure must not abort a request.
+        }
+    }
+
     /**
      * Write one request/response transcript. Never throws.
      *

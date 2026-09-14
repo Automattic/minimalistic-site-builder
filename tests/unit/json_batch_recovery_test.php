@@ -49,6 +49,23 @@ test('JsonBatchRecovery keeps safely repaired quotes out of the model retry path
     ], $out['page']);
 });
 
+test('JsonBatchRecovery repairs literal newlines without a second request', function () {
+    $calls = 0;
+    $requests = ['design' => ['prompt' => 'Select a design'], 'sibling' => ['prompt' => 'Keep this value']];
+    $out = JsonBatchRecovery::run($requests, function (array $subset) use (&$calls, $requests): array {
+        $calls++;
+        assert_eq($requests, $subset);
+        return [
+            'design' => ['text' => "{\"winner\":1,\"why\":\"First reason.\nSecond reason.\nThird reason.\",\"direction\":{\"title\":\"Stone\"}}"],
+            'sibling' => ['text' => '{"value":"Keep every byte."}'],
+        ];
+    });
+    assert_eq(1, $calls);
+    assert_eq("First reason.\nSecond reason.\nThird reason.", $out['design']['why']);
+    assert_eq(['title' => 'Stone'], $out['design']['direction']);
+    assert_eq(['value' => 'Keep every byte.'], $out['sibling']);
+});
+
 test('JsonBatchRecovery retries only one malformed sibling', function () {
     $requests = [
         'theme' => ['prompt' => 'Generate the theme'],

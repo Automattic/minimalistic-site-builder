@@ -85,3 +85,12 @@ test('ImageCrop names the viewport-spanning slots it and ImageQa agree on', func
     assert_eq('16:9', ImageCrop::generationRatio('landscape', 'ultrawide', 'full-bleed hero'));
     assert_eq('3:2', ImageCrop::generationRatio('landscape', 'landscape', 'menu item card'));
 });
+
+
+test('ImageCrop ignores a scene background and obeys an explicit image slot', function () {
+    $context = 'square dish card; background dissolving into darkness';
+    assert_eq(false, ImageCrop::fullFrameSlot('1:1', $context));
+    assert_eq('1:1', ImageCrop::generationRatio('square', 'square', $context));
+    assert_eq('1:1', ImageCrop::generationRatio('square', 'square', 'hero background', 'card'));
+    assert_eq('16:9', ImageCrop::generationRatio('square', 'square', $context, 'cover'));
+});

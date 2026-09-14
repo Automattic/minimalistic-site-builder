@@ -1,0 +1,53 @@
+{
+  "sections": [
+    {
+      "slug": "hero",
+      "title": "Reach Tbilisi Tavern",
+      "type": "hero",
+      "purpose": "Open the contact page with a warm, direct greeting that establishes the tavern's presence in Tbilisi Old Town and invites the visitor to get in touch.",
+      "content_notes": "A single full-bleed candle-lit hero image of the tavern's interior—stone walls, warm candlelight, copper serving vessels—with an overlaid heading and one line of supporting text. The heading reads 'Reach Tbilisi Tavern' in sentence case. The supporting line is a single sentence inviting contact for reservations, enquiries, or feedback. No action on the hero itself; content_notes section below carries the next step.",
+      "image_count": 1,
+      "layout_archetype": "full-bleed-cover",
+      "background": "image",
+      "vertical_density": "standard",
+      "item_pattern": null,
+      "text_placement": "asymmetric-thirds",
+      "handoff": "Hero sits above the contact-details section, which uses an equal-card-grid on a base background to hold the tavern's practical facts: the visual transition from full-bleed candlelit image to gridded information is deliberate, dropping from atmospheric to factual.",
+      "primary_action": null
+    },
+    {
+      "slug": "contact-details",
+      "title": "Visit & Contact",
+      "type": "contact",
+      "purpose": "Provide the visitor with the tavern's address, hours, phone number, and email in a scannable, immediate format so they can reach out or plan a visit.",
+      "content_notes": "An equal-card-grid holding three to four practical cards: location and address in Tbilisi Old Town, hours of operation, phone number, and email address. Each card is borderless with the label in Marcellus (the stone-inscription face) and the detail in Castoro body weight. Use rule-row item_pattern to separate each fact with a thin hairline. Omit any contact detail not present in the SITE SPEC. Text placement is left-column within each card. Include a single sentence above the grid inviting the visitor to call or email for reservations.",
+      "image_count": 0,
+      "layout_archetype": "equal-card-grid",
+      "background": "base",
+      "vertical_density": "compact",
+      "item_pattern": "rule-row",
+      "text_placement": "left-column",
+      "handoff": "Equal-card-grid sits on base ground above the closing CTA panel. The practical, information-dense cards give way to a single invitation—a tonal shift from facts to action, with the cta-panel's contained presence marking the page's conclusion.",
+      "primary_action": null
+    },
+    {
+      "slug": "closing-cta",
+      "title": "Make a Reservation",
+      "type": "cta",
+      "purpose": "Close the contact page with a single, clear invitation to reach out or visit, anchoring the visitor's next step.",
+      "content_notes": "A contained cta-panel on base or tinted background with a single heading ('Make a Reservation' or 'Visit Us'), one supporting line of copy (e.g. 'Join us for an evening in our Tbilisi Old Town tavern'), and one primary action linking to a contact method or reservation enquiry. The panel is borderless, unboxed, with an underlined flame-colored action. Keep copy brief—no more than two lines total. Do not repeat contact details already in the grid above.",
+      "image_count": 0,
+      "layout_archetype": "cta-panel",
+      "background": "tinted",
+      "vertical_density": "standard",
+      "item_pattern": null,
+      "text_placement": "centered",
+      "handoff": "CTA panel closes the contact page on a tinted surface, creating a distinct closing beat separate from the footer (which carries the site's contrast background). The narrowed panel and warm tint lift the final call to action so it reads as intentional, not lost in the page ground.",
+      "primary_action": {
+        "label": "Send an Enquiry",
+        "intent": "Direct the visitor to a contact form or email address to submit reservations or general enquiries",
+        "destination": "#contact-details"
+      }
+    }
+  ]
+}
