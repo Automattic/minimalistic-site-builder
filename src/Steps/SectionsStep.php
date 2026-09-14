@@ -13,6 +13,7 @@ use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\PrefixPrimingLlm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PageOpeningFallback;
 use Automattic\SiteBuild\PlaygroundArtifact;
@@ -200,7 +201,9 @@ final class SectionsStep implements Step
         array_push($warnings, ...$this->warmMarkupCache($requests));
         $batchFailure = null;
         try {
-            $batch = $this->llm->completeBatch($requests);
+            $batch = $this->llm instanceof PrefixPrimingLlm && $this->llm->canPrimeBatch($requests)
+                ? $this->llm->completePrimedBatch($requests)
+                : $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
             // The raw-text transport is all-or-nothing, but every member has
             // a reviewed unit fallback below. Treat a permanent batch failure
@@ -415,7 +418,9 @@ final class SectionsStep implements Step
         $requests = self::requestsFor($jobs);
         array_push($warnings, ...$this->warmMarkupCache($requests));
         try {
-            $batch = $this->llm->completeBatch($requests);
+            $batch = $this->llm instanceof PrefixPrimingLlm && $this->llm->canPrimeBatch($requests)
+                ? $this->llm->completePrimedBatch($requests)
+                : $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
             $reason = str_replace(["\r", "\n"], ' ', $error->getMessage());
             foreach ($pages as $page) {
@@ -775,6 +780,10 @@ final class SectionsStep implements Step
         }
 
         $diverged = self::requestsOutsideSharedLayer($requests, $request['cached_prefixes'][0] ?? '');
+
+        if ($this->llm instanceof PrefixPrimingLlm && $this->llm->canPrimeBatch($requests)) {
+            return $diverged;
+        }
 
         $opts = $request;
         unset($opts['prompt']);

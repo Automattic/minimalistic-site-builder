@@ -40,10 +40,12 @@ class CurlMultiPool
      *        status the pool already read for its 429 hold (the one reader of
      *        that status); called while the handle is still open, before the
      *        pool detaches it and releases its reference
+     * @param null|callable(string|int,mixed):bool $canStart permits a queued request to start
+     * @param null|callable(string|int):void $onComplete receives each completed key, including held requests
      * @return array<array-key,array<string,mixed>> outcomes keyed and ordered
      *         as $items
      */
-    public function run(array $items, callable $buildHandle, callable $classify, int $cap): array
+    public function run(array $items, callable $buildHandle, callable $classify, int $cap, ?callable $canStart = null, ?callable $onComplete = null): array
     {
         if ($items === []) {
             return [];
@@ -96,11 +98,14 @@ class CurlMultiPool
             }
         };
 
-        $await = function () use ($multi, &$inFlight, &$queuedOutcomes, $finish): array {
+        $await = function (?callable $canLaunch = null) use ($multi, &$inFlight, &$queuedOutcomes, $finish): array {
             if ($queuedOutcomes !== []) {
                 $done = $queuedOutcomes;
                 $queuedOutcomes = [];
                 return $done;
+            }
+            if ($canLaunch !== null && $canLaunch()) {
+                return [];
             }
             // Drive the stack until at least one transfer finishes. The -1
             // guard prevents a busy-spin while there is no socket yet (DNS).
@@ -118,6 +123,9 @@ class CurlMultiPool
                 if ($done !== []) {
                     return $done;
                 }
+                if ($canLaunch !== null && $canLaunch()) {
+                    return [];
+                }
                 if ($running && $status === CURLM_OK && $this->select($multi) === -1) {
                     usleep(1000);
                 }
@@ -134,7 +142,7 @@ class CurlMultiPool
         };
 
         try {
-            return RollingPool::run($items, $start, $await, $cap);
+            return RollingPool::run($items, $start, $await, $cap, $canStart, $onComplete);
         } finally {
             // Aborting mid-batch (a throwing classify) leaves siblings in
             // flight; detach them before closing the multi handle. CurlHandle

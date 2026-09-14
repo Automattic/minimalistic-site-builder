@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionBatchLlm, PrefixPrimingLlm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -245,6 +245,16 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             fn (array $subset): array => $this->responseBatch($subset, true),
             defaultMaxTokens: $this->defaultMaxTokens,
         );
+    }
+
+    public function canPrimeBatch(array $requests): bool
+    {
+        return true;
+    }
+
+    public function completePrimedBatch(array $requests): TextBatchResult
+    {
+        return $this->completeBatch($requests);
     }
 
     public function completeBatch(array $requests): TextBatchResult
@@ -696,9 +706,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
     private function streamMulti(array $bodies): array
     {
         $raw = [];
+        $schedule = PromptCacheGate::applies($bodies) ? new PromptCacheSchedule($bodies) : null;
 
-        $buildHandle = function (string|int $key, array $body) use (&$raw): \CurlHandle {
+        $buildHandle = function (string|int $key, array $body) use (&$raw, $schedule): \CurlHandle {
             $raw[$key] = '';
+            $schedule?->start($key);
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
                 CURLOPT_POST          => true,
@@ -712,8 +724,9 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
                 CURLOPT_TIMEOUT       => 600,
                 CURLOPT_LOW_SPEED_LIMIT => 1,
                 CURLOPT_LOW_SPEED_TIME  => 90,
-                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key) {
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key, $schedule) {
                     $raw[$key] .= $chunk;
+                    $schedule?->observe($key, $raw[$key]);
                     return strlen($chunk);
                 },
             ]);
@@ -734,7 +747,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, Vis
             return $outcome;
         };
 
-        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, self::MAX_CONCURRENCY);
+        return (new CurlMultiPool())->run(
+            $bodies, $buildHandle, $classify, self::MAX_CONCURRENCY,
+            $schedule === null ? null : fn (string|int $key): bool => $schedule->canStart($key),
+            $schedule === null ? null : fn (string|int $key) => $schedule->release($key),
+        );
     }
 
     /**
