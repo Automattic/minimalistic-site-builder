@@ -232,6 +232,26 @@ test('navigation reaches the bundle', function () {
 });
 
 /**
+ * A host driving the build from a chat sends no menu, because it has no pages
+ * yet: the plan chose them. Observed on the first build through WordPress.com,
+ * where the bundle came back with five pages and no way between them.
+ */
+test('a host that sent no menu gets one made of the planned pages', function () {
+    $inputs = export_clean_inputs();
+    $inputs['navigation'] = [];
+    $project = export_project($inputs, export_clean_pages(), export_clean_provenance());
+
+    (new ExportBundleStep())->run($project);
+
+    $bundle = $project->readJson(PatternArtifacts::BUNDLE);
+    assert_eq(
+        array_map(static fn (array $p): array => ['title' => $p['title'], 'slug' => $p['slug']], $bundle['pages']),
+        $bundle['navigation'],
+    );
+    assert_eq(true, count($bundle['navigation']) > 0);
+});
+
+/**
  * A run started at the export takes its media manifest from a fixture. One
  * from before the manifest had a shape exports zero images and passes.
  */

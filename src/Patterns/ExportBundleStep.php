@@ -57,15 +57,21 @@ final class ExportBundleStep implements Step
         $media = $project->readJson(PatternArtifacts::MEDIA);
         ResolveMediaStep::assertVersion($media);
 
+        $pages = self::readPages($project, $provenance);
+
         $bundle = [
             'version' => self::BUNDLE_VERSION,
             'theme' => $inputs['theme'] ?? null,
             'brand' => $inputs['brand'] ?? [],
-            'pages' => self::readPages($project, $provenance),
+            'pages' => $pages,
             // The destination builds the menu from this. Dropping it leaves a
             // multi-page site whose pages cannot reach each other, and nothing
-            // downstream notices that the pages are orphaned.
-            'navigation' => $inputs['navigation'] ?? [],
+            // downstream notices that the pages are orphaned. A host that sent
+            // no menu gets one of the pages the plan chose, in the plan's order.
+            'navigation' => ($inputs['navigation'] ?? []) ?: array_map(
+                static fn (array $page): array => ['title' => (string) $page['title'], 'slug' => (string) $page['slug']],
+                $pages,
+            ),
             'media' => $media['images'] ?? [],
             'page_template' => (string) ($inputs['capabilities']['page_template'] ?? ''),
         ];
