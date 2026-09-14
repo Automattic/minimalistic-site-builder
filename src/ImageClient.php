@@ -41,7 +41,8 @@ interface ImageClient
      * `bytes` — a batch must never hold every generated image in memory at
      * once. Callers that need bytes in the return value pass no callback.
      *
-     * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
+     * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string,asset?:string}> $specs
+     *        asset identifies the local filename in request records.
      * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult
      * @return array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>
      *         keyed by the same index as $specs (one result per spec, order

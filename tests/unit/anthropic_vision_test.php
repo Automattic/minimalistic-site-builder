@@ -70,3 +70,43 @@ test('Anthropic completeWithImage sends the image body through the single transp
     assert_eq('end_turn', $client->lastFinishReason());
     assert_eq(1, $client->usageTotals()['requests']);
 });
+
+test('Anthropic image batch retains successful siblings and redacts image bytes', function () {
+    $client = new AnthropicClient('test-key', 'claude-haiku-4-5');
+    $method = new ReflectionMethod($client, 'imageBatch');
+    $method->setAccessible(true);
+    $requests = [
+        'hero' => ['prompt' => 'Look.', 'image_bytes' => 'HERO', 'mime' => 'image/jpeg'],
+        'band' => ['prompt' => 'Look.', 'image_bytes' => 'BAND', 'mime' => 'image/jpeg'],
+    ];
+    $batches = [];
+    $result = $method->invoke($client, $requests, function (array $bodies) use (&$batches): array {
+        $batches[] = $bodies;
+        assert_eq(base64_encode('HERO'), $bodies['hero']['messages'][0]['content'][0]['source']['data']);
+        return [
+            'hero' => ['ok' => true, 'text' => '{"upright":true}', 'input' => 12, 'output' => 4],
+            'band' => ['ok' => false, 'error' => 'unavailable'],
+        ];
+    });
+    assert_eq(1, count($batches));
+    assert_eq(['hero' => '{"upright":true}', 'band' => null], $result);
+    assert_eq(1, $client->usageTotals()['requests']);
+    assert_eq(12, $client->usageTotals()['input_tokens']);
+});
+
+test('image checks retry transient siblings after a permanent sibling failure', function () {
+    $bodies = ['bad' => [], 'slow' => [], 'good' => []];
+    $seen = [];
+    $failed = [];
+    $result = AnthropicClient::retryTextBatch($bodies, function (array $subset) use (&$seen): array {
+        $seen[] = array_keys($subset);
+        if (count($seen) === 1) {
+            return ['bad' => ['ok' => false, 'error' => 'bad'], 'slow' => ['ok' => false, 'transient' => true],
+                'good' => ['ok' => true, 'text' => 'good']];
+        }
+        return ['slow' => ['ok' => true, 'text' => 'slow']];
+    }, [0], onFailure: function ($key) use (&$failed) { $failed[] = $key; }, sleeper: static function () {}, tolerateFailures: true);
+    assert_eq([['bad', 'slow', 'good'], ['slow']], $seen);
+    assert_eq(['bad'], $failed);
+    assert_eq(['good', 'slow'], array_keys($result));
+});

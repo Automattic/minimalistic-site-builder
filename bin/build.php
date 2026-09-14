@@ -537,6 +537,9 @@ if ($withImages) {
         };
     }
     $report->setImages($generated, $failed, count($specs), $placeholders);
+    $report->setImageRequests(
+        $imageClient instanceof \Automattic\SiteBuild\ImageUsageReporting ? $imageClient->imageUsageTotals() : null,
+    );
 }
 
 if ($project->exists('patterns.json')) {

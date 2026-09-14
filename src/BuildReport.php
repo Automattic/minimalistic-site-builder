@@ -45,6 +45,8 @@ final class BuildReport
     private int $imagesTotal = 0;
     private int $imagePlaceholders = 0;
 
+    private ?array $imageRequests = null;
+
     private bool $hasPatterns = false;
     private int $sectionPatternsWritten = 0;
     private int $componentPatternsWritten = 0;
@@ -116,6 +118,12 @@ final class BuildReport
         $this->imagesFailed = $failed;
         $this->imagesTotal = $total;
         $this->imagePlaceholders = $placeholders;
+    }
+
+    /** Record actual provider attempts separately from local assets. */
+    public function setImageRequests(?array $requests): void
+    {
+        $this->imageRequests = $requests;
     }
 
     /** Record the reusable-pattern tally (only when patterns.json exists). */
@@ -306,7 +314,8 @@ final class BuildReport
             $this->imagesGenerated,
             $this->imagesFailed,
             $this->imagesTotal
-        ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '');
+        ) . ($this->imagePlaceholders > 0 ? sprintf(', %d local placeholders', $this->imagePlaceholders) : '')
+            . ($this->imageRequests !== null ? sprintf(', %d provider attempts', $this->imageRequests['attempts']) : '');
     }
 
     /** The patterns summary line, or null when no pattern manifest exists. Pure. */
@@ -391,6 +400,13 @@ final class BuildReport
             'model'         => $defaultModel,
             'step_models'   => $stepModels,
             'built_at'      => $this->builtAt,
+            'images' => $this->hasImages ? [
+                'delivered_assets' => $this->imagesGenerated,
+                'failed_assets' => $this->imagesFailed,
+                'total_assets' => $this->imagesTotal,
+                'placeholders' => $this->imagePlaceholders,
+                'provider_requests' => $this->imageRequests,
+            ] : null,
             'steps'         => array_map(
                 static fn (array $r): array => [
                     'id'            => $r['id'],
