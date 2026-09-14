@@ -2841,7 +2841,7 @@ test('theme-json receives the front hero blueprint as focused sizing context', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json block prompt is smaller than the full theme prompt', function () {
+test('theme-json typography prompt matches the recorded bytes', function () {
     $expectation = json_decode(
         file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
         true,
@@ -2859,7 +2859,8 @@ test('theme-json block prompt is smaller than the full theme prompt', function (
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_true(strlen($prompt) < $expectation['bytes'] / 3);
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
     assert_contains('Return a JSON object with only `styles`.', $prompt);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -2886,7 +2887,8 @@ test('theme-json legacy mode ignores stale design CSS bytes', function () {
         new PromptRenderer(repo_path('prompts')),
     ))->requests($project)['theme-json']['prompt'];
 
-    assert_true(strlen($prompt) < $expectation['bytes'] / 3);
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
     assert_contains('Return a JSON object with only `styles`.', $prompt);
     assert_true(!str_contains($prompt, '#C0FFEE'));
     assert_true(!str_contains($prompt, 'Stale Font'));

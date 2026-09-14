@@ -453,8 +453,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 'prompt' => $this->renderer->render('theme-typography.md', [
                     'design_contract' => json_encode($contract, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
                     'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint(DesignDirectionStep::heroBlueprintFor($project)),
+                    'heading_weights' => implode(', ', array_map(
+                        static fn (string $weight): string => '`' . $weight . '`',
+                        self::committedWeights($direction, 'heading') ?: ['400', '500', '600', '700'],
+                    )),
                 ]),
-                'json_schema' => ['name' => 'theme_typography', 'schema' => self::typographySchema()],
+                'json_schema' => ['name' => 'theme_typography', 'schema' => self::typographySchema($direction)],
             ])];
         }
         $meta = $project->readJson('meta.json');
@@ -752,30 +756,51 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private static function compiledWeight(array $direction, string $slot, string $fallback): string
     {
-        foreach ($direction['type'][$slot]['weights'] ?? [] as $weight) {
-            if (is_int($weight) && $weight >= 100 && $weight <= 900 && $weight % 100 === 0) {
-                return (string) $weight;
-            }
-        }
-        return $fallback;
+        return self::committedWeights($direction, $slot)[0] ?? $fallback;
     }
 
-    /** Keep the model response small and constrain its free typography choices. */
-    private static function typographySchema(): array
+    /** Weights the direction committed for one type slot, as theme.json strings. */
+    private static function committedWeights(array $direction, string $slot): array
+    {
+        $weights = [];
+        foreach ($direction['type'][$slot]['weights'] ?? [] as $weight) {
+            if (is_int($weight) && $weight >= 100 && $weight <= 900 && $weight % 100 === 0) {
+                $weights[] = (string) $weight;
+            }
+        }
+        return array_values(array_unique($weights));
+    }
+
+    /**
+     * Keep the model response small and constrain its free typography choices.
+     * The model still owns the vertical rhythm, the heading weight among the
+     * committed weights, and the button case and tracking.
+     */
+    private static function typographySchema(array $direction): array
     {
         $object = static fn (array $properties): array => [
             'type' => 'object', 'properties' => $properties,
             'required' => array_keys($properties), 'additionalProperties' => false,
         ];
         $choice = static fn (array $values): array => ['type' => 'string', 'enum' => $values];
-        $weight = $object(['typography' => $object(['fontWeight' => $choice(['400', '500', '600', '700'])])]);
+        $weights = ['400', '500', '600', '700'];
+        $button = $object(['typography' => $object([
+            'fontWeight' => $choice($weights),
+            'textTransform' => $choice(['none', 'uppercase', 'lowercase']),
+            'letterSpacing' => $choice(['0', '0.02em', '0.05em', '0.1em']),
+        ])]);
+        $navigation = $object(['typography' => $object(['fontWeight' => $choice($weights)])]);
         return $object(['styles' => $object([
             'typography' => $object(['lineHeight' => $choice(['1.5', '1.6', '1.7'])]),
+            'spacing' => $object(['blockGap' => $choice(array_slice(self::ROOT_BLOCK_GAP_REFERENCES, 0, 6))]),
             'elements' => $object([
-                'heading' => $object(['typography' => $object(['lineHeight' => $choice(['1.05', '1.1', '1.15', '1.2'])])]),
-                'button' => $weight,
+                'heading' => $object(['typography' => $object([
+                    'lineHeight' => $choice(['1.05', '1.1', '1.15', '1.2']),
+                    'fontWeight' => $choice(self::committedWeights($direction, 'heading') ?: $weights),
+                ])]),
+                'button' => $button,
             ]),
-            'blocks' => $object(['core/navigation' => $weight]),
+            'blocks' => $object(['core/navigation' => $navigation]),
         ])]);
     }
 
