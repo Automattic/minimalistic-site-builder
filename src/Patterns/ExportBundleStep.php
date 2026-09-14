@@ -1,0 +1,142 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild\Patterns;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
+
+/**
+ * Step: assemble the content-only bundle, but only if it passes its checks.
+ *
+ * This is the last thing that runs and the only thing a host consumes, which
+ * makes it the right place to enforce what "content only" means. The checks
+ * run before the bundle is written, so a build that violates them fails with
+ * the reasons rather than emitting something a host would apply and regret.
+ *
+ * The report is written either way. A failed build is the one you most want to
+ * inspect, and a report that only exists on success is no use for that.
+ */
+final class ExportBundleStep implements Step
+{
+    /** Bumped when the bundle's shape changes in a way a host must notice. */
+    public const BUNDLE_VERSION = 1;
+
+    public function id(): string
+    {
+        return 'export-bundle';
+    }
+
+    public function label(): string
+    {
+        return 'Verify inventory and Brand constraints, then export content only';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                PatternArtifacts::NORMALIZED,
+                PatternArtifacts::PAGES,
+                PatternArtifacts::PROVENANCE,
+                PatternArtifacts::MEDIA,
+            ],
+            writes: [PatternArtifacts::BUNDLE, PatternArtifacts::REPORT],
+            concurrent: false,
+        );
+    }
+
+    public function run(Project $project): void
+    {
+        $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+        NormalizeInputsStep::assertVersion($inputs);
+        $provenance = $project->readJson(PatternArtifacts::PROVENANCE);
+        $media = $project->readJson(PatternArtifacts::MEDIA);
+        ResolveMediaStep::assertVersion($media);
+
+        $pages = self::readPages($project, $provenance);
+
+        $bundle = [
+            'version' => self::BUNDLE_VERSION,
+            'theme' => $inputs['theme'] ?? null,
+            'brand' => $inputs['brand'] ?? [],
+            'pages' => $pages,
+            // The destination builds the menu from this. Dropping it leaves a
+            // multi-page site whose pages cannot reach each other, and nothing
+            // downstream notices that the pages are orphaned. A host that sent
+            // no menu gets one of the pages the plan chose, in the plan's order.
+            'navigation' => ($inputs['navigation'] ?? []) ?: array_map(
+                static fn (array $page): array => ['title' => (string) $page['title'], 'slug' => (string) $page['slug']],
+                $pages,
+            ),
+            'media' => $media['images'] ?? [],
+            'page_template' => (string) ($inputs['capabilities']['page_template'] ?? ''),
+        ];
+
+        // A class an approved pattern shipped with is the customer's, not
+        // something generation added: personalization changes text bytes and
+        // nothing else, so any class in the bundle that the inventory carries
+        // came from the inventory. A theme's own patterns do write classes the
+        // theme never styles -- Ollie's `feature-boxes` -- and refusing a
+        // bundle over those would refuse the customer's own markup.
+        $capabilities = $inputs['capabilities'] ?? [];
+        $capabilities['classes'] = array_values(array_unique(array_merge(
+            $capabilities['classes'] ?? [],
+            ContentOnlyGuard::classesIn(array_column($inputs['inventory'] ?? [], 'content')),
+        )));
+
+        $violations = ContentOnlyGuard::check(
+            $bundle,
+            array_column( $inputs['inventory'] ?? [], 'id' ),
+            $capabilities,
+        );
+
+        $project->writeJson(PatternArtifacts::REPORT, [
+            'bundle_version' => self::BUNDLE_VERSION,
+            'theme' => $bundle['theme'],
+            'pages' => count($bundle['pages']),
+            'media' => count($bundle['media']),
+            'violations' => $violations,
+            'passed' => $violations === [],
+        ]);
+
+        if ($violations !== []) {
+            throw new \RuntimeException(
+                "Bundle is not content-only and was not written:\n  - "
+                . implode("\n  - ", $violations)
+            );
+        }
+
+        $project->writeJson(PatternArtifacts::BUNDLE, $bundle);
+    }
+
+    /**
+     * Pages in the order the plan put them, each carrying the patterns its
+     * sections came from so a host — and the checks above — can trace them.
+     *
+     * @param array<string, mixed> $provenance
+     * @return list<array<string, mixed>>
+     */
+    private static function readPages(Project $project, array $provenance): array
+    {
+        $sections = [];
+        foreach ($provenance['sections'] ?? [] as $record) {
+            if (is_array($record) && isset($record['page'])) {
+                $sections[(string) $record['page']][] = $record;
+            }
+        }
+
+        $pages = [];
+        foreach (PatternArtifacts::pages($project) as $page) {
+            $page['sections'] = $sections[(string) $page['slug']] ?? [];
+            $pages[] = $page;
+        }
+
+        usort($pages, static fn (array $a, array $b) => ($a['menu_order'] ?? 0) <=> ($b['menu_order'] ?? 0));
+
+        return $pages;
+    }
+}

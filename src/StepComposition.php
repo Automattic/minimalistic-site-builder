@@ -3,6 +3,13 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
+use Automattic\SiteBuild\Patterns\ExportBundleStep;
+use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
+use Automattic\SiteBuild\Patterns\PlanSiteStep;
+use Automattic\SiteBuild\Patterns\PatternArtifacts;
+use Automattic\SiteBuild\Patterns\PersonalizeContentStep;
+use Automattic\SiteBuild\Patterns\ResolveMediaStep;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
@@ -100,6 +107,39 @@ final class StepComposition
         return self::htmlFirstSelected()
             ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
             : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+    }
+
+    /**
+     * Compose a site's content from a supplied pattern inventory, against a
+     * theme the host has already deployed.
+     *
+     * This is a separate graph, not the blocks graph with its theme stages
+     * removed. Subtracting them was measured and does not give portable
+     * content: the markup the content stages emit leans on utility classes
+     * whose CSS the same pipeline writes into the theme, so a host that ships
+     * only the content half gets pages with their layout missing. Composing
+     * from patterns the host's theme already styles avoids that by
+     * construction.
+     *
+     * Two stages remain declared placeholders. The
+     * behaviour is arriving one at a time, and the graph carries the contract
+     * from the start so each stage has a shape to satisfy on landing, and so a
+     * caller who runs past the extracted prefix is told which stage is missing
+     * rather than handed an empty bundle.
+     */
+    public static function patterns(Llm $llm, PromptRenderer $renderer, array $models = []): self
+    {
+        return new self(
+            [
+                new NormalizeInputsStep(),
+                new PlanSiteStep($llm, $renderer, $models['plan-site'] ?? null),
+                new ComposeLayoutsStep(),
+                new PersonalizeContentStep($llm, $renderer, $models['personalize-content'] ?? null),
+                new ResolveMediaStep(),
+                new ExportBundleStep(),
+            ],
+            PatternArtifacts::SEEDS,
+        );
     }
 
     /**
