@@ -19,7 +19,7 @@ function template_part_unit_input(): array
     return [
         'site_spec'        => '{"name":"PART-SPEC-SENTINEL"}',
         'language'         => 'part-language-sentinel',
-        'theme_json'       => '{"part-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"part-theme-sentinel":true}}}',
         'design_direction' => 'PART-DIRECTION-SENTINEL',
         'outline'          => '1. PART-OUTLINE-SENTINEL (hero)',
         'site_pages'       => '- "Home" — / (front page): PART-PAGES-SENTINEL',
