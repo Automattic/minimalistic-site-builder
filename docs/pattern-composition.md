@@ -82,6 +82,23 @@ php tests/pattern-proof.php /tmp/msb-pattern-proof
 node tests/integration/pattern-content-oracle.js /tmp/msb-pattern-proof/pattern-output.json
 ```
 
+`bin/pattern-build.php` is the host-facing entry point. With `--responses` it
+replays recorded model output and makes no network calls; without it the build
+resolves the live transport exactly as `bin/build.php` does (`.env` in the
+checkout root, `LLM_PROVIDER` or `--provider`, `SITE_BUILD_LLM=api` to force
+the metered API beside a coding-agent harness) and prints the token usage:
+
+```sh
+# Replay a recorded run
+php bin/pattern-build.php --input=pattern-inputs.json --output=/tmp/msb-pattern --responses=responses.json
+
+# Generate with the configured provider
+php bin/pattern-build.php --input=pattern-inputs.json --output=/tmp/msb-pattern
+```
+
+The personalize step names no model of its own; it uses the run default
+(`LLM_MODEL`, else the provider's large tier).
+
 The importer integration harness is an optional consumer smoke test. Site
 Foundry remains the source of the selected Brand, Blueprint, resolved deployed
 theme, site creation, and WordPress application. It maps those inputs into this

@@ -2,21 +2,29 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ReplayLlm;
-use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\UsageReporting;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
-$options = getopt('', ['input:', 'output:', 'responses:']);
+$options = getopt('', ['input:', 'output:', 'responses:', 'provider:']);
 $inputPath = isset($options['input']) ? (string) $options['input'] : '';
 $outputPath = isset($options['output']) ? (string) $options['output'] : '';
 $responsesPath = isset($options['responses']) ? (string) $options['responses'] : '';
+$providerFlag = isset($options['provider']) ? (string) $options['provider'] : null;
 
-if ($inputPath === '' || $outputPath === '' || $responsesPath === '') {
-    Narrator::write("Usage: php bin/pattern-build.php --input=<pattern-inputs.json> --output=<project-dir> --responses=<responses.json>\n");
+if ($inputPath === '' || $outputPath === '' || ($responsesPath !== '' && $providerFlag !== null)) {
+    Narrator::write(
+        "Usage: php bin/pattern-build.php --input=<pattern-inputs.json> --output=<project-dir>"
+        . " [--responses=<responses.json> | --provider=anthropic|openai|xai|openrouter|baseten]\n"
+        . "With --responses the build replays recorded model output and makes no network calls.\n"
+        . "Without it the build resolves the live transport from .env (LLM_PROVIDER and its key;"
+        . " SITE_BUILD_LLM=api forces the metered API next to a coding-agent harness).\n"
+    );
     exit(2);
 }
 
@@ -34,9 +42,12 @@ try {
     };
 
     $input = $readJson($inputPath);
-    $responses = $readJson($responsesPath);
-    if (!array_is_list($responses)) {
-        throw new InvalidArgumentException('Fixture responses must be a JSON list');
+    $responses = null;
+    if ($responsesPath !== '') {
+        $responses = $readJson($responsesPath);
+        if (!array_is_list($responses)) {
+            throw new InvalidArgumentException('Fixture responses must be a JSON list');
+        }
     }
     if (!is_dir($outputPath) && !mkdir($outputPath, 0775, true) && !is_dir($outputPath)) {
         throw new RuntimeException("Could not create {$outputPath}");
@@ -65,14 +76,37 @@ try {
         }
     }
 
-    $llm = new ReplayLlm($responses);
+    if ($responses !== null) {
+        $llm = new ReplayLlm($responses);
+    } else {
+        // Live builds resolve the transport exactly as bin/build.php does: .env
+        // from the checkout root, LLM_PROVIDER (or --provider) picks the model
+        // set, and TransportResolver narrates the chosen transport before any
+        // spend. Embedding hosts that mount this checkout share that .env.
+        require_once dirname(__DIR__) . '/src/bootstrap.php';
+        $provider = normalize_provider($providerFlag);
+        if ($provider !== null) {
+            putenv("LLM_PROVIDER={$provider}");
+        }
+        $llm = resolve_llm();
+    }
+
     $composition = StepComposition::patterns($llm);
     $pipeline = new Pipeline($composition->steps(), $composition->seeds());
     $pipeline->runThrough($project, reporter: static function ($step, $elapsed): void {
         fwrite(STDOUT, $step->id() . ': ' . number_format($elapsed, 3) . "s\n");
     });
-    if ($llm->remaining() !== 0) {
+    if ($llm instanceof ReplayLlm && $llm->remaining() !== 0) {
         throw new RuntimeException('Fixture response file contains unused responses');
+    }
+    if ($llm instanceof UsageReporting) {
+        $usage = $llm->usageTotals();
+        fwrite(STDOUT, sprintf(
+            "Model usage: %d request(s), %d input tokens, %d output tokens\n",
+            $usage['requests'],
+            $usage['input_tokens'],
+            $usage['output_tokens'],
+        ));
     }
     fwrite(STDOUT, "Content bundle: {$outputPath}/content-bundle.json\n");
 } catch (Throwable $error) {
