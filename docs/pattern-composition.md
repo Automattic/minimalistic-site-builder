@@ -47,8 +47,9 @@ an approved `fallback`. Factual and URL slots also declare a `binding`; they do
 not enter model requests. Generated text slots may declare `instruction` and
 `max_words`.
 
-The first slice admits plain text in core paragraph, heading, list-item and
-button blocks; button URLs; and portable image URL/alt attributes. A whole rich
+The first slice admits plain text in core paragraph, paragraph emphasis,
+heading, list-item, button and pullquote blocks; pullquote citations; button
+URLs; and portable image URL/alt attributes. A whole rich
 text field containing inline markup is refused because replacing it would lose
 authored structure. Blocks carrying `ai-ignore`, and all descendants of such a
 block, are protected.

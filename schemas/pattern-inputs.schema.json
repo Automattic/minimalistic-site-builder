@@ -84,7 +84,7 @@
                     "minItems": 1,
                     "items": { "type": "integer", "minimum": 0 }
                 },
-                "field": { "enum": ["text", "url", "alt"] },
+                "field": { "enum": ["text", "strong-text", "url", "alt", "citation"] },
                 "fallback": { "type": "string" },
                 "binding": { "type": "string", "minLength": 1 },
                 "instruction": { "type": "string" },

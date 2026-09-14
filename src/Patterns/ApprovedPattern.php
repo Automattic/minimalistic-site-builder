@@ -68,12 +68,15 @@ final class ApprovedPattern
             $definition['block_name'] = $block->name;
             [$selector, $attribute, $commentKey] = match ($block->name . ':' . $field) {
                 'core/paragraph:text' => ['p', null, 'content'],
+                'core/paragraph:strong-text' => ['strong', null, null],
                 'core/heading:text' => ['h1,h2,h3,h4,h5,h6', null, 'content'],
                 'core/list-item:text' => ['li', null, 'content'],
                 'core/button:text' => ['a', null, 'text'],
                 'core/button:url' => ['a', 'href', 'url'],
                 'core/image:url' => ['img', 'src', 'url'],
                 'core/image:alt' => ['img', 'alt', 'alt'],
+                'core/pullquote:text' => ['p', null, null],
+                'core/pullquote:citation' => ['cite', null, null],
                 default => throw new \InvalidArgumentException("Unsupported slot {$id}: {$block->name}:{$field}"),
             };
             $body = substr($markup, $block->openingEnd, $block->closingStart - $block->openingEnd);
@@ -108,7 +111,7 @@ final class ApprovedPattern
             $spans = [['start' => $start, 'length' => $length, 'encoding' => 'html']];
             // Legacy internal trees can mirror sourced content in comment JSON.
             // Keep that value synchronized without reserializing other keys.
-            if (array_key_exists($commentKey, $attrs)) {
+            if ($commentKey !== null && array_key_exists($commentKey, $attrs)) {
                 [$offset, $length] = self::jsonStringSpan($block->rawAttributes, $commentKey);
                 $jsonStart = strpos($block->openingDelimiter, $block->rawAttributes);
                 $spans[] = ['start' => $block->openingStart + $jsonStart + $offset, 'length' => $length, 'encoding' => 'json'];

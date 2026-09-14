@@ -89,6 +89,12 @@ final class ContentPersonalizer
 
     public static function request(array $pending, array $facts): array
     {
+        $locale = is_string($facts['site_language'] ?? null) ? trim($facts['site_language']) : '';
+        $language = is_string($facts['site_language_label'] ?? null) ? trim($facts['site_language_label']) : '';
+        $targetLanguage = $language !== '' ? $language . ($locale !== '' ? " ({$locale})" : '') : $locale;
+        $languageRule = $targetLanguage !== ''
+            ? "Write every generated value in {$targetLanguage}. "
+            : '';
         $items = array_map(static fn ($slot) => [
             'id' => $slot['id'], 'field' => $slot['field'], 'example' => $slot['example'],
             'instruction' => $slot['instruction'] ?? '', 'max_words' => $slot['max_words'] ?? null,
@@ -96,6 +102,7 @@ final class ContentPersonalizer
         ], $pending);
         return [
             'prompt' => "Personalize only the requested plain-text content slots using the supplied facts. "
+                . $languageRule
                 . "Examples illustrate length and purpose; they are not facts. Do not invent factual claims. "
                 . "Return each requested ID exactly once as {\"content\":[{\"id\":\"slot-id\",\"e\":\"value\"}]}. "
                 . "Do not return markup, layout, styling, or additional slots.\n"

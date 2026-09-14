@@ -346,6 +346,24 @@ test('pattern content records forbidden response styling while retaining valid c
     assert_eq('Make room for good work', $result['values']['headline']);
 });
 
+test('pattern requests require the host-selected content language', function () {
+    $request = ContentPersonalizer::request(
+        [['id' => 'headline', 'field' => 'text', 'example' => 'Example']],
+        ['site_language' => 'pt_BR', 'site_language_label' => 'Português do Brasil'],
+    );
+    assert_contains('Write every generated value in Português do Brasil (pt_BR).', $request['prompt']);
+});
+
+test('approved pullquote slots replace quote and citation without changing its shell', function () {
+    $markup = '<!-- wp:pullquote {"textAlign":"center"} --><figure class="wp-block-pullquote has-text-align-center"><blockquote><p>Approved quote</p><cite>Approved source</cite></blockquote></figure><!-- /wp:pullquote -->';
+    $pattern = new ApprovedPattern($markup, [
+        ['id' => 'quote', 'block_path' => [0], 'field' => 'text', 'fallback' => 'Approved quote'],
+        ['id' => 'source', 'block_path' => [0], 'field' => 'citation', 'fallback' => 'Approved source'],
+    ]);
+    $expected = str_replace(['Approved quote', 'Approved source'], ['Uma parceria real', 'Cliente'], $markup);
+    assert_eq($expected, $pattern->serialize(['quote' => 'Uma parceria real', 'source' => 'Cliente']));
+});
+
 test('pattern terminal JSON failures retain valid batch siblings', function () {
     with_temp_dir('pattern-proof-', function ($dir) {
         $project = pattern_proof_project($dir);

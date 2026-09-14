@@ -65,7 +65,8 @@ cat > "$site_foundry_root/.wp-env.override.json" <<JSON
 {
   "plugins": ["."],
   "config": {
-    "SITE_FOUNDRY_LOCAL_MSB_PATH": "/var/www/html/wp-content/msb-local"
+    "SITE_FOUNDRY_LOCAL_MSB_PATH": "/var/www/html/wp-content/msb-local",
+    "SITE_FOUNDRY_LOCAL_MSB_FIXTURES_PATH": "/var/www/html/wp-content/plugins/site-foundry/tests/e2e/local-pattern/fixtures"
   },
   "mappings": {
     "wp-content/msb-local": "$repo_root",
@@ -116,6 +117,20 @@ fi
 )
 
 site_url=$(php -r '$r=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $r["site_url"];' "$evidence_dir/result.json")
+generation_engine=$(
+	cd "$site_foundry_root"
+	pnpm exec wp-env run cli wp --url="$site_url" option get site_foundry_generation_engine 2>/dev/null \
+		| grep -E '^minimalistic-site-builder$'
+)
+generation_hash=$(
+	cd "$site_foundry_root"
+	pnpm exec wp-env run cli wp --url="$site_url" option get site_foundry_generation_input_hash 2>/dev/null \
+		| grep -E '^[a-f0-9]{64}$'
+)
+if [[ "$generation_engine" != "minimalistic-site-builder" || -z "$generation_hash" ]]; then
+	printf 'The imported site has no valid MSB generation receipt.\n'
+	exit 1
+fi
 (
 	cd "$site_foundry_root"
 	pnpm exec wp-env run cli wp --url="$site_url" option get stylesheet
@@ -131,6 +146,7 @@ if command -v ffmpeg >/dev/null 2>&1 && [[ -n "$video" ]]; then
 fi
 
 printf 'Real Site Foundry + MSB E2E passed: %s\n' "$site_url"
+printf 'MSB input hash: %s\n' "$generation_hash"
 printf 'Browser recording: %s\n' "$video"
 printf 'Evidence metadata: %s/result.json\n' "$evidence_dir"
 if [[ $keep_running -eq 1 ]]; then
