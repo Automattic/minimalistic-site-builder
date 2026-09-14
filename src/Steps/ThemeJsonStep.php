@@ -513,7 +513,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($theme)) {
             throw new \RuntimeException('theme-json: missing model output');
         }
-        $warnings = [];
+        $warnings = $theme === [] ? [
+            'theme/theme.json at styles: authored empty object; delivered default typography; disposition missing typography choices replaced',
+        ] : [];
         if (!$this->htmlFirst) {
             $theme = self::typographyChoices($theme, DesignDirectionStep::dataFor($project), $warnings);
         }
@@ -774,65 +776,59 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Keep only the bounded typography choices from the model response.
-     * A missing or out-of-range value takes the compiled default and leaves
-     * an actionable warning. Numbers are accepted when their string form is
-     * a listed choice, because prompt-only transports return them unquoted.
+     * Normalize the bounded typography choices in the model response.
+     * A present choice outside its usable range takes the compiled default
+     * and leaves an actionable warning. Numbers are accepted, because
+     * prompt-only transports return them unquoted. A missing choice and
+     * every other key pass through to the existing scaffold and repair
+     * passes, which own the malformed-shape warnings.
      *
      * @param array<mixed> $response @param list<string> $warnings
      * @return array<mixed>
      */
     public static function typographyChoices(array $response, array $direction, array &$warnings): array
     {
-        $schema = self::typographySchema($direction);
-        $density = (string) ($direction['density'] ?? 'measured');
-        $gap = match ($density) {
-            'packed', 'dense' => 'var:preset|spacing|sm',
-            'airy', 'expansive' => 'var:preset|spacing|lg',
-            default => 'var:preset|spacing|md',
-        };
-        $defaults = [
-            'styles.typography.lineHeight' => '1.6',
-            'styles.spacing.blockGap' => $gap,
-            'styles.elements.heading.typography.lineHeight' => '1.15',
-            'styles.elements.heading.typography.fontWeight' => self::compiledWeight($direction, 'heading', '600'),
-            'styles.elements.button.typography.fontWeight' => '600',
-            'styles.elements.button.typography.textTransform' => 'none',
-            'styles.elements.button.typography.letterSpacing' => '0',
-            'styles.blocks.core/navigation.typography.fontWeight' => '500',
+        $number = static fn (float $min, float $max): \Closure => static fn (string $value): bool =>
+            is_numeric($value) && (float) $value >= $min && (float) $value <= $max;
+        $weight = static fn (string $value): bool => ctype_digit($value) && (int) $value >= 100 && (int) $value <= 900 && (int) $value % 100 === 0;
+        $rules = [
+            'styles.typography.lineHeight' => ['1.6', $number(1.3, 2.0)],
+            'styles.elements.heading.typography.lineHeight' => ['1.15', $number(0.9, 1.4)],
+            'styles.elements.heading.typography.fontWeight' => [self::compiledWeight($direction, 'heading', '600'), $weight],
+            'styles.elements.button.typography.fontWeight' => ['600', $weight],
+            'styles.elements.button.typography.textTransform' => ['none', static fn (string $value): bool =>
+                in_array($value, ['none', 'uppercase', 'lowercase', 'capitalize'], true)],
+            'styles.elements.button.typography.letterSpacing' => ['0', static fn (string $value): bool =>
+                preg_match('/^(?:0|-?\d*\.?\d+(?:em|rem|px))$/', $value) === 1
+                && (float) $value >= -0.05 && (float) $value <= 0.3],
+            'styles.blocks.core/navigation.typography.fontWeight' => ['500', $weight],
         ];
-        $out = [];
-        foreach ($defaults as $path => $default) {
+        foreach ($rules as $path => [$default, $valid]) {
             $keys = explode('.', $path);
-            $node = $schema;
-            $value = $response;
-            $present = true;
+            $leaf = array_pop($keys);
+            $cursor = &$response;
             foreach ($keys as $key) {
-                $node = $node['properties'][$key] ?? [];
-                if (!is_array($value) || !array_key_exists($key, $value)) {
-                    $present = false;
-                    $value = null;
-                    break;
+                if (!is_array($cursor[$key] ?? null) || array_is_list($cursor[$key]) && $cursor[$key] !== []) {
+                    continue 2;
                 }
-                $value = $value[$key];
-            }
-            $allowed = $node['enum'] ?? [];
-            $chosen = is_string($value) || is_int($value) || is_float($value) ? (string) $value : null;
-            if ($chosen === null || !in_array($chosen, $allowed, true)) {
-                $warnings[] = 'theme/theme.json ' . $path . ': authored ' . ($present ? Warnings::value($value) : 'absent')
-                    . '; delivered ' . Warnings::value($default)
-                    . '; disposition ' . ($present ? 'value outside the bounded choices' : 'missing choice') . ' replaced with the compiled default';
-                $chosen = $default;
-            }
-            $cursor = &$out;
-            foreach ($keys as $key) {
-                $cursor[$key] ??= [];
                 $cursor = &$cursor[$key];
             }
-            $cursor = $chosen;
+            if (!array_key_exists($leaf, $cursor)) {
+                continue;
+            }
+            $value = $cursor[$leaf];
+            $chosen = is_string($value) || is_int($value) || is_float($value) ? (string) $value : null;
+            if ($chosen !== null && $valid($chosen)) {
+                $cursor[$leaf] = $chosen;
+                continue;
+            }
+            $warnings[] = 'theme/theme.json ' . $path . ': authored ' . Warnings::value($value)
+                . '; delivered ' . Warnings::value($default)
+                . '; disposition value outside the bounded typography choices replaced with the compiled default';
+            $cursor[$leaf] = $default;
             unset($cursor);
         }
-        return $out;
+        return $response;
     }
 
     /** Weights the direction committed for one type slot, as theme.json strings. */
