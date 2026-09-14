@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\TypeTreatment;
@@ -810,11 +811,11 @@ test('theme-json forces a non-null blockGap so frontend spacing matches the edit
 
     $theme = $project->readJson('theme/theme.json');
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
-    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|sm', $theme['styles']['spacing']['blockGap']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json keeps a model-provided blockGap', function () {
+test('theme-json keeps a model-provided component-role blockGap', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
@@ -823,15 +824,49 @@ test('theme-json keeps a model-provided blockGap', function () {
 
     $payload = valid_theme_payload();
     $payload['settings']['spacing']['blockGap'] = true;
-    $payload['styles']['spacing']['blockGap'] = 'var:preset|spacing|lg';
+    $payload['styles']['spacing']['blockGap'] = 'var:preset|spacing|xs';
 
     $llm = new FakeLlm();
     $llm->queueJson($payload);
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new ThemeJsonStep($llm, $renderer))->run($project);
 
-    assert_eq('var:preset|spacing|lg', $project->readJson('theme/theme.json')['styles']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|xs', $project->readJson('theme/theme.json')['styles']['spacing']['blockGap']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_true(!str_contains($warnings, 'styles.spacing.blockGap'), 'a component role is kept without a warning');
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json replaces a section-role root blockGap with the compiled text rhythm', function () {
+    foreach (['var:preset|spacing|lg', 'var:preset|spacing|xl', 'var:preset|spacing|xxl', 'var(--wp--preset--spacing--xl)'] as $authored) {
+        $theme = ['styles' => ['spacing' => ['blockGap' => $authored]]];
+        [$once, $warnings] = ThemeJsonStep::repairRootBlockGap($theme);
+        assert_eq('var:preset|spacing|sm', $once['styles']['spacing']['blockGap'], $authored);
+        assert_eq(1, count($warnings), $authored);
+        assert_contains('theme/theme.json styles.spacing.blockGap: authored "' . $authored . '"', $warnings[0]);
+        assert_contains('delivered "var:preset|spacing|sm"', $warnings[0]);
+        assert_contains('disposition=section-padding preset replaced with the compiled root text rhythm', $warnings[0]);
+        [$twice, $secondWarnings] = ThemeJsonStep::repairRootBlockGap($once);
+        assert_eq($once, $twice, 'fixed point');
+        assert_eq([], $secondWarnings);
+    }
+});
+
+test('theme-json root blockGap resolves to a component-role preset at every density', function () {
+    // The root gap separates heading from paragraph and paragraph from
+    // paragraph. It must stay on the component ramp (at most 1.5rem at its
+    // widest) for every committed density; the section ramp starts at 1.75rem.
+    foreach (DesignDirectionStep::DENSITIES as $density) {
+        $theme = ThemeJsonStep::normalizeSpacingSettings(['styles' => []], $density);
+        [$theme, $warnings] = ThemeJsonStep::repairRootBlockGap($theme);
+        assert_eq([], $warnings, $density);
+        $gap = $theme['styles']['spacing']['blockGap'];
+        assert_true(preg_match('/^var:preset\\|spacing\\|(xs|sm|md)$/', $gap, $m) === 1, "{$density}: {$gap}");
+        $sizes = array_column($theme['settings']['spacing']['spacingSizes'], 'size', 'slug');
+        assert_true(preg_match('/clamp\\(([\\d.]+)rem, [^,]+, ([\\d.]+)rem\\)$/', $sizes[$m[1]], $px) === 1, "{$density}: {$sizes[$m[1]]}");
+        assert_true((float) $px[2] <= 1.5, "{$density}: root gap {$sizes[$m[1]]} widens past the component ramp");
+        assert_true((float) $px[1] >= 0.5, "{$density}: root gap {$sizes[$m[1]]} collapses below 0.5rem");
+    }
 });
 
 test('theme-json repairs a copied blockGap placeholder and reaches a fixed point', function () {
@@ -840,12 +875,12 @@ test('theme-json repairs a copied blockGap placeholder and reaches a fixed point
 
     [$once, $warnings] = ThemeJsonStep::repairRootBlockGap($theme);
 
-    assert_eq('var:preset|spacing|md', $once['styles']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|sm', $once['styles']['spacing']['blockGap']);
     assert_eq(1, count($warnings));
     $warning = $warnings[0];
     assert_contains('theme/theme.json styles.spacing.blockGap', $warning);
     assert_contains('authored "var:preset|spacing|<slug>"', $warning);
-    assert_contains('delivered "var:preset|spacing|md"', $warning);
+    assert_contains('delivered "var:preset|spacing|sm"', $warning);
     assert_contains('disposition=', $warning);
 
     [$twice, $secondWarnings] = ThemeJsonStep::repairRootBlockGap($once);
@@ -867,13 +902,13 @@ test('theme-json run records a copied blockGap placeholder repair durably', func
     (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq(
-        'var:preset|spacing|md',
+        'var:preset|spacing|sm',
         $project->readJson('theme/theme.json')['styles']['spacing']['blockGap'],
     );
     $warnings = implode("\n", $project->readJson('warnings.json')['theme-json'] ?? []);
     assert_contains('styles.spacing.blockGap', $warnings);
     assert_contains('authored "var:preset|spacing|<slug>"', $warnings);
-    assert_contains('delivered "var:preset|spacing|md"', $warnings);
+    assert_contains('delivered "var:preset|spacing|sm"', $warnings);
     assert_contains('disposition=', $warnings);
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -2358,7 +2393,7 @@ test('theme-json repairs malformed scaffold shapes with durable actionable warni
         $theme['styles']['elements']['h2']['typography']['fontSize'],
         'malformed array leaf replaced',
     );
-    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|sm', $theme['styles']['spacing']['blockGap']);
     assert_eq('800', $theme['styles']['elements']['h1']['typography']['fontWeight'], 'valid sibling retained');
 
     $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
@@ -2391,7 +2426,7 @@ test('theme-json repairs malformed top-level styles values with durable warnings
         (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
         $theme = $project->readJson('theme/theme.json');
-        assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+        assert_eq('var:preset|spacing|sm', $theme['styles']['spacing']['blockGap']);
         assert_eq('var:preset|color|base', $theme['styles']['color']['background']);
         $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
         assert_contains(
