@@ -156,7 +156,7 @@ final class GeminiImage
         }
         // A slot described as wide or large keeps 2K even when the context
         // also names a small neighbour ("wide feature image for a small crew").
-        if (preg_match('/\b(?:wide|large|feature|cover)\b/iu', $context) === 1) {
+        if (preg_match('/\b(?:wide|large|cover)\b/iu', $context) === 1) {
             return $size;
         }
         // Adjacent footer tiles can share edges without spanning the viewport.
