@@ -12,7 +12,7 @@ function section_unit_input(): array
     return [
         'site_spec'        => '{"name":"UNIT-SPEC-SENTINEL"}',
         'language'         => 'unit-language-sentinel',
-        'theme_json'       => '{"unit-theme-sentinel":true}',
+        'theme_json' => '{"settings":{"custom":{"unit-theme-sentinel":true}}}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
         'card_style'       => 'flush',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
@@ -186,7 +186,7 @@ test('SectionUnit request preparation does not call the LLM', function () {
     $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
     $input = section_unit_input();
     $input['site_spec'] = ['name' => 'DECODED-SPEC-SENTINEL'];
-    $input['theme_json'] = ['decoded-theme-sentinel' => true];
+    $input['theme_json'] = ['settings' => ['custom' => ['decoded-theme-sentinel' => true]]];
 
     $request = $unit->request($input);
 
@@ -337,7 +337,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'motion_instructions' => $rules->motion($input['motion_profile'] ?? null),
         'site_context'      => rtrim($renderer->render('site-context.md', [
             'site_spec'        => $input['site_spec'],
-            'theme_json'       => $input['theme_json'],
+            'theme_json' => \Automattic\SiteBuild\MarkupContext::theme(json_decode($input['theme_json'], true)),
             'design_direction' => $input['design_direction'],
         ]), "\r\n"),
         'language'          => $input['language'],
