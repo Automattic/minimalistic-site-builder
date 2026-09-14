@@ -161,3 +161,39 @@ test('decodeJson rejects a top-level scalar with an actionable error', function 
     assert_true($result['data'] === null, 'JSON envelopes must be objects or arrays');
     assert_contains('top-level JSON value', (string) $result['error']);
 });
+
+test('decodeJson preserves literal line breaks and tabs inside string values', function () {
+    $raw = "{\n\t\"why\":\"First line\r\nSecond\tline\",\n\"items\":[\"one\ntwo\",\"three\"]\n}";
+    $expected = ['why' => "First line\r\nSecond\tline", 'items' => ["one\ntwo", 'three']];
+    $result = AnthropicClient::decodeJsonResult($raw);
+    assert_eq(['data' => $expected, 'error' => null], $result);
+    assert_eq($expected, AnthropicClient::decodeJson(json_encode($expected, JSON_THROW_ON_ERROR)));
+});
+
+test('literal whitespace repair preserves existing escapes and structural whitespace', function () {
+    $raw = '{"why":"A literal \\n and an escaped \\"quote\\"' . "\n" . 'Next line","path":"C:\\\\images",}';
+    assert_eq([
+        'why' => "A literal \n and an escaped \"quote\"\nNext line",
+        'path' => 'C:\\images',
+    ], AnthropicClient::decodeJson($raw));
+    assert_eq(['value' => "line\n\tend"], AnthropicClient::decodeJson("{\n\t\"value\":\"line\\n\\tend\"\n}"));
+});
+
+test('literal whitespace repair keeps ambiguous structure for model repair', function () {
+    $cases = [
+        "{\"why\":\"one\ntwo\" \"safe\":true}",
+        "[\"one\ntwo\" false]",
+        "{\"why\":\"one\n\"two\", \"safe\":true}",
+        "{\"bad\nkey\":\"value\"}",
+        "{\"why\":\"one\ntwo\x00\"}",
+        "{\"why\":\"one\\\ntwo\"}",
+        "{\"why\":\"one\ntwo\\q\"}",
+        "{\"why\":\"one\ntwo\xFF\"}",
+        "{\"why\":\"one\ntwo",
+    ];
+    foreach ($cases as $raw) {
+        $result = AnthropicClient::decodeJsonResult($raw);
+        assert_eq(null, $result['data']);
+        assert_true(is_string($result['error']) && $result['error'] !== '');
+    }
+});
