@@ -223,10 +223,61 @@ test('theme compiler supplies link defaults when the typography response is empt
     assert_eq('var:preset|color|primary', $theme['styles']['elements']['link']['color']['text']);
     assert_eq('var:preset|color|accent', $theme['styles']['elements']['link'][':hover']['color']['text']);
     assert_true(!isset($theme['styles']['elements']['link'][':focus']));
-    assert_contains('authored empty object', json_encode($project->readJson('warnings.json')));
+    assert_contains('missing choice replaced with the compiled default', json_encode($project->readJson('warnings.json')));
     assert_eq(1, count($llm->calls));
     $step->consume($project, ['theme-json' => []]);
     assert_eq($theme, $project->readJson('theme/theme.json'));
     assert_eq(1, count($llm->calls));
     remove_tree($tmp);
+});
+
+test('theme compiler replaces missing, invalid, and extra typography choices with defaults and warnings', function () {
+    $tmp = sys_get_temp_dir() . '/theme_compiler_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A lamp studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Lamp Studio']);
+    seed_test_design_direction($project, overrides: [
+        'density' => 'airy',
+        'palette' => ['base' => '#F4EBDC', 'contrast' => '#221A12', 'primary' => '#8C5A20', 'secondary' => '#5A4A35', 'accent' => '#D40E0D', 'band' => '#E7D9C3'],
+        'type' => ['heading' => ['family' => 'Spectral', 'weights' => [700, 900]], 'body' => ['family' => 'Inter', 'weights' => [300, 400]]],
+    ]);
+    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $step->consume($project, ['theme-json' => [
+        'settings' => ['color' => ['palette' => [['slug' => 'base', 'name' => 'Base', 'color' => '#000000']]]],
+        'styles' => [
+            'typography' => ['lineHeight' => 1.6],
+            'elements' => [
+                'heading' => ['typography' => ['lineHeight' => '0.8', 'fontWeight' => 900]],
+                'button' => ['typography' => ['fontWeight' => 'bold', 'textTransform' => 'uppercase', 'letterSpacing' => '0.5em']],
+                'link' => ['color' => ['text' => '#123456']],
+            ],
+            'css' => 'body { color: red; }',
+        ],
+    ]]);
+    $theme = $project->readJson('theme/theme.json');
+    $colors = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#F4EBDC', $colors['base'], 'an extra palette key does not override the compiled palette');
+    assert_eq('var:preset|color|primary', $theme['styles']['elements']['link']['color']['text']);
+    assert_true(!isset($theme['styles']['css']));
+    assert_eq('1.6', $theme['styles']['typography']['lineHeight'], 'a numeric value is accepted when it names a listed choice');
+    assert_eq('900', $theme['styles']['elements']['heading']['typography']['fontWeight']);
+    assert_eq('1.15', $theme['styles']['elements']['heading']['typography']['lineHeight']);
+    assert_eq('600', $theme['styles']['elements']['button']['typography']['fontWeight']);
+    assert_eq('uppercase', $theme['styles']['elements']['button']['typography']['textTransform']);
+    assert_eq('0', $theme['styles']['elements']['button']['typography']['letterSpacing']);
+    assert_eq('500', $theme['styles']['blocks']['core/navigation']['typography']['fontWeight']);
+    assert_eq('var:preset|spacing|lg', $theme['styles']['spacing']['blockGap'], 'the block gap default follows the density');
+    assert_eq('400', $theme['styles']['typography']['fontWeight'], 'body weight prefers the committed weight nearest 400');
+    $warnings = implode("\n", $project->readJson('warnings.json')['theme-json']);
+    foreach ([
+        'styles.elements.heading.typography.lineHeight: authored "0.8"',
+        'styles.elements.button.typography.fontWeight: authored "bold"',
+        'styles.elements.button.typography.letterSpacing: authored "0.5em"',
+        'styles.spacing.blockGap: authored absent',
+        'styles.blocks.core/navigation.typography.fontWeight: authored absent',
+    ] as $row) {
+        assert_contains($row, $warnings);
+    }
+    assert_true(!str_contains($warnings, 'typography.lineHeight: authored 1.6'));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
