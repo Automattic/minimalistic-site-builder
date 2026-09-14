@@ -790,7 +790,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $number = static fn (float $min, float $max): \Closure => static fn (string $value): bool =>
             is_numeric($value) && (float) $value >= $min && (float) $value <= $max;
-        $weight = static fn (string $value): bool => ctype_digit($value) && (int) $value >= 100 && (int) $value <= 900 && (int) $value % 100 === 0;
+        // Variable fonts use intermediate weights such as 650.
+        $weight = static fn (string $value): bool => ctype_digit($value) && (int) $value >= 100 && (int) $value <= 900;
         $rules = [
             'styles.typography.lineHeight' => ['1.6', $number(1.3, 2.0)],
             'styles.elements.heading.typography.lineHeight' => ['1.15', $number(0.9, 1.4)],
