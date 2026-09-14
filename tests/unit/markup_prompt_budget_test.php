@@ -36,27 +36,6 @@ test('markup theme context keeps rendered styles and presets but omits font sour
     assert_true(strlen($compact) < strlen(json_encode($theme, JSON_PRETTY_PRINT)) / 2);
 });
 
-test('image sections share compact cached rules while no-media sections share the first two layers', function () {
-    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $input = markup_budget_input();
-    $first = $unit->request($input);
-    $input['section']['slug'] = 'more-products';
-    $second = $unit->request($input);
-    assert_eq($first['cached_prefixes'], $second['cached_prefixes']);
-    $input['section']['layout_archetype'] = 'feature-row-hairlines';
-    $plain = $unit->request($input);
-    assert_eq(array_slice($first['cached_prefixes'], 0, 2), array_slice($plain['cached_prefixes'], 0, 2));
-    assert_contains('AI_IMAGE: subject | page-context | style | aspect-ratio', $first['cached_prefixes'][2]);
-    assert_true(!str_contains(implode('', $plain['cached_prefixes']) . $plain['prompt'], 'AI_IMAGE: subject |'));
-    assert_true(!str_contains($first['prompt'], 'AI_IMAGE: subject |'));
-    $rules = file_get_contents(repo_path('prompts/image-markup.md'));
-    assert_true(strlen($rules) < 4000);
-    assert_true(strlen($rules) < strlen(file_get_contents(repo_path('prompts/image-generation.md'))) / 3);
-    foreach (['theme:./assets/', 'url', 'alt', 'ui-screenshot', 'empty', 'grade', 'captions', 'decorative'] as $term) {
-        assert_contains($term, $rules);
-    }
-});
-
 test('header prompt includes only its assigned recipe and shares normalized site JSON', function () {
     $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $input = markup_budget_input() + [

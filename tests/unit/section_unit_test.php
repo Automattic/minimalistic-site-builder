@@ -355,7 +355,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'composition'       => $composition,
         'item_pattern_assignment' => 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.',
         'header_contract'   => $input['header_contract'],
-        'image_instructions' => rtrim($renderer->render('image-markup.md', [])),
+        'image_instructions' => $renderer->render('image-generation.md', []),
         'form_instructions'  => $renderer->render('no-forms.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),

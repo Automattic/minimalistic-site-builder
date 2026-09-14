@@ -182,10 +182,10 @@ test('section prompt freezes site, build, page, and brief layer boundaries', fun
     [$page, $brief] = explode($briefMarker, $afterPage, 2);
 
     assert_eq('{{site_context}}', trim($site));
-    assert_contains('{{image_instructions}}', $page);
     foreach ([
         '{{language}}',
         '{{card_style}}',
+        '{{image_instructions}}',
         '{{block_markup_output_contract}}',
         '{{motion_instructions}}',
         '{{card_instructions}}',
