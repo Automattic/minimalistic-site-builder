@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\PromptCacheGate;
 use Automattic\SiteBuild\PromptCacheSchedule;
 use Automattic\SiteBuild\RollingPool;
 
@@ -69,15 +70,16 @@ test('each cache deadline starts when its writer starts', function () {
         'visit-1' => cache_schedule_body(['site', 'visit']),
         'visit-2' => cache_schedule_body(['site', 'visit']),
     ], static function () use (&$now): float { return $now; });
+    $deadline = PromptCacheGate::DEFAULT_DEADLINE_SECONDS;
     $schedule->start('home');
-    $now = 10.0;
+    $now = $deadline;
     assert_eq(true, $schedule->canStart('visit-1'));
-    $now = 20.0;
+    $now = 2 * $deadline;
     $schedule->start('visit-1');
     assert_eq(false, $schedule->canStart('visit-2'));
-    $now = 29.9;
+    $now = 3 * $deadline - 0.1;
     assert_eq(false, $schedule->canStart('visit-2'));
-    $now = 30.0;
+    $now = 3 * $deadline;
     assert_eq(true, $schedule->canStart('visit-2'));
 });
 
