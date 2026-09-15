@@ -31,6 +31,15 @@ use Automattic\SiteBuild\StepDeclaration;
  * second one is why every count here is reported — a page that kept every
  * placeholder and returned success is the failure this stage is most likely to
  * have.
+ *
+ * A page the host supplied as markup is written one of three ways, and the
+ * request says which. With declared `slots`, only those slots change: bindings
+ * come from the facts and never reach the model, the author's instruction and
+ * word limit are what the model is given, and the declared fallback is what a
+ * slot keeps when the answer will not do (`DeclaredSlots`). With no `slots`
+ * key, slots are discovered the way a composed page's are, and `ai-ignore` is
+ * the opt-out. With `slots: []` the page is frozen: nothing is asked, nothing
+ * is written, and the report says so.
  */
 final class PersonalizeContentStep implements Step
 {
@@ -85,6 +94,7 @@ final class PersonalizeContentStep implements Step
 
         $warnings = [];
         $slotsFound = 0;
+        $writable = 0;
 
         foreach ($layouts as $layout) {
             $slug = (string) ($layout['slug'] ?? '');
@@ -104,6 +114,7 @@ final class PersonalizeContentStep implements Step
 
             $written = $this->writePage($project, $slug, $page, $layout, $inputs);
             $slotsFound += $written['slots'];
+            $writable += $written['frozen'] ? 0 : 1;
             $warnings = array_merge($warnings, $written['warnings']);
         }
 
@@ -111,8 +122,9 @@ final class PersonalizeContentStep implements Step
         // The pages exist, the build reports success, and the site goes out
         // carrying the placeholder copy the patterns shipped with. Observed
         // against an inventory whose entries were empty markup: four pages,
-        // no model call, no warning, 0.00s.
-        if ($slotsFound === 0) {
+        // no model call, no warning, 0.00s. A site the host froze page by page
+        // is the one case where writing nothing is what was asked.
+        if ($writable > 0 && $slotsFound === 0) {
             throw new \RuntimeException(
                 'No page offered a single piece of text to write. The chosen patterns hold no '
                 . 'heading, paragraph, button or list item, which usually means the inventory '
@@ -129,7 +141,7 @@ final class PersonalizeContentStep implements Step
      * @param array<string, mixed> $page
      * @param array<string, mixed> $layout
      * @param array<string, mixed> $inputs
-     * @return array{slots: int, warnings: list<string>}
+     * @return array{slots: int, frozen: bool, warnings: list<string>}
      */
     private function writePage(
         Project $project,
@@ -138,11 +150,76 @@ final class PersonalizeContentStep implements Step
         array $layout,
         array $inputs,
     ): array {
-        $markup = self::sectionsOf($layout);
+        $provenance = (string) ($layout['provenance'] ?? 'composed');
+
+        // A supplied page is hashed and written as the host sent it, byte for
+        // byte; a composed page is its sections joined.
+        $markup = $provenance === 'blueprint'
+            ? (string) ($layout['sections'][0]['content'] ?? '')
+            : self::sectionsOf($layout);
         if (trim($markup) === '') {
             throw new \RuntimeException(sprintf('Page "%s" composed to no markup at all.', $slug));
         }
 
+        $declared = $provenance === 'blueprint' ? self::declaredSlots($inputs, $slug) : null;
+
+        if ($declared === []) {
+            $this->writeArtifact($project, $slug, $page, $provenance, $markup, $markup, true);
+
+            return [
+                'slots' => 0,
+                'frozen' => true,
+                'warnings' => [sprintf('%s: frozen by the host, so nothing on it was written', $slug)],
+            ];
+        }
+
+        $written = $declared === null
+            ? $this->writeDiscovered($slug, $page, $markup, $inputs)
+            : $this->writeDeclared($slug, $page, $markup, $declared, $inputs);
+
+        $this->writeArtifact($project, $slug, $page, $provenance, $markup, $written['markup'], false);
+
+        return ['slots' => $written['slots'], 'frozen' => false, 'warnings' => $written['warnings']];
+    }
+
+    /**
+     * The page's file: the plan's metadata, the words, and the hash of the
+     * markup they were written into, so the bundle can say what the host
+     * supplied and what came back.
+     *
+     * @param array<string, mixed> $page
+     */
+    private function writeArtifact(
+        Project $project,
+        string $slug,
+        array $page,
+        string $provenance,
+        string $source,
+        string $content,
+        bool $frozen,
+    ): void {
+        $project->writeJson(rtrim(PatternArtifacts::PAGES, '*') . $slug . '.json', [
+            'slug' => $slug,
+            'title' => (string) ($page['title'] ?? ucfirst($slug)),
+            'front' => (bool) ($page['front'] ?? false),
+            'menu_order' => (int) ($page['menu_order'] ?? 0),
+            'provenance' => $provenance,
+            'source_hash' => hash('sha256', $source),
+            'frozen' => $frozen,
+            'content' => $content,
+        ]);
+    }
+
+    /**
+     * Slots found in the markup: bindings first, then whatever text the
+     * blocks hold, with `ai-ignore` as the opt-out.
+     *
+     * @param array<string, mixed> $page
+     * @param array<string, mixed> $inputs
+     * @return array{markup: string, slots: int, warnings: list<string>}
+     */
+    private function writeDiscovered(string $slug, array $page, string $markup, array $inputs): array
+    {
         $facts = is_array($inputs['facts'] ?? null) ? $inputs['facts'] : [];
         $bindings = ContentBindings::apply($markup, $facts);
         $declaredFeatures = is_array($facts['features'] ?? null) && $facts['features'] !== [];
@@ -151,21 +228,111 @@ final class PersonalizeContentStep implements Step
 
         $asked = $request === []
             ? ['answers' => [], 'reasons' => []]
-            : $this->ask($request, $slug, $page, $inputs);
+            : $this->ask($request, $slug, $page, $inputs, false);
         $outcome = $slots->fill($asked['answers']);
 
-        $project->writeJson(rtrim(PatternArtifacts::PAGES, '*') . $slug . '.json', [
-            'slug' => $slug,
-            'title' => (string) ($page['title'] ?? ucfirst($slug)),
-            'front' => (bool) ($page['front'] ?? false),
-            'menu_order' => (int) ($page['menu_order'] ?? 0),
-            'content' => $outcome['markup'],
-        ]);
-
         return [
+            'markup' => $outcome['markup'],
             'slots' => count($request),
             'warnings' => self::warnings($slug, $request, $bindings, $outcome, $asked['reasons'], $declaredFeatures),
         ];
+    }
+
+    /**
+     * Only the slots the author declared. A bound slot takes its value from
+     * the facts and is never shown to the model; a slot with an instruction is
+     * asked for, at the author's word limit, and keeps its declared fallback
+     * when the answer will not do. The model never sees the page's other text.
+     *
+     * @param array<string, mixed>       $page
+     * @param list<array<string, mixed>> $declared
+     * @param array<string, mixed>       $inputs
+     * @return array{markup: string, slots: int, warnings: list<string>}
+     */
+    private function writeDeclared(string $slug, array $page, string $markup, array $declared, array $inputs): array
+    {
+        $facts = is_array($inputs['facts'] ?? null) ? $inputs['facts'] : [];
+        $compiled = new DeclaredSlots($markup, $declared);
+
+        $values = [];
+        $request = [];
+        $fallbacks = [];
+        $warnings = [];
+        $kept = [];
+
+        foreach ($compiled->inventory() as $slot) {
+            $id = (string) $slot['id'];
+            $fallbacks[$id] = (string) $slot['fallback'];
+
+            if (isset($slot['binding'])) {
+                $value = $facts[(string) $slot['binding']] ?? null;
+                $value = is_scalar($value) ? (string) $value : null;
+                $error = $value === null ? 'the facts carry no ' . $slot['binding'] : DeclaredSlots::valueError($slot, $value);
+                if ($error !== null) {
+                    $values[$id] = (string) $slot['fallback'];
+                    $kept[] = $id . ' (' . $error . ')';
+                    continue;
+                }
+                $values[$id] = $value;
+                continue;
+            }
+
+            $request[] = [
+                'id' => $id,
+                'block' => (string) $slot['block_name'],
+                'field' => (string) $slot['field'],
+                'instruction' => (string) ($slot['instruction'] ?? ''),
+                'example' => (string) $slot['example'],
+                'max_words' => (int) ($slot['max_words'] ?? 0),
+            ];
+        }
+
+        $asked = $request === []
+            ? ['answers' => [], 'reasons' => []]
+            : $this->ask($request, $slug, $page, $inputs, true);
+
+        foreach ($request as $slot) {
+            $id = (string) $slot['id'];
+            if (isset($asked['answers'][$id])) {
+                $values[$id] = $asked['answers'][$id];
+                continue;
+            }
+            $values[$id] = $fallbacks[$id];
+            $kept[] = $id . ' (' . ($asked['reasons'][$id] ?? 'unknown') . ')';
+        }
+
+        if ($request === []) {
+            $warnings[] = sprintf('%s: every declared slot is bound, so the model was not asked', $slug);
+        }
+        if ($kept !== []) {
+            $warnings[] = sprintf(
+                '%s: %d of %d declared slots kept their fallback: %s',
+                $slug,
+                count($kept),
+                count($declared),
+                implode(', ', $kept),
+            );
+        }
+
+        return ['markup' => $compiled->serialize($values), 'slots' => count($request), 'warnings' => $warnings];
+    }
+
+    /**
+     * What the host declared for a supplied page: null to discover, a list
+     * to honour, an empty list to freeze.
+     *
+     * @param array<string, mixed> $inputs
+     * @return list<array<string, mixed>>|null
+     */
+    private static function declaredSlots(array $inputs, string $slug): ?array
+    {
+        foreach ($inputs['pages'] ?? [] as $page) {
+            if ((string) ($page['slug'] ?? '') === $slug && NormalizeInputsStep::isSupplied($page)) {
+                return is_array($page['slots'] ?? null) ? array_values($page['slots']) : null;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -175,21 +342,23 @@ final class PersonalizeContentStep implements Step
      * @param list<array<string, mixed>> $request
      * @param array<string, mixed>       $page
      * @param array<string, mixed>       $inputs
+     * @param bool                       $strict Declared slots: the author's limit, no buffer.
      * @return array{answers: array<string, string>, reasons: array<string, string>}
      */
-    private function ask(array $request, string $slug, array $page, array $inputs): array
+    private function ask(array $request, string $slug, array $page, array $inputs, bool $strict): array
     {
-        $round = self::read($this->call($request, $slug, $page, $inputs), $request);
+        $round = self::read($this->call($request, $slug, $page, $inputs), $request, $strict);
         $answers = $round['answers'];
         $reasons = $round['reasons'];
         $missing = self::unanswered($request, $answers);
 
         // Asking again for everything is a second full generation that may fail
         // the same way; asking for nothing leaves the page half written. Big
-        // Sky's rule, kept: one more round, only for what failed, and only when
-        // something did come back.
-        if ($missing !== [] && count($missing) < count($request)) {
-            $retry = self::read($this->call($missing, $slug, $page, $inputs), $missing);
+        // Sky's rule, kept for discovered slots: one more round, only for what
+        // failed, and only when something did come back. A declared slot is
+        // one the author asked for by name, so it gets its one re-ask either way.
+        if ($missing !== [] && ($strict || count($missing) < count($request))) {
+            $retry = self::read($this->call($missing, $slug, $page, $inputs), $missing, $strict);
             $answers += $retry['answers'];
             $reasons = array_merge($reasons, $retry['reasons']);
         }
@@ -213,7 +382,7 @@ final class PersonalizeContentStep implements Step
             'slug' => $slug,
             'title' => (string) ($page['title'] ?? $slug),
             'purpose' => (string) ($page['description'] ?? 'Not stated.'),
-            'locale' => (string) ($inputs['locale'] ?? 'en'),
+            'language' => LocaleLabel::describe((string) ($inputs['locale'] ?? 'en')),
             'slots' => (string) json_encode($request, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
             'notes' => trim((string) ($inputs['facts']['notes'] ?? '')) ?: 'None.',
         ]);
@@ -245,13 +414,15 @@ final class PersonalizeContentStep implements Step
      * @param list<array<string, mixed>> $request
      * @return array{answers: array<string, string>, reasons: array<string, string>}
      */
-    private static function read(array $response, array $request): array
+    private static function read(array $response, array $request, bool $strict): array
     {
         $limits = [];
         $blocks = [];
+        $fields = [];
         foreach ($request as $slot) {
             $limits[(string) $slot['id']] = (int) $slot['max_words'];
             $blocks[(string) $slot['id']] = (string) $slot['block'];
+            $fields[(string) $slot['id']] = (string) ($slot['field'] ?? 'text');
         }
 
         $answers = [];
@@ -269,19 +440,30 @@ final class PersonalizeContentStep implements Step
                 continue;
             }
 
-            if ($text === '') {
+            if ($text === '' && $fields[$id] !== 'alt') {
                 $reasons[$id] = 'the model returned an empty string';
                 continue;
             }
 
+            // A declared limit is the author's, and the author counted. A
+            // discovered limit is measured from the pattern's own copy, and
+            // Big Sky's buffer over it is kept: models miscount words.
             $limit = $limits[$id];
             $words = ContentSlots::wordCount($text);
-            if ($limit > 0 && $words > $limit + self::WORD_BUFFER) {
+            if ($limit > 0 && $words > $limit + ($strict ? 0 : self::WORD_BUFFER)) {
                 $reasons[$id] = sprintf('%d words where the pattern has room for %d', $words, $limit);
                 continue;
             }
 
-            $answers[$id] = $blocks[$id] === 'core/heading' ? self::sentenceCase($text) : $text;
+            if ($strict) {
+                $error = DeclaredSlots::valueError(['field' => $fields[$id], 'block_name' => $blocks[$id]], $text);
+                if ($error !== null) {
+                    $reasons[$id] = $error;
+                    continue;
+                }
+            }
+
+            $answers[$id] = $blocks[$id] === 'core/heading' && !$strict ? self::sentenceCase($text) : $text;
         }
 
         return ['answers' => $answers, 'reasons' => array_diff_key($reasons, $answers)];

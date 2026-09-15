@@ -328,3 +328,204 @@ test('a single page with nothing to write is reported and the build goes on', fu
     assert_contains('gallery: no slot to write into', (string) json_encode($project->readJson('warnings.json')));
     assert_contains('Who is speaking', personalize_page($project)['content']);
 });
+
+function personalize_supplied_markup(): string
+{
+    return '<!-- wp:heading --><h2 class="wp-block-heading">Contact us</h2><!-- /wp:heading -->'
+        . "\n" . '<!-- wp:paragraph --><p>Write to hello@example.com</p><!-- /wp:paragraph -->'
+        . "\n" . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/old/">Book</a></div><!-- /wp:button --></div><!-- /wp:buttons -->';
+}
+
+/**
+ * A supplied page in a project: the plan marks it supplied, the layout
+ * carries its markup with blueprint provenance, and the normalized inputs
+ * hold the slot declaration the host sent (null, a list, or []).
+ *
+ * @param list<array<string, mixed>>|null $slots
+ * @param array<string, mixed>            $facts
+ */
+function personalize_supplied_project(?array $slots, array $facts = []): Project
+{
+    $project = personalize_project('', $facts, [[
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'front' => false,
+        'menu_order' => 10,
+        'description' => '',
+        'supplied' => true,
+    ]]);
+
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['pages'] = [['slug' => 'contact', 'title' => 'Contact', 'markup' => personalize_supplied_markup(), 'slots' => $slots]];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+    $project->writeJson(PatternArtifacts::LAYOUTS, ['pages' => [[
+        'slug' => 'contact',
+        'provenance' => 'blueprint',
+        'sections' => [['pattern' => null, 'content' => personalize_supplied_markup()]],
+    ]]]);
+
+    return $project;
+}
+
+function personalize_declared_slots(): array
+{
+    return [
+        ['id' => 'contact-heading', 'block_path' => [0], 'field' => 'text', 'fallback' => 'Contact us', 'instruction' => 'A warm heading', 'max_words' => 3],
+        ['id' => 'contact-email', 'block_path' => [1], 'field' => 'text', 'fallback' => 'Write to hello@example.com', 'binding' => 'email'],
+        ['id' => 'contact-url', 'block_path' => [2, 0], 'field' => 'url', 'fallback' => '/old/', 'binding' => 'contact_url'],
+    ];
+}
+
+/**
+ * Declared slots: the model is asked only for the slot with an instruction,
+ * sees that instruction, never sees the bound ones, and the bound ones take
+ * the facts' values. Every other byte of the page survives.
+ */
+test('declared slots change and nothing else does', function () {
+    $project = personalize_supplied_project(personalize_declared_slots(), [
+        'intent' => 'Book calls.',
+        'email' => 'ola@northwind.example',
+        'contact_url' => '/contact/',
+    ]);
+    $prompts = null;
+
+    personalize_step(personalize_llm([personalize_reply(['contact-heading' => 'Vamos conversar'])], $prompts))->run($project);
+
+    $page = personalize_page($project, 'contact');
+    assert_contains('<h2 class="wp-block-heading">Vamos conversar</h2>', $page['content']);
+    assert_contains('<p>ola@northwind.example</p>', $page['content']);
+    assert_contains('href="/contact/"', $page['content']);
+    assert_contains('class="wp-block-button__link wp-element-button"', $page['content']);
+    assert_eq(1, count($prompts));
+    assert_contains('A warm heading', (string) $prompts[0]);
+    assert_eq(false, str_contains((string) $prompts[0], 'contact-email'), 'a bound slot is not offered to the model');
+    assert_eq('blueprint', $page['provenance']);
+    assert_eq(hash('sha256', personalize_supplied_markup()), $page['source_hash']);
+});
+
+/**
+ * The author's limit is the author's. A declared three-word heading that
+ * comes back as a sentence keeps the declared fallback, and the report says
+ * which slot and why.
+ */
+test('a declared slot whose answer breaks its limit keeps the declared fallback', function () {
+    $project = personalize_supplied_project(personalize_declared_slots(), ['email' => 'a@b.c', 'contact_url' => '/c/']);
+
+    personalize_step(personalize_llm([
+        personalize_reply(['contact-heading' => 'A heading that runs well past three words']),
+        personalize_reply(['contact-heading' => 'Still far too long for the slot']),
+    ]))->run($project);
+
+    assert_contains('>Contact us<', personalize_page($project, 'contact')['content']);
+    $warnings = (string) json_encode($project->readJson('warnings.json'));
+    assert_contains('kept their fallback', $warnings);
+    assert_contains('contact-heading', $warnings);
+    assert_contains('room for 3', $warnings);
+});
+
+test('a bound slot whose fact is missing keeps its fallback and says so', function () {
+    $project = personalize_supplied_project(personalize_declared_slots(), ['contact_url' => '/c/']);
+
+    personalize_step(personalize_llm([personalize_reply(['contact-heading' => 'Say hello'])]))->run($project);
+
+    assert_contains('>Write to hello@example.com<', personalize_page($project, 'contact')['content']);
+    assert_contains('carry no email', (string) json_encode($project->readJson('warnings.json')));
+});
+
+/**
+ * No `slots` key: the page is written the way a composed page is, every
+ * text-bearing block a slot and ai-ignore the opt-out.
+ */
+test('a supplied page with no slot declaration has its slots discovered', function () {
+    $project = personalize_supplied_project(null);
+    $prompts = null;
+
+    personalize_step(personalize_llm([personalize_reply([
+        'contact-1' => 'Say hello',
+        'contact-2' => 'Write to us any time.',
+        'contact-3-1' => 'Book now',
+    ])], $prompts))->run($project);
+
+    $page = personalize_page($project, 'contact');
+    assert_contains('>Say hello<', $page['content']);
+    assert_contains('>Book now<', $page['content']);
+    assert_contains('href="/old/"', $page['content']);
+    assert_eq(1, count($prompts));
+});
+
+/**
+ * `slots: []` is the host saying: this page is right as it is. No call, no
+ * change, and the report says the page was frozen rather than silently
+ * written as-is.
+ */
+test('a frozen page is written untouched with no model call', function () {
+    $project = personalize_supplied_project([]);
+    $prompts = null;
+
+    personalize_step(personalize_llm([], $prompts))->run($project);
+
+    $page = personalize_page($project, 'contact');
+    assert_eq(personalize_supplied_markup(), $page['content']);
+    assert_eq(true, $page['frozen']);
+    assert_eq(0, count($prompts));
+    assert_contains('contact: frozen by the host', (string) json_encode($project->readJson('warnings.json')));
+});
+
+/**
+ * A site the host froze page by page has nothing to write, and that is what
+ * was asked; the no-slot guard is for pages that were meant to be written.
+ */
+test('a site of only frozen pages is not a failure', function () {
+    $project = personalize_supplied_project([]);
+
+    personalize_step(personalize_llm([]))->run($project);
+
+    assert_eq(true, $project->exists(rtrim(PatternArtifacts::PAGES, '*') . 'contact.json'));
+});
+
+/** The locale reaches the prompt as a language, not only as a code. */
+test('the model is told which language to write in', function () {
+    $project = personalize_project();
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['locale'] = 'pt_BR';
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+    $prompts = null;
+
+    personalize_step(personalize_llm([personalize_reply(['speakers-1' => 'Quem fala'])], $prompts))->run($project);
+
+    assert_contains('Portuguese (Brazil) (pt_BR)', (string) $prompts[0]);
+});
+
+/**
+ * A declared slot is one the author asked for by name. When the whole answer
+ * came back empty it is still asked once more, and only then keeps its
+ * fallback, named in the report.
+ */
+test('a declared slot the model skipped entirely is asked once more', function () {
+    $project = personalize_supplied_project(personalize_declared_slots(), ['email' => 'a@b.c', 'contact_url' => '/c/']);
+    $prompts = null;
+
+    personalize_step(personalize_llm([['content' => []], ['content' => []]], $prompts))->run($project);
+
+    assert_eq(2, count($prompts));
+    assert_contains('>Contact us<', personalize_page($project, 'contact')['content']);
+    assert_contains('contact-heading (the model returned nothing for it)', (string) json_encode($project->readJson('warnings.json')));
+});
+
+/** The hash a supplied page carries is of the markup exactly as the host sent it. */
+test('a supplied page is hashed and written byte for byte', function () {
+    $project = personalize_supplied_project([]);
+    $padded = "\n\n" . personalize_supplied_markup() . "\n";
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['pages'][0]['markup'] = $padded;
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+    $project->writeJson(PatternArtifacts::LAYOUTS, ['pages' => [[
+        'slug' => 'contact', 'provenance' => 'blueprint', 'sections' => [['pattern' => null, 'content' => $padded]],
+    ]]]);
+
+    personalize_step(personalize_llm([]))->run($project);
+
+    $page = personalize_page($project, 'contact');
+    assert_eq($padded, $page['content']);
+    assert_eq(hash('sha256', $padded), $page['source_hash']);
+});
