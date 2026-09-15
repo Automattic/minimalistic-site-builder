@@ -63,6 +63,7 @@ final class StepComposition
     /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
     public const GRAPH_HTML_FIRST = 'html-first';
     public const GRAPH_BLOCKS = 'blocks';
+    public const GRAPH_PATTERNS = 'patterns';
 
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
