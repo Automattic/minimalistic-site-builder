@@ -4844,6 +4844,63 @@ final class GeneratedMarkup
         }
         return $changed ? $document->render() : $markup;
     }
+    /** Apply the brief's wordmark case to the hero H1. */
+    public static function withHeroWordmarkCase(string $markup, ?string $case, string $part, array &$repairs = []): string
+    {
+        $caseClass = match ($case) {
+            'uppercase' => 'hero-wordmark--upper',
+            'lowercase' => 'hero-wordmark--lower',
+            default => null,
+        };
+        if ($caseClass === null) {
+            return $markup;
+        }
+        $document = BlockMarkup::parse($markup);
+        if ($document->hasMismatchedDelimiters() || $document->hasMalformedDelimiters()) {
+            return $markup;
+        }
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'heading' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $own = $document->ownHtml($index);
+            if (preg_match('/<h1\b/', $own) !== 1) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $tokens = array_values(array_filter(
+                $tokens,
+                static fn (string $c): bool => !in_array($c, ['hero-wordmark--upper', 'hero-wordmark--lower'], true),
+            ));
+            $tokens[] = $caseClass;
+            $attrs['className'] = implode(' ', $tokens);
+            $document->setAttrs($index, $attrs);
+            foreach (['hero-wordmark--upper', 'hero-wordmark--lower'] as $stale) {
+                if ($stale !== $caseClass) {
+                    $document->removeClassTokenInOwnHtml($index, $stale);
+                }
+            }
+            if (preg_match('/\bclass="[^"]*\b' . preg_quote($caseClass, '/') . '\b/', $document->ownHtml($index)) !== 1) {
+                $document->replaceInOwnHtml($index, 'class="', 'class="' . $caseClass . ' ');
+            }
+            $delivered = $document->render();
+            if ($delivered === $markup) {
+                return $markup;
+            }
+            $repairs[] = [
+                'code' => 'hero-wordmark-case',
+                'part' => $part,
+                'authored' => 'hero wordmark',
+                'delivered' => $caseClass,
+                'disposition' => 'repaired',
+            ];
+            return $delivered;
+        }
+        return $markup;
+    }
+
+
     /**
      * Collapse a paragraph or heading whose text is one phrase written three
      * or more times in a row ("MORE PROJECTS — MORE PROJECTS — MORE

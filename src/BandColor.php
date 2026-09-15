@@ -26,7 +26,11 @@ final class BandColor
         'blush' => 345.0,
     ];
 
-    public static function valid(string $base, string $band): bool
+    /**
+     * @param string|null $statedFamily a band family the brief states (frm
+     *        PR-2ag): the band must sit in it instead of in the base's family
+     */
+    public static function valid(string $base, string $band, ?string $statedFamily = null): bool
     {
         $baseRgb = ContrastMath::hexToRgb($base);
         $bandRgb = ContrastMath::hexToRgb($band);
@@ -45,7 +49,11 @@ final class BandColor
         // are one family whatever the classifier calls each side.
         $nearGrey = static fn (array $rgb): bool =>
             GroundTint::chromaOf($rgb) <= GroundTint::NEUTRAL_CHROMA * 2;
-        if ($bandFamily !== $baseFamily && !($nearGrey($baseRgb) && $nearGrey($bandRgb))) {
+        if ($statedFamily !== null) {
+            if ($bandFamily !== $statedFamily) {
+                return false;
+            }
+        } elseif ($bandFamily !== $baseFamily && !($nearGrey($baseRgb) && $nearGrey($bandRgb))) {
             return false;
         }
         $baseLightness = self::toHsl($baseRgb)[2];

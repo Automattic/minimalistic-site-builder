@@ -12,6 +12,56 @@ namespace Automattic\SiteBuild;
  */
 final class HeroComposition
 {
+    /**
+     * Phrases that state the case of the wordmark hero (frm PR-2ac):
+     * dasstudio's "huge uppercase wordmark hero" shipped "Studio Grund" in
+     * mixed case, and fabrica's "giant lowercase wordmark" shipped
+     * "Luminous"; the phrase picked the recipe and nothing carried the case.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_WORDMARK_CASE_PHRASES = [
+        'uppercase' => [
+            'uppercase wordmark', 'uppercase name', 'uppercase site name', 'wordmark in capitals',
+            'all-caps wordmark', 'all caps wordmark', 'capitalised wordmark', 'capitalized wordmark',
+            'name in capitals', 'name set in capitals',
+        ],
+        'lowercase' => [
+            'lowercase wordmark', 'lowercase name', 'lowercase site name', 'all-lowercase wordmark',
+            'all lowercase wordmark', 'wordmark in lowercase', 'name in lowercase',
+        ],
+    ];
+
+    /** The wordmark case a brief states in so many words, or null. */
+    public static function statedWordmarkCase(string $brief): ?string
+    {
+        $brief = AffirmativeBrief::text($brief);
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_WORDMARK_CASE_PHRASES as $case => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedWordmarkCaseFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $case = self::statedWordmarkCase($text);
+                if ($case !== null) {
+                    return $case;
+                }
+            }
+        }
+        return null;
+    }
+
     /** @var list<string> */
     public const RECIPES = [
         'cinematic-safe-zone',

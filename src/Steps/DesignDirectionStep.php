@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\AccentHue;
+use Automattic\SiteBuild\AffirmativeBrief;
+use Automattic\SiteBuild\BandTint;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\HeadingEmphasis;
@@ -241,6 +244,50 @@ final class DesignDirectionStep implements Step
             'color_economy' => $seedColorEconomy,
             'choice'        => $seedChoice,
         ] = $this->chooseSeed($prompt, $spec, $warnings);
+        // A ground the brief states in so many words outranks the seed's
+        // (frm PR-4g): the prompt rule alone held on one rerun in two.
+        $statedGround = self::statedGroundFor($meta);
+        $groundRepair = null;
+        if ($statedGround !== null && $seedGround !== $statedGround) {
+            $groundRepair = 'designDirection.json: field ground_key seed committed '
+                . self::describe($seedGround === '' ? null : $seedGround) . ' delivered '
+                . self::describe($statedGround) . '; disposition the brief names its ground, so the seed yields to it';
+            $seedGround = $statedGround;
+        }
+        // A page tint the brief states outranks the seed's the same way
+        // (frm PR-4t): zova-like32's "White page" met a seed that committed
+        // a warm cream.
+        $statedTint = self::statedTintFor($meta);
+        $tintRepair = null;
+        if ($statedTint !== null && $seedTint !== $statedTint) {
+            $tintRepair = 'designDirection.json: field ground_tint seed committed '
+                . self::describe($seedTint === '' ? null : $seedTint) . ' delivered '
+                . self::describe($statedTint) . '; disposition the brief names its page tint, so the seed yields to it';
+            $seedTint = $statedTint;
+        }
+        // A letterform tradition the brief states outranks the seed's the
+        // same way (frm PR-5f): cohesion-like14 set a serif display on a
+        // "bold black type" brief because the seed chose a serif tradition.
+        $statedType = self::statedTypeRegisterFor($meta);
+        $typeRepair = null;
+        if ($statedType !== null && $seedTypeRegister !== $statedType) {
+            $typeRepair = 'designDirection.json: field type_register seed committed '
+                . self::describe($seedTypeRegister === '' ? null : $seedTypeRegister) . ' delivered '
+                . self::describe($statedType) . '; disposition the brief names its letterform tradition, so the seed yields to it';
+            $seedTypeRegister = $statedType;
+        }
+        // A hue budget the brief states outranks the seed's the same way
+        // (frm PR-4v): calderr-like20's "every letter and line in one cobalt
+        // blue" met three single-accent seeds, and the palette floor then
+        // rotated the accent to a violet the brief never asked for.
+        $statedEconomy = self::statedEconomyFor($meta);
+        $economyRepair = null;
+        if ($statedEconomy !== null && $seedColorEconomy !== $statedEconomy) {
+            $economyRepair = 'designDirection.json: field color_economy seed committed '
+                . self::describe($seedColorEconomy === '' ? null : $seedColorEconomy) . ' delivered '
+                . self::describe($statedEconomy) . '; disposition the brief names its hue budget, so the seed yields to it';
+            $seedColorEconomy = $statedEconomy;
+        }
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -317,7 +364,7 @@ final class DesignDirectionStep implements Step
                 . 'disposition fallback';
         }
 
-        $repairs = [];
+        $repairs = array_values(array_filter([$groundRepair, $tintRepair, $typeRepair, $economyRepair], static fn (?string $r): bool => $r !== null));
         $direction = self::normalize(
             $payload['direction'] ?? null,
             $recipe,
@@ -329,6 +376,7 @@ final class DesignDirectionStep implements Step
             $seedColorEconomy,
             $seedRegister,
             $seedTypeRegister,
+            BandTint::statedFor($meta)['tint'] ?? null,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -358,6 +406,8 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired to caller-owned design_constraints.hero_canvas';
             $direction['canvas'] = $constraints['hero_canvas'];
         }
+
+        $direction = self::withStatedDirection($direction, $meta, isset($constraints['hero_canvas']), $repairs, $warnings);
 
         if ($repairs !== []) {
             Narrator::write('  [design-direction] repaired ' . count($repairs)
@@ -878,6 +928,7 @@ final class DesignDirectionStep implements Step
         string $conceptColorEconomy = '',
         string $conceptRegister = '',
         string $conceptTypeRegister = '',
+        ?string $statedBandTint = null,
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -946,13 +997,15 @@ final class DesignDirectionStep implements Step
 
         if (isset($palette['base'])) {
             $authoredBand = $palette['band'] ?? null;
-            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand)) {
-                $band = BandColor::fromBase($palette['base']);
+            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand, $statedBandTint)) {
+                $band = $statedBandTint !== null ? BandTint::apply($palette['base'], $statedBandTint) : BandColor::fromBase($palette['base']);
                 if ($band !== null) {
                     $palette['band'] = $band;
                     $repairs[] = 'designDirection.json: field palette.band authored '
                         . self::describe($authoredBand) . ' delivered ' . self::describe($band)
-                        . '; disposition derived a same-family surface 10 lightness points from base '
+                        . ($statedBandTint !== null
+                            ? '; disposition derived a band in the stated tint 10 lightness points from base '
+                            : '; disposition derived a same-family surface 10 lightness points from base ')
                         . 'without crossing the page light/dark key';
                 }
             }
@@ -2389,6 +2442,306 @@ final class DesignDirectionStep implements Step
      * The optional section texture, or `none` when no direction exists
      * or the field is absent.
      */
+    /**
+     * Bounded phrases a brief uses to ask for the framed canvas (frm PR-2p):
+     * parley's "cover hero in a rounded frame". The full-bleed canvas is the
+     * default and needs no phrase.
+     *
+     * @var list<string>
+     */
+    private const STATED_FRAMED_PHRASES = [
+        'in a rounded frame', 'rounded frame', 'framed hero', 'framed page', 'framed canvas', 'inset hero',
+        'hero in a frame', 'hero inset from the edge', 'inset from the viewport', 'page in a frame',
+    ];
+
+    /**
+     * Bounded phrases a brief uses to ask for colour photography (frm
+     * PR-4o): fabrica's "moody colour photography" met a direction that
+     * committed a silver monochrome grade with a duotone treatment.
+     *
+     * @var list<string>
+     */
+    private const STATED_COLOUR_PHRASES = [
+        'colour photography', 'color photography', 'colour photos', 'color photos', 'colour photographs',
+        'color photographs', 'saturated colour', 'saturated color', 'full colour', 'full color',
+        'photos in colour', 'photos in color', 'photography in colour', 'photography in color',
+    ];
+
+    /** Grade words that contradict stated colour photography. */
+    private const MONOCHROME_GRADE = '/\b(?:monochrome|monochromatic|black[- ]and[- ]white|black & white|b&w|grayscale|greyscale|duotone|desaturated|silver[- ]toned|drained(?: toward| towards| of)?(?: warm| cool)? gr[ae]ys?|washed[- ]out|gr[ae]y[- ]toned|near[- ]gr[ae]y)\b/iu';
+
+    /** Whether a brief asks for colour photography in so many words. */
+    public static function statedColourPhotography(string $brief): bool
+    {
+        $brief = AffirmativeBrief::text($brief);
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_COLOUR_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedColourPhotographyFor(array $meta): bool
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedColourPhotography($text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The canvas a brief states in so many words, or null. */
+    public static function statedCanvas(string $brief): ?string
+    {
+        $brief = AffirmativeBrief::text($brief);
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_FRAMED_PHRASES as $phrase) {
+            if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                return 'framed';
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedCanvasFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '' && self::statedCanvas($text) !== null) {
+                return self::statedCanvas($text);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Apply the direction fields the brief states (frm PR-2p) to a
+     * normalized direction: the user's own words outrank the model's
+     * commitment, the way the stated ground, type register and hero already
+     * do, but never a caller-owned constraint. Pure — unit-testable.
+     *
+     * @param array<string,mixed> $direction
+     * @param array<string,mixed> $meta
+     * @param list<string> $repairs
+     * @return array<string,mixed>
+     */
+    public static function withStatedDirection(array $direction, array $meta, bool $canvasPinned, array &$repairs = [], array &$warnings = []): array
+    {
+        $statedCanvas = self::statedCanvasFor($meta);
+        if ($statedCanvas !== null && !$canvasPinned && ($direction['canvas'] ?? null) !== $statedCanvas) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($direction['canvas'] ?? null) . ' delivered '
+                . self::describe($statedCanvas)
+                . '; disposition the brief names its canvas, so the model commitment yields to it';
+            $direction['canvas'] = $statedCanvas;
+        }
+        // frm PR-4o: colour photography the brief states outranks a
+        // monochrome grade and a duotone treatment. The grade prose drives
+        // every generated picture, so its monochrome words are rewritten and
+        // the clause is stated first; the treatment goes back to natural.
+        if (self::statedColourPhotographyFor($meta)) {
+            $grade = trim((string) ($direction['image_grade'] ?? ''));
+            if ($grade !== '' && preg_match(self::MONOCHROME_GRADE, $grade) === 1) {
+                $rewritten = trim((string) preg_replace(self::MONOCHROME_GRADE, 'full colour', $grade));
+                // Two adjacent monochrome words ("silver-toned monochrome") collapse to one clause.
+                $rewritten = (string) preg_replace('/\bfull colour(?:\s+full colour)+\b/u', 'full colour', $rewritten);
+                $direction['image_grade'] = 'Full saturated colour photography. ' . $rewritten;
+                $repairs[] = 'designDirection.json: field image_grade authored a monochrome grade delivered a full-colour grade'
+                    . '; disposition the brief names colour photography, so the model commitment yields to it';
+            }
+            $treatment = (string) ($direction['image_treatment'] ?? '');
+            if (in_array($treatment, ['duotone', 'high-key-bw'], true)) {
+                $repairs[] = 'designDirection.json: field image_treatment authored ' . self::describe($treatment)
+                    . ' delivered "natural"; disposition the brief names colour photography, so the treatment stays natural';
+                $direction['image_treatment'] = 'natural';
+            }
+        }
+        // frm PR-4y: an accent hue the brief states outranks the seed's
+        // accent. parley's "a single orange accent on the buttons" shipped
+        // yellow in four cohorts: the seed authored yellow, and the palette
+        // floor rotated an authored orange away from the orange-brown
+        // primary (the floor now moves the primary for a stated accent).
+        $statedAccent = AccentHue::statedFor($meta);
+        if ($statedAccent !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $accent = is_string($palette['accent'] ?? null) ? $palette['accent'] : null;
+            if ($accent !== null && !AccentHue::inFamily($accent, $statedAccent)) {
+                $fixed = AccentHue::toFamily($accent, $statedAccent);
+                if ($fixed !== null && strcasecmp($fixed, $accent) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.accent authored '
+                        . self::describe($accent) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its accent hue (' . $statedAccent['word']
+                        . '), so the model commitment moves into that hue family and retains its lightness';
+                    $direction['palette']['accent'] = $fixed;
+                } elseif ($fixed === null) {
+                    $warnings[] = 'file="designDirection.json"; path="palette.accent"; authored='
+                        . self::describe($accent) . '; delivered=' . self::describe($accent)
+                        . '; disposition=retained because the stated hue cannot preserve this extreme lightness;'
+                        . ' requested hue=' . self::describe($statedAccent['word']);
+                }
+            }
+        }
+        // A colour the brief names for the PALETTE, not for the accent. The
+        // accent reader above only fires next to "accent"/"button"/"cta", so
+        // "a deep forest green and warm cream palette" reached nothing and
+        // the build shipped a dark brown page with a red accent — none of the
+        // brief's colour anywhere. One role has to carry it, and `primary` is
+        // the brand role: base and contrast answer to the ground key, and the
+        // accent may be separately stated. If any role is already in the
+        // family the brief is satisfied and nothing moves, which is also what
+        // makes this a fixed point.
+        $statedPalette = AccentHue::statedPaletteFamilyFor($meta);
+        if ($statedPalette !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $carried = false;
+            foreach ($palette as $hex) {
+                if (is_string($hex) && AccentHue::inFamily($hex, $statedPalette)) {
+                    $carried = true;
+                    break;
+                }
+            }
+            $primary = is_string($palette['primary'] ?? null) ? $palette['primary'] : null;
+            if (!$carried && $primary !== null) {
+                $fixed = AccentHue::toFamily($primary, $statedPalette);
+                if ($fixed !== null && strcasecmp($fixed, $primary) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.primary authored '
+                        . self::describe($primary) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its palette colour (' . $statedPalette['word']
+                        . ') and no role carried it, so the brand role moves into that hue family'
+                        . ' and retains its lightness';
+                    $direction['palette']['primary'] = $fixed;
+                } elseif ($fixed === null) {
+                    $warnings[] = 'file="designDirection.json"; path="palette.primary"; authored='
+                        . self::describe($primary) . '; delivered=' . self::describe($primary)
+                        . '; disposition=retained because the stated palette hue cannot preserve this extreme'
+                        . ' lightness; requested hue=' . self::describe($statedPalette['word']);
+                }
+            }
+        }
+        // frm PR-2ag: a band colour the brief states beside a surface noun
+        // outranks the grey band derived from the page. zova's "pale blue
+        // gradient panel hero" shipped a neutral panel in six cohorts: the
+        // white page's band is grey, and no reader looked at the panel.
+        $statedBand = BandTint::statedFor($meta);
+        if ($statedBand !== null) {
+            $palette = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+            $base = is_string($palette['base'] ?? null) ? $palette['base'] : null;
+            $band = is_string($palette['band'] ?? null) ? $palette['band'] : null;
+            if ($base !== null && ($band === null || GroundTint::classify($band) !== $statedBand['tint'])) {
+                $fixed = BandTint::apply($base, $statedBand['tint']);
+                if ($fixed !== null && strcasecmp($fixed, (string) $band) !== 0) {
+                    $repairs[] = 'designDirection.json: field palette.band authored '
+                        . self::describe($band) . ' delivered ' . self::describe($fixed)
+                        . '; disposition the brief names its band colour (' . $statedBand['word']
+                        . '), so the band moves into that tint family at its derived lightness';
+                    $direction['palette']['band'] = $fixed;
+                }
+            }
+        }
+        // frm PR-5t: a heading treatment the brief states outranks the seed's.
+        // luzia's "tight sans headings" met caps-tight and every heading
+        // shipped uppercase; a brief that also states uppercase titles keeps
+        // the caps treatment through the same reader.
+        $statedTreatment = TypeTreatment::statedTreatmentFor($meta);
+        if ($statedTreatment !== null) {
+            $committedTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+            // caps-tracked already sets the stated uppercase (frm PR-5u); its
+            // open tracking is the seed's own choice and stands.
+            $caseHolds = $statedTreatment === 'caps-tight' && $committedTreatment === 'caps-tracked'
+                && !TypeTreatment::statedTightFor($meta);
+            if ($committedTreatment !== $statedTreatment && !$caseHolds) {
+                $repairs[] = 'designDirection.json: field type_treatment authored ' . self::describe($committedTreatment)
+                    . ' delivered ' . self::describe($statedTreatment)
+                    . '; disposition the brief states its heading treatment, so the model commitment yields to it';
+                $direction['type_treatment'] = $statedTreatment;
+            }
+        }
+        // frm PR-5s: a stated wordmark case is the wordmark's own case (PR-2ac),
+        // not the site-wide heading treatment. fabrica-like27 read "a giant
+        // lowercase wordmark" as the lowercase treatment and set every heading
+        // and the team names lowercase; dasstudio's "uppercase section titles"
+        // states the heading case too and keeps its caps treatment.
+        $wordmarkCase = HeroComposition::statedWordmarkCaseFor($meta);
+        if ($wordmarkCase !== null && TypeTreatment::statedHeadingCaseFor($meta) === null) {
+            $treatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+            if ($treatment !== null && TypeTreatment::caseOf($treatment) === $wordmarkCase) {
+                $repairs[] = 'designDirection.json: field type_treatment authored ' . self::describe($treatment)
+                    . ' delivered "' . TypeTreatment::DEFAULT . '"; disposition the brief states the case of the wordmark,'
+                    . ' not of the headings, and the wordmark carries its own case, so the headings keep sentence case';
+                $direction['type_treatment'] = TypeTreatment::DEFAULT;
+            }
+        }
+        return $direction;
+    }
+
+    public static function statedTypeRegisterFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = ConceptSeeds::statedTypeRegister($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedEconomyFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = ColorEconomy::statedInBrief($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $meta */
+    public static function statedTintFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = GroundTint::statedInBrief($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
+    public static function statedGroundFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = GroundKey::statedInBrief($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
     public static function surfaceFor(Project $project): string
     {
         if (!$project->exists(self::FILE)) {

@@ -1,0 +1,210 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild;
+
+/**
+ * A stated accent hue (frm PR-4y): the colour family a brief names for its
+ * accent in so many words ("a single orange accent on the buttons", "one
+ * cobalt accent", "red buttons"). parley's brief names orange; the seed
+ * authored yellow in three cohorts, and when the model authored orange the
+ * palette floor's hue-separation repair rotated it to yellow because the
+ * primary is an orange-brown. The stated hue is the seventh stated-axis
+ * reader: the direction's accent is repaired into the family, and the floor
+ * moves the primary away from a stated accent, never the accent.
+ *
+ * Families are HSL hue arcs in degrees (representative, start, end), circular
+ * where an arc crosses zero. Neutral words (black, white, grey, ink) name no
+ * hue and are not accents here.
+ *
+ * English only, and a fixed list. A brief written in another language — which
+ * the pipeline accepts, and which SiteSpecStep::languageOf() already tracks —
+ * reaches no reader here, so the same stated colour is preserved in English
+ * and left to the model in Spanish. Read a null as "no reader matched", never
+ * as "the brief stated nothing".
+ */
+final class AccentHue
+{
+    /** @var array<string, array{0:float,1:float,2:float}> word => [representative, start, end] */
+    public const FAMILIES = [
+        'red'        => [0.0, 345.0, 12.0],
+        'crimson'    => [352.0, 340.0, 6.0],
+        'coral'      => [12.0, 4.0, 22.0],
+        'terracotta' => [18.0, 8.0, 30.0],
+        'rust'       => [20.0, 10.0, 32.0],
+        'orange'     => [28.0, 15.0, 45.0],
+        'amber'      => [42.0, 32.0, 52.0],
+        'ochre'      => [40.0, 30.0, 50.0],
+        'ocher'      => [40.0, 30.0, 50.0],
+        'mustard'    => [46.0, 38.0, 56.0],
+        'yellow'     => [52.0, 45.0, 66.0],
+        'lime'       => [85.0, 66.0, 105.0],
+        'olive'      => [75.0, 55.0, 95.0],
+        'sage'       => [120.0, 90.0, 150.0],
+        'green'      => [130.0, 95.0, 165.0],
+        'emerald'    => [150.0, 135.0, 170.0],
+        'teal'       => [180.0, 165.0, 195.0],
+        'cyan'       => [190.0, 180.0, 205.0],
+        'blue'       => [222.0, 200.0, 250.0],
+        'cobalt'     => [225.0, 212.0, 238.0],
+        'navy'       => [228.0, 215.0, 245.0],
+        'indigo'     => [250.0, 235.0, 265.0],
+        'violet'     => [275.0, 258.0, 292.0],
+        'purple'     => [280.0, 262.0, 300.0],
+        'magenta'    => [310.0, 292.0, 330.0],
+        'pink'       => [335.0, 318.0, 352.0],
+        'burgundy'   => [350.0, 335.0, 5.0],
+        'maroon'     => [355.0, 340.0, 8.0],
+    ];
+
+    /**
+     * The colour family a brief names for the PALETTE rather than for the
+     * accent (frm PR-4y follow-up): "a deep forest green and warm cream
+     * palette", "a palette of cobalt and bone". The accent reader above only
+     * fires next to `accent`, `button`, `cta` or `pill`, so the commonest way
+     * a person states a colour — as the palette's own colour — reached no
+     * reader at all, and the delivered site kept none of it. The evidence
+     * build for that brief shipped a dark brown page with a red accent.
+     *
+     * Deliberately tight. The colour word must sit in the palette's own noun
+     * phrase, so "green energy consultancy with a bold palette" names no
+     * design colour. Neutral words (cream, bone, ink) carry no hue and are
+     * not families here, which is why only one half of a two-colour brief
+     * usually lands — that is the half the build can act on.
+     *
+     * @return array{word:string,hue:float,start:float,end:float}|null
+     */
+    public static function statedPaletteFamily(string $brief): ?array
+    {
+        $brief = AffirmativeBrief::text($brief);
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        $words = implode('|', array_map(
+            static fn (string $word): string => preg_quote($word, '/'),
+            array_keys(self::FAMILIES),
+        ));
+        $noun = '(?:colou?r |colour-|color-)?(?:palette|scheme)';
+        $patterns = [
+            // "forest green palette", "green and warm cream colour palette"
+            '/(?<![\p{L}-])(' . $words . ')(?:-[\p{L}]+)?(?:\s+and\s+[\p{L}\s-]{1,24}?)?\s+' . $noun . '(?![\p{L}-])/u',
+            // "a palette of forest green and cream", "scheme in cobalt"
+            '/(?<![\p{L}-])' . $noun . '\s+(?:of|in|around)\s+[\p{L}\s-]{0,20}?(' . $words . ')(?![\p{L}-])/u',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $m) === 1) {
+                $word = $m[1];
+                [$hue, $start, $end] = self::FAMILIES[$word];
+                return ['word' => $word, 'hue' => $hue, 'start' => $start, 'end' => $end];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The stated palette family for a build's meta, or null.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{word:string,hue:float,start:float,end:float}|null
+     */
+    public static function statedPaletteFamilyFor(array $meta): ?array
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $family = self::statedPaletteFamily($text);
+                if ($family !== null) {
+                    return $family;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The accent family a brief names, or null.
+     *
+     * @return array{word:string,hue:float,start:float,end:float}|null
+     */
+    public static function statedInBrief(string $brief): ?array
+    {
+        $brief = AffirmativeBrief::text($brief);
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        $words = implode('|', array_map(
+            static fn (string $word): string => preg_quote($word, '/'),
+            array_keys(self::FAMILIES),
+        ));
+        $patterns = [
+            // "a single orange accent", "one cobalt accent", "orange accent on the buttons"
+            '/(?<![\p{L}-])(' . $words . ')(?:-[\p{L}]+)? accents?(?![\p{L}-])/u',
+            // "accent in orange", "an accent of cobalt"
+            '/(?<![\p{L}-])accents? (?:in|of) (' . $words . ')(?![\p{L}-])/u',
+            // "orange buttons", "a red CTA", "cobalt pill CTA"
+            '/(?<![\p{L}-])(' . $words . ') (?:pill )?(?:buttons?|ctas?|pills?)(?![\p{L}-])/u',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $m) === 1) {
+                $word = $m[1];
+                [$hue, $start, $end] = self::FAMILIES[$word];
+                return ['word' => $word, 'hue' => $hue, 'start' => $start, 'end' => $end];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The stated accent family from a build's meta, the user's own words
+     * first and the refined brief second.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{word:string,hue:float,start:float,end:float}|null
+     */
+    public static function statedFor(array $meta): ?array
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $stated = self::statedInBrief($text);
+                if ($stated !== null) {
+                    return $stated;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a hex sits inside the family's arc with enough chroma to read
+     * as that colour. A grey or an unreadable value is never in a family.
+     *
+     * @param array{word:string,hue:float,start:float,end:float} $family
+     */
+    public static function inFamily(string $hex, array $family): bool
+    {
+        $hue = PaletteFloor::hue($hex);
+        $chroma = PaletteFloor::chroma($hex);
+        if ($hue === null || $chroma === null || $chroma <= PaletteFloor::CHROMA_MIN) {
+            return false;
+        }
+        $start = $family['start'];
+        $end = $family['end'];
+        if ($start <= $end) {
+            return $hue >= $start && $hue <= $end;
+        }
+        return $hue >= $start || $hue <= $end;
+    }
+
+    /**
+     * Move the color to the requested hue and preserve its lightness.
+     * Add chroma to gray colors. Return null if the color cannot carry the hue.
+     *
+     * @param array{word:string,hue:float,start:float,end:float} $family
+     */
+    public static function toFamily(string $hex, array $family): ?string
+    {
+        $chroma = PaletteFloor::chroma($hex);
+        if ($chroma === null) {
+            return null;
+        }
+        $moved = PaletteFloor::atHue($hex, $family['hue'], PaletteFloor::CHROMA_MIN + 0.05);
+        return $moved !== null && self::inFamily($moved, $family) ? $moved : null;
+    }
+}

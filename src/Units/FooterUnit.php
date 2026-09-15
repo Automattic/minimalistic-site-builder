@@ -75,6 +75,12 @@ final class FooterUnit extends AbstractMarkupUnit
             }
         }
         $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        $markup = FooterMarkup::withIdentityLineCase(
+            $markup,
+            is_string($input['stated_wordmark_case'] ?? null) ? $input['stated_wordmark_case'] : null,
+            $key,
+            $repairs,
+        );
         $before = $markup;
         $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
