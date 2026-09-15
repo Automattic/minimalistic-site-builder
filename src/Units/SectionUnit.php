@@ -8,6 +8,11 @@ use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\SectionContent;
+use Automattic\SiteBuild\SectionContentCompiler;
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\PromptRenderer;
 
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
@@ -43,6 +48,33 @@ final class SectionUnit extends AbstractPageSectionUnit
     private const BUILD_LAYER_MARKER = '<!-- cache-layer:build -->';
     private const PAGE_LAYER_MARKER = '<!-- cache-layer:page -->';
     private const BRIEF_LAYER_MARKER = '<!-- cache-layer:brief -->';
+
+    /** The env key that selects content mode: the model writes a content document and PHP compiles the markup. */
+    public const OUTPUT_ENV = 'SITE_BUILD_SECTION_OUTPUT';
+
+    private bool $contentMode = false;
+
+    public function __construct(
+        Llm $llm,
+        PromptRenderer $renderer,
+        ?string $model = null,
+        ?float $temperature = null,
+        ?bool $contentMode = null,
+    ) {
+        parent::__construct($llm, $renderer, $model, $temperature);
+        $this->contentMode = $contentMode ?? self::contentModeSelected();
+    }
+
+    /** Whether SITE_BUILD_SECTION_OUTPUT asks for content mode. */
+    public static function contentModeSelected(): bool
+    {
+        return strtolower(trim((string) Env::get(self::OUTPUT_ENV, ''))) === 'content';
+    }
+
+    public function contentMode(): bool
+    {
+        return $this->contentMode;
+    }
 
     /**
      * @param array{
@@ -92,6 +124,9 @@ final class SectionUnit extends AbstractPageSectionUnit
         }
 
         $archetype = $this->archetype($input);
+        if ($this->contentMode) {
+            return $this->contentRequest($input, $section, $slug, $role, $archetype, $itemPattern, $compositionVars);
+        }
         $composition = $this->renderer->render('section-composition.md', [
             'layout_archetype' => $compositionVars['layout_archetype'],
             'background'       => $compositionVars['background'],
@@ -160,8 +195,82 @@ final class SectionUnit extends AbstractPageSectionUnit
         return $request;
     }
 
+    /**
+     * The content-mode request: the same site and page layers, a shorter
+     * build layer of writing rules, and a JSON schema instead of a markup
+     * recipe. The compiler executes the composition the plan assigned.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $section
+     * @param array<string,string> $compositionVars
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes:list<string>,json_schema:array{name:string,schema:array<string,mixed>}}
+     */
+    private function contentRequest(
+        array $input,
+        array $section,
+        string $slug,
+        string $role,
+        string $archetype,
+        ?string $itemPattern,
+        array $compositionVars,
+    ): array {
+        $action = $section['primary_action'] ?? null;
+        $hasAction = is_array($action) && trim((string) ($action['label'] ?? '')) !== '';
+        $assignment = implode("\n", [
+            '  Layout archetype: ' . $archetype,
+            '  Background:       ' . $compositionVars['background'],
+            '  Vertical density: ' . $compositionVars['vertical_density'],
+            '  Text placement:   ' . $compositionVars['text_placement'],
+            '  Item pattern:     ' . ($itemPattern ?? 'none'),
+            '  Primary action:   ' . ($hasAction
+                ? '"' . trim((string) $action['label']) . '" -> ' . trim((string) ($action['destination'] ?? ''))
+                    . ' (' . trim((string) ($action['intent'] ?? '')) . ')'
+                : 'none'),
+            '  Seams:            ' . $compositionVars['handoff'],
+            '  Neighbors:',
+            $this->inputString($input, 'neighbors'),
+        ]);
+        $request = $this->renderedRequest('section-content.md', $this->commonVars($input) + [
+            'site_pages'      => $this->inputString($input, 'site_pages'),
+            'page_title'      => $this->pageString($input, 'title'),
+            'page_path'       => $this->pageString($input, 'path', '/'),
+            'section_title'   => $this->sectionString($section, 'title'),
+            'section_slug'    => $slug,
+            'section_role'    => $role,
+            'section_type'    => $this->sectionString($section, 'type', 'content'),
+            'section_purpose' => $this->sectionString($section, 'purpose'),
+            'content_notes'   => $this->sectionString($section, 'content_notes'),
+            'assignment'      => $assignment,
+            'content_shape'   => SectionContent::shape($archetype, $itemPattern, $hasAction),
+        ]);
+        [$siteLayer, $buildLayer, $pageLayer, $brief] = self::cacheLayers($request['prompt'], [
+            self::SITE_LAYER_MARKER,
+            self::BUILD_LAYER_MARKER,
+            self::PAGE_LAYER_MARKER,
+            self::BRIEF_LAYER_MARKER,
+        ]);
+        $request['cached_prefixes'] = [$siteLayer, $buildLayer, $pageLayer];
+        $request['prompt'] = $brief;
+        $request['json_schema'] = ['name' => 'section_content', 'schema' => SectionContent::schema($archetype, $itemPattern)];
+        return $request;
+    }
+
+    /** Decode a content-mode response and compile it; an unusable document throws like unusable markup. */
+    private static function compileContent(string $raw, array $input): string
+    {
+        $text = trim(\Automattic\SiteBuild\CodeFences::strip($raw));
+        $doc = json_decode($text, true);
+        if (!is_array($doc) || trim((string) ($doc['heading'] ?? '')) === '') {
+            throw new \RuntimeException('the content document is not a JSON object with a heading');
+        }
+        return SectionContentCompiler::compile($doc, $input);
+    }
+
     public function finish(string $raw, array $input): MarkupResult
     {
+        if ($this->contentMode) {
+            $raw = self::compileContent($raw, $input);
+        }
         $cardStyle = $this->cardStyle($input);
         $archetype = $this->assignedArchetype($input);
         $itemPattern = $this->assignedItemPattern($input);
