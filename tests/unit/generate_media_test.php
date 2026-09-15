@@ -44,6 +44,32 @@ test('pattern images preserve supplied pages, customer images and logos', functi
     assert_eq([], GenerateMediaStep::targets(media_image('https://customer.test/photo.jpg'), 'neve'));
 });
 
+/**
+ * A pattern is stock wherever it is hosted. The approved inventory is what
+ * says so: an image the pattern shipped with is stock even when the pattern
+ * hotlinks it off-site, and an image that appears nowhere in the inventory
+ * came from the customer and is not ours to replace.
+ */
+test('an image the inventory ships generates off-site, and the customer\'s own does not', function () {
+    $stock = 'https://live.staticflickr.com/7875/31859115207_2d1fd593d0_b.jpg';
+    $mine = 'https://customer.test/photo.jpg';
+    $pattern = '<!-- wp:cover {"url":"' . $stock . '","dimRatio":60} --><div class="wp-block-cover"><img src="' . $stock . '"/></div><!-- /wp:cover -->';
+
+    $project = media_project(
+        ['home' => $pattern . media_image($mine)],
+        theme: 'twentytwentythree',
+        inventory: [['id' => 'tt3/hero', 'content' => $pattern]],
+    );
+    $client = new FakeImageClient();
+    (new GenerateMediaStep($client))->run($project);
+
+    assert_eq(1, count($client->calls));
+    $content = PatternArtifacts::pages($project)[0]['content'];
+    assert_contains('media/', $content);
+    assert_true(!str_contains($content, $stock));
+    assert_contains($mine, $content);
+});
+
 test('partial image failures keep source bytes and actionable warnings while siblings finish', function () {
     $good = media_image('/wp-content/themes/neve/good.jpg');
     $bad = str_replace('alt=""', 'alt="broken"', media_image('/wp-content/themes/neve/bad.jpg'));

@@ -10,7 +10,7 @@ use Automattic\SiteBuild\Project;
  * @param array<string, string> $pages   Markup by slug.
  * @param array<string, mixed>  $facts
  */
-function media_project(array $pages, array $facts = [], string $theme = 'twentytwentyfive'): Project
+function media_project(array $pages, array $facts = [], string $theme = 'twentytwentyfive', array $inventory = []): Project
 {
     $dir = sys_get_temp_dir() . '/resolve-media-' . bin2hex(random_bytes(4));
     mkdir($dir, 0o777, true);
@@ -20,6 +20,7 @@ function media_project(array $pages, array $facts = [], string $theme = 'twentyt
         'version' => NormalizeInputsStep::INPUTS_VERSION,
         'theme' => $theme,
         'facts' => $facts,
+        'inventory' => $inventory,
     ]);
 
     foreach ($pages as $slug => $markup) {

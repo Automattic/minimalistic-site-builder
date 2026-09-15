@@ -49,12 +49,16 @@ final class GenerateMediaStep implements Step
         $pages = PatternArtifacts::pages($project);
         $wanted = [];
         $targets = [];
+        // What the approved patterns ship with is stock, wherever it is hosted:
+        // a pattern that hotlinks its photograph off-site is still offering
+        // stock. An image the inventory never mentions came from the customer.
+        $stock = self::stockSources((array) ($inputs['inventory'] ?? []));
         foreach ($pages as $page) {
             if (!empty($page['frozen']) || ($page['provenance'] ?? '') === 'blueprint') {
                 continue;
             }
             $slug = (string) $page['slug'];
-            $targets[$slug] = self::targets((string) ($page['content'] ?? ''), (string) ($inputs['theme'] ?? ''));
+            $targets[$slug] = self::targets((string) ($page['content'] ?? ''), (string) ($inputs['theme'] ?? ''), $stock);
             foreach ($targets[$slug] as $target) {
                 $key = substr(hash('sha256', $target['source']), 0, 24);
                 $wanted[$key] ??= $target + ['pages' => []];
@@ -169,7 +173,10 @@ final class GenerateMediaStep implements Step
     }
 
     /** Eligible, structurally safe media blocks, in document order. */
-    public static function targets(string $markup, string $theme): array
+    /**
+     * @param array<string, true> $stock Image sources the approved inventory ships, as a set.
+     */
+    public static function targets(string $markup, string $theme, array $stock = []): array
     {
         if ($theme === '') { return []; }
         $doc = BlockMarkup::parse($markup);
@@ -190,7 +197,7 @@ final class GenerateMediaStep implements Step
                 if (preg_match('/\salt=(["\'])(.*?)\1/i', $tag[0], $a)) { $alt = html_entity_decode($a[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'); }
                 if (preg_match('/\bai-ignore\b/', $tag[0])) { continue; }
             }
-            if ($source === '' || !str_contains((string) parse_url($source, PHP_URL_PATH), '/themes/' . $theme . '/')) { continue; }
+            if ($source === '' || (!str_contains((string) parse_url($source, PHP_URL_PATH), '/themes/' . $theme . '/') && !isset($stock[$source]))) { continue; }
             // Logos, icons and vector illustrations are intentional identity assets.
             if (!preg_match('/\.(?:jpe?g|png|webp)(?:[?#]|$)/i', $source) || preg_match('/(?:logo|icon|avatar)/i', basename((string) parse_url($source, PHP_URL_PATH)))) { continue; }
             $context = '';
@@ -212,6 +219,36 @@ final class GenerateMediaStep implements Step
      * @param array<string, mixed>                                                     $inputs
      * @param list<array<string, mixed>>                                               $pages
      */
+    /**
+     * Every image source the approved inventory references, as a set. Both the
+     * block attribute and the `src` are read, because a pattern carries the
+     * same photograph in both and either one is what a page ends up holding.
+     *
+     * @param list<array<string, mixed>> $inventory
+     * @return array<string, true>
+     */
+    private static function stockSources(array $inventory): array
+    {
+        $found = [];
+        foreach ($inventory as $pattern) {
+            $markup = is_array($pattern) ? (string) ($pattern['content'] ?? '') : '';
+            if ($markup === '') { continue; }
+            $doc = BlockMarkup::parse($markup);
+            foreach ($doc->indices() as $i) {
+                $attrs = $doc->attrs($i) ?? [];
+                foreach (['url', 'mediaUrl'] as $field) {
+                    $url = trim((string) ($attrs[$field] ?? ''));
+                    if ($url !== '') { $found[$url] = true; }
+                }
+            }
+            if (preg_match_all('/\ssrc=(["\'])(.*?)\1/i', $markup, $m)) {
+                foreach ($m[2] as $src) { $found[html_entity_decode($src, ENT_QUOTES | ENT_HTML5, 'UTF-8')] = true; }
+            }
+        }
+
+        return $found;
+    }
+
     public static function prompt(array $want, array $inputs, array $pages): string
     {
         $facts = is_array($inputs['facts'] ?? null) ? $inputs['facts'] : [];
