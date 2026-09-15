@@ -65,10 +65,10 @@ final class SectionUnit extends AbstractPageSectionUnit
         $this->contentMode = $contentMode ?? self::contentModeSelected();
     }
 
-    /** Whether SITE_BUILD_SECTION_OUTPUT asks for content mode. */
+    /** Content mode is the default; SITE_BUILD_SECTION_OUTPUT=markup selects the markup prompt. */
     public static function contentModeSelected(): bool
     {
-        return strtolower(trim((string) Env::get(self::OUTPUT_ENV, ''))) === 'content';
+        return strtolower(trim((string) Env::get(self::OUTPUT_ENV, ''))) !== 'markup';
     }
 
     public function contentMode(): bool

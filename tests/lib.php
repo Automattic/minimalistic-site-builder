@@ -11,6 +11,14 @@ require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/FakeLlm.php';
 require_once __DIR__ . '/doubles.php';
 
+// The unit and step tests written against the markup prompts describe that
+// contract and queue block markup as the model's reply. Content mode is the
+// build default, so the suite pins the markup prompt here; content-mode tests
+// pass `contentMode: true` explicitly or set the env themselves.
+if (getenv(\Automattic\SiteBuild\Units\SectionUnit::OUTPUT_ENV) === false) {
+    putenv(\Automattic\SiteBuild\Units\SectionUnit::OUTPUT_ENV . '=markup');
+}
+
 /** @var array<int,array{0:string,1:callable}> */
 $GLOBALS['__tests'] = [];
 

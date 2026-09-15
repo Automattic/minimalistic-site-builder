@@ -7,6 +7,10 @@ use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\HeroContentCompiler;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionContent;
 
 /**
  * Generate the front page's first section from one assigned hero recipe and
@@ -16,6 +20,23 @@ final class HeroUnit extends AbstractPageSectionUnit
 {
     public const MARKER_PREFIX = 'hero-composition--';
     private const MOBILE_MARKER_PREFIX = 'hero-mobile--';
+
+    private const BUILD_LAYER_MARKER = '<!-- cache-layer:build -->';
+    private const PAGE_LAYER_MARKER = '<!-- cache-layer:page -->';
+    private const BRIEF_LAYER_MARKER = '<!-- cache-layer:brief -->';
+
+    private bool $contentMode = false;
+
+    public function __construct(
+        Llm $llm,
+        PromptRenderer $renderer,
+        ?string $model = null,
+        ?float $temperature = null,
+        ?bool $contentMode = null,
+    ) {
+        parent::__construct($llm, $renderer, $model, $temperature);
+        $this->contentMode = $contentMode ?? SectionUnit::contentModeSelected();
+    }
 
     /**
      * @param array{
@@ -33,6 +54,9 @@ final class HeroUnit extends AbstractPageSectionUnit
     public function request(array $input): array
     {
         $context = $this->context($input);
+        if ($this->contentMode) {
+            return $this->contentRequest($input, $context);
+        }
         $recipe = $context['recipe'];
         $blueprint = $context['blueprint'];
         $mobileTransformation = $context['mobile_transformation'];
@@ -66,9 +90,87 @@ final class HeroUnit extends AbstractPageSectionUnit
         ]);
     }
 
+    /**
+     * The content-mode hero request: the same site, build, and page layers
+     * the front page's sections send, the same schema, and a hero brief. The
+     * compiler executes the blueprint; the model writes the words.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $context
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes:list<string>,json_schema:array{name:string,schema:array<string,mixed>}}
+     */
+    private function contentRequest(array $input, array $context): array
+    {
+        $blueprint = $context['blueprint'];
+        $action = $context['primary_action'];
+        $section = $context['section'];
+        $register = (string) ($blueprint['headline_register'] ?? 'display');
+        $lines = (array) ($blueprint['headline_line_target']['desktop'] ?? [1, 3]);
+        $assignment = implode("\n", [
+            '  Front-page hero recipe: ' . $context['recipe'] . ' (' . (string) $blueprint['media_mode'] . ')',
+            '  Headline register:      ' . $register,
+            '  Headline lines:         ' . (int) ($lines[0] ?? 1) . ' to ' . (int) ($lines[1] ?? 3) . ' on desktop at the display size',
+            '  Media aspect:           ' . (string) $blueprint['media_aspect'],
+            '  Primary action:         ' . (is_array($action)
+                ? '"' . $action['label'] . '" -> ' . $action['destination'] . ' (' . $action['intent'] . ')'
+                : 'none'),
+            '  Neighbors:',
+            $this->inputString($input, 'neighbors'),
+        ]);
+        $shape = implode("\n", [
+            'This is the front page hero. Write the one headline the whole site is judged on: '
+                . match ($register) {
+                    'restrained' => 'a short, quiet line of two to eight words; the picture carries the impact.',
+                    'poster'     => 'a bold poster line; every word earns its place.',
+                    default      => 'a clear display line that states what the site offers.',
+                },
+            'Do not restate the site name as the headline. `lead` is one supporting sentence; leave `paragraphs` and `items` empty.',
+            is_array($action)
+                ? 'Fill `action_label` with the visitor-facing words for the planned primary action.'
+                : 'Leave `action_label` empty: the hero has no planned button.',
+            (string) $blueprint['media_mode'] === 'cover-image'
+                ? 'The picture is a full-width backdrop behind the copy: fill `image_subject` with a scene whose focal interest sits toward the edges and whose '
+                    . (string) ($blueprint['text_safe_region'] ?? 'center') . ' region stays calm and low-detail. Fill `image_context` in photographic terms.'
+                : 'The picture is one contained foreground photograph beside the copy in a ' . (string) $blueprint['media_aspect']
+                    . ' frame: fill `image_subject` and `image_context`. Never a cutout or a transparent asset.',
+            'Leave `link_label` and `link_href` empty.',
+        ]);
+        $request = $this->renderedRequest('section-content.md', $this->commonVars($input) + [
+            'site_pages'      => $this->inputString($input, 'site_pages'),
+            'page_title'      => $this->pageString($input, 'title'),
+            'page_path'       => $this->pageString($input, 'path', '/'),
+            'section_title'   => $this->sectionString($section, 'title'),
+            'section_slug'    => $this->sectionString($section, 'slug'),
+            'section_role'    => $context['role'],
+            'section_type'    => $this->sectionString($section, 'type', 'hero'),
+            'section_purpose' => $this->sectionString($section, 'purpose'),
+            'content_notes'   => $this->sectionString($section, 'content_notes'),
+            'assignment'      => $assignment,
+            'content_shape'   => $shape,
+        ]);
+        [$siteLayer, $buildLayer, $pageLayer, $brief] = self::cacheLayers($request['prompt'], [
+            self::SITE_LAYER_MARKER,
+            self::BUILD_LAYER_MARKER,
+            self::PAGE_LAYER_MARKER,
+            self::BRIEF_LAYER_MARKER,
+        ]);
+        $request['cached_prefixes'] = [$siteLayer, $buildLayer, $pageLayer];
+        $request['prompt'] = $brief;
+        $request['json_schema'] = ['name' => 'section_content', 'schema' => SectionContent::schema()];
+        return $request;
+    }
+
     public function finish(string $raw, array $input): MarkupResult
     {
         $context = $this->context($input);
+        if ($this->contentMode) {
+            $text = trim(\Automattic\SiteBuild\CodeFences::strip($raw));
+            $doc = json_decode($text, true);
+            if (!is_array($doc)) {
+                throw new \RuntimeException('the hero content document is not a JSON object');
+            }
+            $raw = HeroContentCompiler::compile($doc, $context, $input);
+        }
         $key = $this->key($input);
         $warnings = [];
         $repairs = [];

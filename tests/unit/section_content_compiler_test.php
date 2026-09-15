@@ -221,7 +221,11 @@ test('content mode rejects a reply that is not a document', function () {
     assert_throws(fn () => $unit->finish('<!-- wp:group --><div></div><!-- /wp:group -->', $input));
 });
 
-test('content mode is off unless the env asks for it', function () {
-    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    assert_eq(false, $unit->contentMode());
+test('content mode is the default and SITE_BUILD_SECTION_OUTPUT=markup opts out', function () {
+    $before = getenv(SectionUnit::OUTPUT_ENV);
+    putenv(SectionUnit::OUTPUT_ENV);
+    assert_eq(true, (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->contentMode());
+    putenv(SectionUnit::OUTPUT_ENV . '=markup');
+    assert_eq(false, (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->contentMode());
+    putenv($before === false ? SectionUnit::OUTPUT_ENV : SectionUnit::OUTPUT_ENV . '=' . $before);
 });
