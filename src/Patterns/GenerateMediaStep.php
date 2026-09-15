@@ -53,12 +53,27 @@ final class GenerateMediaStep implements Step
         // a pattern that hotlinks its photograph off-site is still offering
         // stock. An image the inventory never mentions came from the customer.
         $stock = self::stockSources((array) ($inputs['inventory'] ?? []));
+        // 'composed' leaves a supplied page alone; 'all' takes its images too.
+        // A Blueprint that writes its own markup has no other way to ask: a
+        // slot cannot reach a cover, which is neither a leaf nor a case
+        // DeclaredSlots knows.
+        $everywhere = 'all' === (string) ($policy['scope'] ?? 'composed');
         foreach ($pages as $page) {
-            if (!empty($page['frozen']) || ($page['provenance'] ?? '') === 'blueprint') {
+            // Frozen outranks the scope. `"slots": []` is how a legal page
+            // stays byte for byte, and widening what may be reached must not
+            // reach it.
+            if (!empty($page['frozen'])) {
+                continue;
+            }
+            $supplied = ($page['provenance'] ?? '') === 'blueprint';
+            if ($supplied && !$everywhere) {
                 continue;
             }
             $slug = (string) $page['slug'];
-            $targets[$slug] = self::targets((string) ($page['content'] ?? ''), (string) ($inputs['theme'] ?? ''), $stock);
+            // Everything in supplied markup is the Blueprint author's own, so
+            // under this scope it is all stock; a composed page is held to what
+            // the approved inventory ships.
+            $targets[$slug] = self::targets((string) ($page['content'] ?? ''), (string) ($inputs['theme'] ?? ''), $supplied ? null : $stock);
             foreach ($targets[$slug] as $target) {
                 $key = substr(hash('sha256', $target['source']), 0, 24);
                 $wanted[$key] ??= $target + ['pages' => []];
@@ -174,9 +189,11 @@ final class GenerateMediaStep implements Step
 
     /** Eligible, structurally safe media blocks, in document order. */
     /**
-     * @param array<string, true> $stock Image sources the approved inventory ships, as a set.
+     * @param array<string, true>|null $stock Image sources the approved inventory ships, as a
+     *                                        set; null when every image in this markup is stock,
+     *                                        as on a page the Blueprint supplied whole.
      */
-    public static function targets(string $markup, string $theme, array $stock = []): array
+    public static function targets(string $markup, string $theme, ?array $stock = []): array
     {
         if ($theme === '') { return []; }
         $doc = BlockMarkup::parse($markup);
@@ -197,7 +214,7 @@ final class GenerateMediaStep implements Step
                 if (preg_match('/\salt=(["\'])(.*?)\1/i', $tag[0], $a)) { $alt = html_entity_decode($a[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'); }
                 if (preg_match('/\bai-ignore\b/', $tag[0])) { continue; }
             }
-            if ($source === '' || (!str_contains((string) parse_url($source, PHP_URL_PATH), '/themes/' . $theme . '/') && !isset($stock[$source]))) { continue; }
+            if ($source === '' || ($stock !== null && !str_contains((string) parse_url($source, PHP_URL_PATH), '/themes/' . $theme . '/') && !isset($stock[$source]))) { continue; }
             // Logos, icons and vector illustrations are intentional identity assets.
             if (!preg_match('/\.(?:jpe?g|png|webp)(?:[?#]|$)/i', $source) || preg_match('/(?:logo|icon|avatar)/i', basename((string) parse_url($source, PHP_URL_PATH)))) { continue; }
             $context = '';

@@ -70,6 +70,64 @@ test('an image the inventory ships generates off-site, and the customer\'s own d
     assert_contains($mine, $content);
 });
 
+/**
+ * A Blueprint that supplies its pages whole still wants photographs of its
+ * own: `scope: "all"` is how it says so. The images in supplied markup are
+ * the Blueprint author's, not a customer's, so under that scope every one is
+ * a target -- the slot system cannot reach them anyway, having no core/cover
+ * case and requiring a leaf block.
+ */
+test('a supplied page generates only when the Blueprint widens the scope', function () {
+    $source = 'https://live.staticflickr.com/7875/31859115207_2d1fd593d0_b.jpg';
+    $supplied = function (string $scope) use ($source) {
+        $project = media_project(['home' => media_image($source)], theme: 'twentytwentythree');
+        $page = $project->readJson('patterns/pages/home.json');
+        $page['provenance'] = 'blueprint';
+        $project->writeJson('patterns/pages/home.json', $page);
+        $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+        $inputs['image_generation'] = ['enabled' => true, 'scope' => $scope];
+        $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+
+        return $project;
+    };
+
+    $narrow = $supplied('composed');
+    $quiet = new FakeImageClient();
+    (new GenerateMediaStep($quiet))->run($narrow);
+    assert_eq([], $quiet->calls);
+    assert_contains($source, PatternArtifacts::pages($narrow)[0]['content']);
+
+    $wide = $supplied('all');
+    $client = new FakeImageClient();
+    (new GenerateMediaStep($client))->run($wide);
+    assert_eq(1, count($client->calls));
+    $content = PatternArtifacts::pages($wide)[0]['content'];
+    assert_contains('media/', $content);
+    assert_true(!str_contains($content, $source));
+});
+
+/**
+ * `"slots": []` freezes a page so a legal notice stays byte for byte. That
+ * outranks the scope: widening what generation may reach must not reach it.
+ */
+test('the widest scope still never touches a frozen page', function () {
+    $source = 'https://live.staticflickr.com/7875/31859115207_2d1fd593d0_b.jpg';
+    $project = media_project(['legal' => media_image($source)], theme: 'twentytwentythree');
+    $page = $project->readJson('patterns/pages/legal.json');
+    $page['provenance'] = 'blueprint';
+    $page['frozen'] = true;
+    $project->writeJson('patterns/pages/legal.json', $page);
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['image_generation'] = ['enabled' => true, 'scope' => 'all'];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+
+    $client = new FakeImageClient();
+    (new GenerateMediaStep($client))->run($project);
+
+    assert_eq([], $client->calls);
+    assert_contains($source, PatternArtifacts::pages($project)[0]['content']);
+});
+
 test('partial image failures keep source bytes and actionable warnings while siblings finish', function () {
     $good = media_image('/wp-content/themes/neve/good.jpg');
     $bad = str_replace('alt=""', 'alt="broken"', media_image('/wp-content/themes/neve/bad.jpg'));
