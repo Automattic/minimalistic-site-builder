@@ -41,7 +41,9 @@ function export_clean_inputs(): array
     return [
         'version' => NormalizeInputsStep::INPUTS_VERSION,
         'theme' => 'twentytwentyfive',
-        'brand' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
+        'site' => ['title' => 'Summit'],
+        'brand' => ['id' => 3, 'name' => 'Summit', 'logo_url' => '', 'context' => '', 'config' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'name' => 'Base', 'color' => '#FFF']]]]]],
+        'pages' => [['slug' => 'home', 'title' => 'Home', 'intent' => 'Open']],
         'inventory' => [
             [
                 'id' => 'twentytwentyfive/banner-cover-big-heading',
@@ -295,4 +297,110 @@ test('the page template the host chose reaches the bundle', function () {
     (new ExportBundleStep())->run($project);
 
     assert_eq('page-no-title', $project->readJson(PatternArtifacts::BUNDLE)['page_template']);
+});
+
+/**
+ * A bundle names the inputs it came from, so a destination can tell two
+ * builds apart and a receipt can point back at the request.
+ */
+test('the bundle carries a hash of the three seeds and the site title', function () {
+    $project = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+    $project->writeJson(PatternArtifacts::REQUEST, ['version' => 2, 'theme' => 'twentytwentyfive']);
+    $project->writeJson(PatternArtifacts::INVENTORY, ['patterns' => []]);
+    $project->writeJson(PatternArtifacts::BRAND, ['name' => 'Summit']);
+
+    (new ExportBundleStep())->run($project);
+
+    $bundle = $project->readJson(PatternArtifacts::BUNDLE);
+    assert_eq(ExportBundleStep::inputHash($project), $bundle['input_hash']);
+    assert_eq(64, strlen($bundle['input_hash']));
+    assert_eq('Summit', $bundle['site']['title']);
+    assert_eq('Summit', $bundle['brand']['name']);
+});
+
+/**
+ * Each page says where it came from and carries two hashes: the markup that
+ * was written into, and what came out. Equal hashes mean nothing changed.
+ */
+test('each page carries its provenance and both hashes', function () {
+    $pages = export_clean_pages();
+    $pages[0]['provenance'] = 'blueprint';
+    $pages[0]['source_hash'] = hash('sha256', 'before');
+    $pages[0]['frozen'] = true;
+    $project = export_project(export_clean_inputs(), $pages, ['sections' => []]);
+
+    (new ExportBundleStep())->run($project);
+
+    $page = $project->readJson(PatternArtifacts::BUNDLE)['pages'][0];
+    assert_eq('blueprint', $page['provenance']);
+    assert_eq(hash('sha256', 'before'), $page['source_hash']);
+    assert_eq(hash('sha256', $page['content']), $page['content_hash']);
+    assert_eq(true, $page['frozen']);
+    assert_eq(['home'], $project->readJson(PatternArtifacts::REPORT)['frozen']);
+    assert_eq(1, $project->readJson(PatternArtifacts::REPORT)['supplied']);
+});
+
+/**
+ * A class the host wrote into a supplied page is the host's, written against
+ * its own theme. Personalization changes text bytes and nothing else, so it
+ * is counted as defined the way an inventory pattern's classes are.
+ */
+test('classes a supplied page shipped with are not held against the bundle', function () {
+    $inputs = export_clean_inputs();
+    $markup = '<!-- wp:group --><div class="wp-block-group legal-notice"></div><!-- /wp:group -->';
+    $inputs['pages'][] = ['slug' => 'legal', 'title' => 'Legal', 'markup' => $markup, 'slots' => []];
+    $pages = export_clean_pages();
+    $pages[] = ['slug' => 'legal', 'title' => 'Legal', 'menu_order' => 10, 'provenance' => 'blueprint', 'content' => $markup];
+    $project = export_project($inputs, $pages, export_clean_provenance());
+
+    (new ExportBundleStep())->run($project);
+
+    assert_eq(true, $project->readJson(PatternArtifacts::REPORT)['passed']);
+});
+
+/**
+ * What each stage could not do travels with the bundle, so a host that only
+ * ever sees the bundle still sees that a page kept its placeholders.
+ */
+test('the build warnings travel inside the bundle', function () {
+    $project = export_project(export_clean_inputs(), export_clean_pages(), export_clean_provenance());
+    $project->replaceWarnings('personalize-content', ['home: 2 of 9 slots kept the pattern\'s own copy']);
+
+    (new ExportBundleStep())->run($project);
+
+    assert_contains('kept the pattern', (string) json_encode($project->readJson(PatternArtifacts::BUNDLE)['warnings']));
+});
+
+/**
+ * The mixed fixture is a real four-page site on Ollie: one page composed from
+ * the inventory, one with declared slots, one with discovered slots, one
+ * frozen. Replaying its recording runs every stage without a network call,
+ * and the bundle it lands is the one the live run landed.
+ */
+test('the ollie-mixed fixture replays every stage offline to a passing bundle', function () {
+    $fixtures = dirname(__DIR__) . '/fixtures/patterns/ollie-mixed';
+    $dir = sys_get_temp_dir() . '/mixed-replay-' . bin2hex(random_bytes(4));
+    mkdir($dir, 0o777, true);
+    $project = new Project($dir, basename($dir));
+    \Automattic\SiteBuild\Patterns\FixtureLoader::load($fixtures, $project);
+    $project->writeJson('meta.json', ['prompt' => 'fixture']);
+
+    $recording = json_decode((string) file_get_contents($fixtures . '/responses.json'), true);
+    $composition = \Automattic\SiteBuild\StepComposition::patterns(
+        new \Automattic\SiteBuild\Patterns\ReplayLlm($recording),
+        new \Automattic\SiteBuild\PromptRenderer(\Automattic\SiteBuild\Package::promptsDir()),
+    );
+    (new \Automattic\SiteBuild\Pipeline($composition->steps(), $composition->seeds()))->runThrough($project);
+
+    $bundle = $project->readJson(PatternArtifacts::BUNDLE);
+    $report = $project->readJson(PatternArtifacts::REPORT);
+    exec('rm -rf ' . escapeshellarg($dir));
+
+    assert_eq(true, $report['passed']);
+    assert_eq(['home', 'contact', 'about', 'legal'], array_column($bundle['pages'], 'slug'));
+    assert_eq(['composed', 'blueprint', 'blueprint', 'blueprint'], array_column($bundle['pages'], 'provenance'));
+    assert_eq(['legal'], $report['frozen']);
+    assert_eq($bundle['pages'][3]['source_hash'], $bundle['pages'][3]['content_hash'], 'a frozen page is byte-identical');
+    assert_contains('ola@northwind.example', $bundle['pages'][1]['content']);
+    assert_eq('Northwind', $bundle['brand']['name']);
 });

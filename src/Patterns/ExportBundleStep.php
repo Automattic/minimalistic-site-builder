@@ -20,8 +20,13 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class ExportBundleStep implements Step
 {
-    /** Bumped when the bundle's shape changes in a way a host must notice. */
-    public const BUNDLE_VERSION = 1;
+    /**
+     * Bumped when the bundle's shape changes in a way a host must notice.
+     *
+     * 2: an input hash, a site title, the Brand as a record, per-page hashes
+     * and provenance, and the build's warnings carried inside the bundle.
+     */
+    public const BUNDLE_VERSION = 2;
 
     public function id(): string
     {
@@ -61,7 +66,9 @@ final class ExportBundleStep implements Step
 
         $bundle = [
             'version' => self::BUNDLE_VERSION,
+            'input_hash' => self::inputHash($project),
             'theme' => $inputs['theme'] ?? null,
+            'site' => ['title' => (string) ($inputs['site']['title'] ?? '')],
             'brand' => $inputs['brand'] ?? [],
             'pages' => $pages,
             // The destination builds the menu from this. Dropping it leaves a
@@ -72,20 +79,24 @@ final class ExportBundleStep implements Step
                 static fn (array $page): array => ['title' => (string) $page['title'], 'slug' => (string) $page['slug']],
                 $pages,
             ),
-            'media' => $media['images'] ?? [],
             'page_template' => (string) ($inputs['capabilities']['page_template'] ?? ''),
+            'media' => $media['images'] ?? [],
+            'warnings' => $project->exists('warnings.json') ? $project->readJson('warnings.json') : [],
         ];
 
         // A class an approved pattern shipped with is the customer's, not
         // something generation added: personalization changes text bytes and
         // nothing else, so any class in the bundle that the inventory carries
-        // came from the inventory. A theme's own patterns do write classes the
-        // theme never styles -- Ollie's `feature-boxes` -- and refusing a
-        // bundle over those would refuse the customer's own markup.
+        // came from the inventory. The same holds for the markup a host
+        // supplied for a page: it wrote those classes against its own theme.
+        // A theme's own patterns do write classes the theme never styles --
+        // Ollie's `feature-boxes` -- and refusing a bundle over those would
+        // refuse the customer's own markup.
         $capabilities = $inputs['capabilities'] ?? [];
         $capabilities['classes'] = array_values(array_unique(array_merge(
             $capabilities['classes'] ?? [],
             ContentOnlyGuard::classesIn(array_column($inputs['inventory'] ?? [], 'content')),
+            ContentOnlyGuard::classesIn(self::suppliedMarkup($inputs['pages'] ?? [])),
         )));
 
         $violations = ContentOnlyGuard::check(
@@ -98,6 +109,9 @@ final class ExportBundleStep implements Step
             'bundle_version' => self::BUNDLE_VERSION,
             'theme' => $bundle['theme'],
             'pages' => count($bundle['pages']),
+            'composed' => count(array_filter($pages, static fn (array $p): bool => $p['provenance'] === 'composed')),
+            'supplied' => count(array_filter($pages, static fn (array $p): bool => $p['provenance'] === 'blueprint')),
+            'frozen' => array_values(array_column(array_filter($pages, static fn (array $p): bool => !empty($p['frozen'])), 'slug')),
             'media' => count($bundle['media']),
             'violations' => $violations,
             'passed' => $violations === [],
@@ -131,12 +145,57 @@ final class ExportBundleStep implements Step
 
         $pages = [];
         foreach (PatternArtifacts::pages($project) as $page) {
-            $page['sections'] = $sections[(string) $page['slug']] ?? [];
-            $pages[] = $page;
+            $content = (string) ($page['content'] ?? '');
+            $pages[] = [
+                'slug' => (string) $page['slug'],
+                'title' => (string) ($page['title'] ?? ucfirst((string) $page['slug'])),
+                'front' => (bool) ($page['front'] ?? false),
+                'menu_order' => (int) ($page['menu_order'] ?? 0),
+                'provenance' => (string) ($page['provenance'] ?? 'composed'),
+                'frozen' => (bool) ($page['frozen'] ?? false),
+                'sections' => $sections[(string) $page['slug']] ?? [],
+                'source_hash' => (string) ($page['source_hash'] ?? hash('sha256', $content)),
+                'content_hash' => hash('sha256', $content),
+                'content' => $content,
+            ];
         }
 
-        usort($pages, static fn (array $a, array $b) => ($a['menu_order'] ?? 0) <=> ($b['menu_order'] ?? 0));
+        usort($pages, static fn (array $a, array $b) => $a['menu_order'] <=> $b['menu_order']);
 
         return $pages;
+    }
+
+    /**
+     * One hash over the three seeds the host wrote, so a bundle names the
+     * inputs it came from and a destination can tell two builds apart.
+     *
+     * The seeds are hashed as the host wrote them. A seed a fixture run did
+     * not supply hashes as empty rather than stopping the export: the bundle
+     * still says what it was built from, which is nothing for that seed.
+     */
+    public static function inputHash(Project $project): string
+    {
+        $parts = [];
+        foreach ([PatternArtifacts::REQUEST, PatternArtifacts::INVENTORY, PatternArtifacts::BRAND] as $seed) {
+            $parts[] = $project->exists($seed) ? $project->readText($seed) : '';
+        }
+
+        return hash('sha256', implode("\n", $parts));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $pages
+     * @return list<string>
+     */
+    private static function suppliedMarkup(array $pages): array
+    {
+        $markup = [];
+        foreach ($pages as $page) {
+            if (is_array($page) && NormalizeInputsStep::isSupplied($page)) {
+                $markup[] = (string) $page['markup'];
+            }
+        }
+
+        return $markup;
     }
 }
