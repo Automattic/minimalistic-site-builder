@@ -120,9 +120,9 @@ final class HeroUnit extends AbstractPageSectionUnit
         $shape = implode("\n", [
             'This is the front page hero. Write the one headline the whole site is judged on: '
                 . match ($register) {
-                    'restrained' => 'a short, quiet line of two to eight words; the picture carries the impact.',
-                    'poster'     => 'a bold poster line; every word earns its place.',
-                    default      => 'a clear display line that states what the site offers.',
+                    'restrained' => 'a short, quiet line of two to six words; the picture carries the impact.',
+                    'poster'     => 'a bold poster line of at most six words; every word earns its place.',
+                    default      => 'a clear display line of at most eight words that states what the site offers.',
                 },
             'Do not restate the site name as the headline. `lead` is one supporting sentence; leave `paragraphs` and `items` empty.',
             is_array($action)

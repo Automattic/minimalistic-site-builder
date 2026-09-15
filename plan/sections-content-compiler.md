@@ -1,8 +1,19 @@
 # Plan: content-only section output compiled by PHP
 
-> **Status (2026-09-15):** M0 to M2 shipped on branch `blocks-optimizer`
-> behind `SITE_BUILD_SECTION_OUTPUT=content` (default stays markup). M3, the
-> cohort A/B and default flip, and M4 are not started. The numbers in *Why*
+> **Status (2026-09-15):** M0 to M3 shipped on branch `blocks-optimizer`.
+> Content mode is the default; `SITE_BUILD_SECTION_OUTPUT=markup` keeps the
+> markup prompts. The front hero compiles from the same schema and cached
+> layers as the sections (M4 first step). The header and footer stay on the
+> markup prompts: together they are about 6 percent of a build's effective
+> cost across 23 recipes, and `HeaderNav::withCompleteInnerPages()` already
+> inserts the navigation deterministically, so a deterministic header is the
+> cheap next move if wanted. The markup-only prompt prose and fixers stay
+> while markup mode is reachable.
+>
+> M3 result on the seven-demo cohort, multi-page with images, Opus 5:
+> sections fresh input −69%, output −65%, effective cost −63%, average
+> request 21.8 s → 11.9 s, slowest request 63.9 s → 29.1 s; sections
+> warnings per build 0–36 → 1–3; whole-build effective cost −39%. The numbers in *Why*
 > come from `projects/*/logs/llms/*.log` on the eight demo builds in `projects/`.
 >
 > Findings from the live spike (tbilisi demo, Opus 5, no images):
