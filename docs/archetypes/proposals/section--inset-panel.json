@@ -1,0 +1,17 @@
+{
+    "id": "inset-panel",
+    "family": "section",
+    "title": "inset-panel — a second surface floating inside the band on all four sides",
+    "idea": "A panel painted in the opposite surface floats inside the band with a fixed margin on all four sides, so one band carries two surfaces and the inner one holds everything.",
+    "why_new": "a section is one surface today — full-bleed-cover.md explicitly forbids stacking a panel on the cover. That rule is right for a cover and wrong as a general limit: it leaves the generator no way to build a bounded call to action inside a band.",
+    "built_from": "a full-aligned outer group on one surface holding one constrained inner group on another. No new CSS, but it needs the cover rule scoped to full-bleed-cover rather than applied everywhere.",
+    "risk": "the most generic entry on this page. A box on a background is the default shape of every template on the internet, so it earns its place only through a real margin proportion and two surfaces that genuinely differ. It also needs two contrast checks instead of one.",
+    "mockup": {
+        "scope": "mock-section-inset-panel",
+        "html": "<div class=\"preview mock-section-inset-panel r-band\">\n<div class=\"panel\">\n      <div>\n        <h4>Two places left on the March course</h4>\n        <p>Five days, six students, and one bench each. Materials and lunch included.</p>\n      </div>\n      <span class=\"cta\">Take a place</span>\n    </div>\n</div>",
+        "css": ".mock-section-inset-panel { background: #1c2b24; padding: 6cqw; }\n.mock-section-inset-panel .panel { background: #f4f1e6; color: #17201b; block-size: 100%; padding: 0 7cqw;\n  font-family: var(--f-sans); display: grid; grid-template-columns: 1fr auto;\n  align-items: center; gap: 5cqw; }\n.mock-section-inset-panel h4 { margin: 0 0 1.6cqw; font-family: var(--f-serif); font-size: 4.2cqw;\n  line-height: 1.05; letter-spacing: -.02em; max-width: 18ch; }\n.mock-section-inset-panel p { margin: 0; font-size: 1.5cqw; line-height: 1.5; opacity: .7; max-width: 34ch; }\n.mock-section-inset-panel .cta { background: #17201b; color: #f4f1e6; padding: 1.5cqw 3.2cqw;\n  font-size: 1.3cqw; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

@@ -1,0 +1,17 @@
+{
+    "id": "wordmark-band",
+    "family": "section",
+    "title": "S7 wordmark-band — one phrase at display scale on a full-bleed colour field",
+    "idea": "One short phrase set to the full width of a flat colour field, with two small facts under it. The band says one thing at the loudest volume the page has.",
+    "why_new": "No band in the catalog has an imageless display register — BIGR-885 retired the one hero recipe that had one — so a page has no loud typographic moment anywhere.",
+    "built_from": "one full-aligned group on a contrast surface and one heading carrying the existing has-fit-text device — which today only footer-composition.md teaches. This is the cheapest way to put that device to work outside the footer.",
+    "risk": "fit-text needs a genuinely full-width heading and renders only where the running WordPress version ships it, so it needs a fallback size. Cap at one per site, or every page becomes a shouting match.",
+    "mockup": {
+        "scope": "mock-section-wordmark-band",
+        "html": "<div class=\"preview mock-section-wordmark-band r-band\">\n<div class=\"phrase\">Made to order</div>\n    <div class=\"under\"><span>Nothing held in stock</span><span>Lead time 8–14 weeks</span></div>\n</div>",
+        "css": ".mock-section-wordmark-band { background: #a8340f; color: #fdf3e4;\n  font-family: \"Helvetica Neue\", Inter, ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: center; gap: 2.2cqw; padding: 0 4cqw; }\n.mock-section-wordmark-band .phrase { font-weight: 800; font-size: 12.4cqw; line-height: .86;\n  letter-spacing: -.045em; text-transform: uppercase; white-space: nowrap; }\n.mock-section-wordmark-band .under { display: flex; justify-content: space-between;\n  font-size: 1.25cqw; letter-spacing: .18em; text-transform: uppercase; opacity: .7; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

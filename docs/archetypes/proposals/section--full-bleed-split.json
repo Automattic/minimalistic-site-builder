@@ -1,0 +1,17 @@
+{
+    "id": "full-bleed-split",
+    "family": "section",
+    "title": "S5 full-bleed-split — two equal fields, media bleeding to the viewport edge",
+    "idea": "Two fields of equal height divide the band edge to edge. The media half touches the viewport with no gutter and no rounded corner; the copy half is a solid surface, not a card on a background.",
+    "why_new": "every split on every site renders inside the same content gutters today, so the two halves always read as two boxes on a page. This is the section twin of the split-bleed-duo hero.",
+    "built_from": "one full-aligned group holding a two-column row with zero gap and no padding on the media column.",
+    "risk": "when the design direction's Canvas is framed, nothing bleeds and the archetype loses its whole point — it must either be ineligible on a framed canvas or degrade to asymmetric-split honestly. The copy half needs its own contrast check against the surface it paints.",
+    "mockup": {
+        "scope": "mock-section-full-bleed-split",
+        "html": "<div class=\"preview mock-section-full-bleed-split grain\">\n<div class=\"copy\">\n      <h4>The north yard, in winter</h4>\n      <p>Six weeks a year the yard is frozen hard enough to move the heavy stock across it.</p>\n      <span class=\"cta\">Read the season notes</span>\n    </div>\n    <div class=\"ph-sea\"></div>\n</div>",
+        "css": ".mock-section-full-bleed-split { display: grid; grid-template-columns: 1fr 1fr; }\n.mock-section-full-bleed-split .copy { background: #1d2a33; color: #eef2f4; font-family: var(--f-sans);\n  display: flex; flex-direction: column; justify-content: center; gap: 2.2cqw; padding: 0 7cqw; }\n.mock-section-full-bleed-split .copy h4 { margin: 0; font-family: var(--f-serif); font-size: 4.8cqw;\n  line-height: 1.05; letter-spacing: -.02em; }\n.mock-section-full-bleed-split .copy p { margin: 0; font-size: 1.55cqw; line-height: 1.55; opacity: .75; max-width: 30ch; }\n.mock-section-full-bleed-split .copy .cta { font-size: 1.25cqw; letter-spacing: .14em; text-transform: uppercase;\n  border-bottom: 1px solid; padding-bottom: .6cqw; align-self: flex-start; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}
