@@ -1,0 +1,75 @@
+{
+    "pages": [
+        {
+            "slug": "home",
+            "title": "Home",
+            "front": true,
+            "menu_order": 0,
+            "description": "The hub that sets the scene for the conference and compels visitors to secure their spot.",
+            "sections": [
+                {
+                    "category": "banner",
+                    "intent": "Set the tone with the conference name, date, location, and a bold visual of the stage or crowd.",
+                    "reason": "A banner gives events teams an immediate sense of the conference scale and atmosphere, anchoring the brand the moment they land."
+                },
+                {
+                    "category": "call-to-action",
+                    "intent": "Push the primary 'Register' action with urgency (early-bird deadline or limited capacity).",
+                    "reason": "The brief’s sole CTA is registration; a dedicated hero-level CTA ensures the highest traffic page converts the moment interest peaks."
+                },
+                {
+                    "category": "featured",
+                    "intent": "Surface three key differentiators (e.g., track count, top-tier speakers, interactive workshops).",
+                    "reason": "Events teams evaluate conferences on standout value; featured cards let them scan proof points without scrolling through dense copy."
+                },
+                {
+                    "category": "text",
+                    "intent": "Summarize the conference narrative: the theme, the tracks, and the promise of actionable takeaways.",
+                    "reason": "A concise text block bridges the emotional pull of the banner with practical detail, addressing both the aspirational and logistical mindsets of event managers."
+                }
+            ]
+        },
+        {
+            "slug": "agenda",
+            "title": "Agenda",
+            "front": false,
+            "menu_order": 10,
+            "description": "A day-by-day layout of sessions, tracks, and breaks so organizers can judge the flow of the event.",
+            "sections": [
+                {
+                    "category": "text",
+                    "intent": "Present a structured, multi-day schedule with time slots, concurrent tracks, and session titles.",
+                    "reason": "A single text-driven grid is the clearest way for time-conscious events teams to map their own agenda and spot sessions relevant to their planning responsibilities."
+                }
+            ]
+        },
+        {
+            "slug": "speakers",
+            "title": "Speakers",
+            "front": false,
+            "menu_order": 20,
+            "description": "A showcase of headliners and session leads, with credentials that matter to event professionals.",
+            "sections": [
+                {
+                    "category": "gallery",
+                    "intent": "Display speaker headshots in a clean, browsable grid with name, role, and topic on hover.",
+                    "reason": "A gallery matches the visual scanning behaviour of an events team vetting credibility—faces and affiliations build trust faster than paragraphs."
+                }
+            ]
+        },
+        {
+            "slug": "venue",
+            "title": "Venue",
+            "front": false,
+            "menu_order": 30,
+            "description": "Everything an attendee needs to arrive prepared: the venue, travel tips, and on-site services.",
+            "sections": [
+                {
+                    "category": "contact",
+                    "intent": "Share the venue address, map, transport links, and a contact for accessibility or dietary queries.",
+                    "reason": "Logistics are a decisive factor for busy events professionals; a contact section bundles all arrival and access information into one actionable block."
+                }
+            ]
+        }
+    ]
+}

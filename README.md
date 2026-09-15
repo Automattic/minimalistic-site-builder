@@ -408,3 +408,11 @@ node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 Pass `--width=<px>` (or set `SHOT_WIDTH`), `--chrome=<path>` (or set
 `CHROME`/`CHROME_BIN`), and `--no-scroll` to reproduce the old un-scrolled
 behaviour.
+
+## Composing content for an existing theme
+
+The pattern composition (`StepComposition::patterns()`) takes a theme's own
+patterns, a Brand and a request, and returns a content-only bundle for a site
+the destination already has the theme for. Pages are either composed from the
+inventory or supplied as markup with declared slots. See
+[docs/pattern-composition.md](docs/pattern-composition.md).

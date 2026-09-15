@@ -1,0 +1,46 @@
+{
+    "sections": [
+        {
+            "page": "home",
+            "index": 0,
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Set the tone with the conference name, date, location, and a bold visual of the stage or crowd."
+        },
+        {
+            "page": "home",
+            "index": 1,
+            "pattern": "twentytwentyfive/event-rsvp",
+            "intent": "Push the primary 'Register' action with urgency (early-bird deadline or limited capacity)."
+        },
+        {
+            "page": "home",
+            "index": 2,
+            "pattern": "twentytwentyfive/banner-cover-big-heading",
+            "intent": "Surface three key differentiators (e.g., track count, top-tier speakers, interactive workshops)."
+        },
+        {
+            "page": "home",
+            "index": 3,
+            "pattern": "twentytwentyfive/text-faqs",
+            "intent": "Summarize the conference narrative: the theme, the tracks, and the promise of actionable takeaways."
+        },
+        {
+            "page": "agenda",
+            "index": 0,
+            "pattern": "twentytwentyfive/text-faqs",
+            "intent": "Present a structured, multi-day schedule with time slots, concurrent tracks, and session titles."
+        },
+        {
+            "page": "speakers",
+            "index": 0,
+            "pattern": "twentytwentyfive/media-instagram-grid",
+            "intent": "Display speaker headshots in a clean, browsable grid with name, role, and topic on hover."
+        },
+        {
+            "page": "venue",
+            "index": 0,
+            "pattern": "twentytwentyfive/contact-info-locations",
+            "intent": "Share the venue address, map, transport links, and a contact for accessibility or dietary queries."
+        }
+    ]
+}

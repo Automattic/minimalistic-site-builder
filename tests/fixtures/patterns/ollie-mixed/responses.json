@@ -1,0 +1,66 @@
+{
+  "version": 2,
+  "slots": {
+    "home-1-1-1-1-1": "Estúdio Northwind",
+    "home-1-1-1-1-2": "Marca e site prontos em semanas, não meses.",
+    "home-1-1-1-2": "Identidade visual e sites que lançam seu produto em semanas, sem perder tempo com escopo aberto.",
+    "home-1-1-1-3-1": "Agendar conversa",
+    "home-1-1-1-3-2": "Ver trabalhos",
+    "home-2-1-1": "Perguntas frequentes",
+    "home-2-1-2": "Como trabalhamos",
+    "home-2-1-3": "Tem dúvidas sobre prazos, valores ou processo? As respostas rápidas estão aqui. Se a sua pergunta não aparecer, é só chamar.",
+    "home-2-2-1-1-1-1-1": "Quanto tempo leva?",
+    "home-2-2-1-1-1-1-2": "Do primeiro rascunho à entrega, um projeto de identidade e site costuma levar entre duas e quatro semanas. O prazo depende da complexidade, mas sempre combinamos uma data clara antes de começar.",
+    "home-2-2-1-1-2-1-1": "Vocês cobram por hora?",
+    "home-2-2-1-1-2-1-2": "Não. Todo projeto tem preço fixo definido na proposta. Assim você sabe exatamente o investimento antes de bater o martelo, sem surpresas no meio do caminho.",
+    "home-2-2-1-2-1-1-1": "E se eu nunca trabalhei com estúdio?",
+    "home-2-2-1-2-1-1-2": "Sem problema. A gente guia cada etapa, do briefing à publicação. Nosso processo é feito para founders sem tempo — direto, enxuto e com decisões explicadas de forma simples.",
+    "home-2-2-1-2-2-1-1": "O que entregam?",
+    "home-2-2-1-2-2-1-2": "Identidade visual completa — logotipo, paleta, tipografia e aplicações — mais um site de marketing responsivo, pronto para publicar. Tudo organizado em um guia de marca que você usa depois sozinho.",
+    "home-2-3-1-1-1-2-1": "Ficou alguma dúvida?",
+    "home-2-3-1-1-1-2-2": "Ainda em dúvida? Vamos conversar.",
+    "home-2-3-1-2-1": "Falar com a gente →",
+    "home-3-1": "A Northwind entendeu o que a gente precisava antes mesmo do briefing. Entregaram tudo no prazo e o site já saiu do ar.",
+    "home-3-3-2-1": "Marina Dutra",
+    "home-3-3-2-2": "Founder",
+    "home-4-1-1": "Pronto para começar?",
+    "home-4-1-2": "Seu produto merece uma cara própria.",
+    "home-4-1-3": "Somos um estúdio de duas pessoas em Porto Alegre. Cuidamos da sua marca e do seu site com preço fechado e entrega rápida.",
+    "home-4-2-1": "Agendar conversa",
+    "contact-heading": "Vamos conversar",
+    "about-1-1-1-1": "Marca e site em semanas",
+    "about-1-1-1-2": "Somos um estúdio pequeno em Porto Alegre que entrega identidade visual e sites de marketing direto ao ponto, com orçamento fechado e sem rodeios.",
+    "about-1-1-2-1": "Agendar uma conversa"
+  },
+  "plan": {
+    "pages": [
+      {
+        "slug": "home",
+        "title": "Home",
+        "description": "Introduce the studio and funnel visitors toward booking a first conversation.",
+        "sections": [
+          {
+            "category": "hero",
+            "intent": "State who Northwind is and what it delivers in a direct, warm way that makes founders feel understood.",
+            "reason": "Founders scanning for a trustworthy partner need the studio's promise and personality upfront before they scroll further."
+          },
+          {
+            "category": "features",
+            "intent": "Show the two things the studio does — brand identity and marketing sites — plus the fixed-price guarantee.",
+            "reason": "Early-stage founders need clarity: this section answers 'what exactly do you build?' and removes pricing anxiety."
+          },
+          {
+            "category": "testimonial",
+            "intent": "Let one client voice confirm speed and quality so a hesitant founder feels peer reassurance.",
+            "reason": "Social proof from a similar founder reduces perceived risk before someone invests time in a call."
+          },
+          {
+            "category": "call-to-action",
+            "intent": "Make the primary ask — 'Book a call' — unmissable with a short sentence that feels like an invitation, not a pitch.",
+            "reason": "After seeing the offer and hearing a peer, a visitor is primed to act; this section removes friction."
+          }
+        ]
+      }
+    ]
+  }
+}

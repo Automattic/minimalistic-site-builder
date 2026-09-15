@@ -127,3 +127,13 @@ GitHub has **no API or `gh` command to upload true comment attachments** — the
 3. Post with `gh pr comment <n> --body "…"` (add `--edit-last` to update it), `gh issue comment <n> --body "…"`, or `gh pr edit <n> --body "…"`.
 
 If gist creation or authentication is unavailable, do not fall back to committing the evidence. Post the textual verification and give the user the local artifact path, or ask them to upload it through the GitHub web UI. If the user prefers genuine GitHub-hosted attachments, ask them to drag the images into the comment via the web UI instead.
+
+## Pattern image generation
+
+The patterns graph optionally accepts an `ImageClient`: `generate-media` runs
+between personalization and media resolution. It writes generated JPEGs beside
+`bundle/content.json`; hosts must publish/import them before deleting the build
+workspace. See [the media contract](docs/pattern-composition.md#generated-images).
+Supplied pages and protected blocks retain their original images. Offline replay
+has no image client. Image generation/publication failures retain the original
+source with an actionable warning; they do not abort the composition.
