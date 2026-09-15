@@ -155,20 +155,17 @@ final class SectionContent
         $string = ['type' => 'string'];
         $itemProperties = [];
         foreach (self::itemKeys($archetype, $itemPattern) as $key) {
-            $itemProperties[$key] = $key === 'list'
-                ? ['type' => 'array', 'items' => $string, 'maxItems' => 6]
-                : $string;
+            $itemProperties[$key] = $key === 'list' ? ['type' => 'array', 'items' => $string] : $string;
         }
-        [$min, $max] = self::itemCounts($archetype, $itemPattern);
+        // Anthropic structured outputs reject minItems/maxItems on arrays;
+        // the brief states the counts and the compiler slices to them.
         $properties = [
             'heading'          => $string,
             'heading_emphasis' => $string,
             'lead'             => $string,
-            'paragraphs'       => ['type' => 'array', 'items' => $string, 'maxItems' => 3],
+            'paragraphs'       => ['type' => 'array', 'items' => $string],
             'items'            => [
                 'type'     => 'array',
-                'minItems' => $min,
-                'maxItems' => $max,
                 'items'    => [
                     'type'                 => 'object',
                     'properties'           => $itemProperties,
