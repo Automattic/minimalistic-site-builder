@@ -168,6 +168,9 @@ final class SectionUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        if (($input['is_opening'] ?? false) && self::hasOneGroupRoot($markup)) {
+            $markup = GeneratedMarkup::withRootClassMarker($markup, 'page-opening--', 'page-opening--section', $this->key($input), $repairs);
+        }
         if ($archetype !== null && self::hasOneGroupRoot($markup)) {
             $markup = GeneratedMarkup::withRootClassMarker(
                 $markup,
