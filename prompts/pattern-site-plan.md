@@ -13,6 +13,22 @@ a preference the site cannot have — it is a section that cannot exist.
 {{categories}}
 </available_categories>
 
+<available_patterns>
+These are the actual arrangements the destination theme ships, written as
+`id — title [categories]`. Every section must name one of these ids in
+`pattern`, and the id you name must carry the category you chose.
+
+Pick the pattern whose title describes the job that section is doing. A theme
+usually ships several in one category — a full-bleed cover and a plain intro
+are both banners, and they are not interchangeable. Reading only the category
+is how a site ends up built from one pattern repeated.
+
+Do not use the same pattern twice anywhere in the site. When a category holds
+only one pattern and you have already used it, choose a different category.
+
+{{patterns}}
+</available_patterns>
+
 <pages_requested>
 {{requested_pages}}
 </pages_requested>
@@ -29,7 +45,7 @@ a field is a reply that gets dropped.
       "title": "Home",
       "description": "one sentence on what this page is for",
       "sections": [
-        { "category": "one of the available categories", "intent": "what this section does here", "reason": "why this site needs it" }
+        { "category": "one of the available categories", "pattern": "an id from the available patterns", "intent": "what this section does here", "reason": "why this site needs it" }
       ]
     }
   ]
@@ -47,8 +63,12 @@ a field is a reply that gets dropped.
 	"Merch Store", "Tour" over "Tour Dates".
 	Name pages and sections in the site's own vocabulary. A management
 	consultancy has "Consultants", not "Team".
-	Do not repeat a section across pages. The homepage and the additional pages
-	should read as one site, not as separate ones.
+	Do not repeat a section across pages, and do not name the same pattern
+	twice anywhere in the site. The homepage and the additional pages should
+	read as one site, not as separate ones.
+	Use the range the theme gives you. A site that draws on many of its
+	patterns reads as one design; a site built from the first pattern of each
+	category reads as a template someone forgot to finish.
 	Explain each choice in terms of this site and what its visitors came for.
 </instructions>
 

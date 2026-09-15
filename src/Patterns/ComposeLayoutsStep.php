@@ -55,6 +55,10 @@ final class ComposeLayoutsStep implements Step
         $layouts = [];
         $provenance = [];
         $unmatched = [];
+        // Patterns already placed, so a later section reaches for one the site
+        // has not used yet. Site-wide, not per page: a hero repeated on every
+        // page is the shape this prevents.
+        $used = [];
 
         foreach ($plan['pages'] ?? [] as $page) {
             $slug = (string) ($page['slug'] ?? '');
@@ -82,7 +86,7 @@ final class ComposeLayoutsStep implements Step
             $sections = [];
 
             foreach ($page['sections'] ?? [] as $index => $section) {
-                $choice = self::choose($section, $inventory);
+                $choice = self::choose($section, $inventory, $used);
 
                 if ($choice === null) {
                     $unmatched[] = sprintf(
@@ -94,6 +98,7 @@ final class ComposeLayoutsStep implements Step
                     continue;
                 }
 
+                $used[$choice] = true;
                 $sections[] = [
                     'pattern' => $choice,
                     'content' => (string) $inventory[$choice]['content'],
@@ -141,7 +146,7 @@ final class ComposeLayoutsStep implements Step
      * @param array<string,mixed>              $section
      * @param array<string,array<string,mixed>> $inventory Keyed by pattern id.
      */
-    private static function choose(array $section, array $inventory): ?string
+    private static function choose(array $section, array $inventory, array $used = []): ?string
     {
         $named = $section['pattern'] ?? null;
         if (is_string($named) && $named !== '') {
@@ -168,6 +173,16 @@ final class ComposeLayoutsStep implements Step
         }
 
         sort($matches);
+
+        // Prefer one this site has not used. Taking the first match every time
+        // builds a five-page site out of three patterns however many the theme
+        // ships, and repeats the same hero on every page. Falling back to the
+        // first match keeps a category with one pattern usable.
+        foreach ($matches as $id) {
+            if (!isset($used[$id])) {
+                return $id;
+            }
+        }
 
         return $matches[0];
     }

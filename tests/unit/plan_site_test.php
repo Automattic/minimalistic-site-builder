@@ -229,7 +229,7 @@ test('a composed page the plan left out stops the build', function () {
 test('the plan schema asks for nothing the model endpoint refuses', function () {
     $method = new ReflectionMethod(PlanSiteStep::class, 'schema');
     $method->setAccessible(true);
-    $schema = (string) json_encode($method->invoke(null, ['hero', 'footer']));
+    $schema = (string) json_encode($method->invoke(null, ['hero', 'footer'], ['tt5/hero', 'tt5/footer']));
 
     foreach (['maxItems', 'uniqueItems', 'minimum', 'maximum', 'multipleOf', 'minProperties', 'maxProperties'] as $refused) {
         assert_true(!str_contains($schema, $refused), "the endpoint refuses {$refused} and fails the whole request");

@@ -84,9 +84,13 @@ final class PlanSiteStep implements Step
             );
         }
 
+        $inventory = $inputs['inventory'] ?? [];
+        $ids = self::ids($inventory);
+
         $prompt = $this->renderer->render('pattern-site-plan.md', [
             'facts' => (string) json_encode($inputs['facts'] ?? [], JSON_PRETTY_PRINT),
             'categories' => implode("\n", array_map(static fn (string $c): string => '- ' . $c, $categories)),
+            'patterns' => self::catalogue($inventory),
             'requested_pages' => $composed === []
                 ? 'None. Choose the pages yourself.'
                 : (string) json_encode($composed, JSON_PRETTY_PRINT),
@@ -95,11 +99,11 @@ final class PlanSiteStep implements Step
 
         $plan = $this->llm->completeJson($prompt, array_filter([
             'model' => $this->model,
-            'json_schema' => ['name' => 'site_plan', 'schema' => self::schema($categories)],
-            'max_tokens' => 4000,
+            'json_schema' => ['name' => 'site_plan', 'schema' => self::schema($categories, $ids)],
+            'max_tokens' => 8000,
         ]));
 
-        $pages = self::pages($plan, $categories);
+        $pages = self::pages($plan, $categories, $ids);
 
         // A reply that renamed its fields normalizes to nothing, and writing
         // that would hand the next stage an empty plan and call it a success.
@@ -180,9 +184,10 @@ final class PlanSiteStep implements Step
      * @param list<string>         $categories
      * @return list<array<string, mixed>>
      */
-    private static function pages(array $plan, array $categories): array
+    private static function pages(array $plan, array $categories, array $ids = []): array
     {
         $allowed = array_fill_keys($categories, true);
+        $known = array_fill_keys($ids, true);
         $pages = [];
         $order = 0;
 
@@ -195,13 +200,22 @@ final class PlanSiteStep implements Step
             $sections = [];
             foreach ($page['sections'] ?? [] as $section) {
                 $category = strtolower(trim((string) ($section['category'] ?? '')));
-                if (isset($allowed[$category])) {
-                    $sections[] = [
-                        'category' => $category,
-                        'intent' => (string) ($section['intent'] ?? $category),
-                        'reason' => (string) ($section['reason'] ?? ''),
-                    ];
+                if (!isset($allowed[$category])) {
+                    continue;
                 }
+                $entry = [
+                    'category' => $category,
+                    'intent' => (string) ($section['intent'] ?? $category),
+                    'reason' => (string) ($section['reason'] ?? ''),
+                ];
+                // The pattern the model picked, when it picked one the host
+                // actually supplied. An invented id is dropped rather than
+                // carried to composition, which would fail there instead.
+                $named = trim((string) ($section['pattern'] ?? ''));
+                if ($named !== '' && isset($known[$named])) {
+                    $entry['pattern'] = $named;
+                }
+                $sections[] = $entry;
             }
 
             $pages[] = [
@@ -243,10 +257,61 @@ final class PlanSiteStep implements Step
     }
 
     /**
+     * Every pattern id the host supplied, in inventory order.
+     *
+     * @param list<array<string, mixed>> $inventory
+     * @return list<string>
+     */
+    private static function ids(array $inventory): array
+    {
+        $ids = [];
+        foreach ($inventory as $pattern) {
+            $id = trim((string) ($pattern['id'] ?? ''));
+            if ($id !== '') {
+                $ids[$id] = true;
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    /**
+     * The inventory as the planner reads it: what each pattern is called and
+     * what it is for. Planning against category names alone cannot tell a
+     * hero from a pricing table, so the plan repeats itself and the site comes
+     * out of one pattern per category however much the theme ships.
+     *
+     * @param list<array<string, mixed>> $inventory
+     */
+    private static function catalogue(array $inventory): string
+    {
+        $lines = [];
+        foreach ($inventory as $pattern) {
+            $id = trim((string) ($pattern['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $categories = array_values(array_filter(array_map(
+                static fn ($c): string => strtolower(trim((string) $c)),
+                $pattern['categories'] ?? [],
+            )));
+            $lines[] = sprintf(
+                '- %s — %s [%s]',
+                $id,
+                trim((string) ($pattern['title'] ?? $id)) ?: $id,
+                $categories === [] ? 'uncategorised' : implode(', ', $categories),
+            );
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * @param list<string> $categories
+     * @param list<string> $ids
      * @return array<string, mixed>
      */
-    private static function schema(array $categories): array
+    private static function schema(array $categories, array $ids = []): array
     {
         return [
             'type' => 'object',
@@ -272,13 +337,14 @@ final class PlanSiteStep implements Step
                                 // upper bound is asked for in the prompt instead.
                                 'items' => [
                                     'type' => 'object',
-                                    'required' => ['category', 'intent', 'reason'],
+                                    'required' => $ids === [] ? ['category', 'intent', 'reason'] : ['category', 'pattern', 'intent', 'reason'],
                                     'additionalProperties' => false,
-                                    'properties' => [
+                                    'properties' => array_filter([
                                         'category' => ['type' => 'string', 'enum' => $categories],
+                                        'pattern' => $ids === [] ? null : ['type' => 'string', 'enum' => $ids],
                                         'intent' => ['type' => 'string'],
                                         'reason' => ['type' => 'string'],
-                                    ],
+                                    ]),
                                 ],
                             ],
                         ],
