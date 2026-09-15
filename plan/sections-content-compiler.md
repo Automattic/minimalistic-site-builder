@@ -1,7 +1,28 @@
 # Plan: content-only section output compiled by PHP
 
-> **Status (2026-09-15):** proposed. Not started. The numbers in *Why* come
-> from `projects/*/logs/llms/*.log` on the eight demo builds in `projects/`.
+> **Status (2026-09-15):** M0 to M2 shipped on branch `blocks-optimizer`
+> behind `SITE_BUILD_SECTION_OUTPUT=content` (default stays markup). M3, the
+> cohort A/B and default flip, and M4 are not started. The numbers in *Why*
+> come from `projects/*/logs/llms/*.log` on the eight demo builds in `projects/`.
+>
+> Findings from the live spike (tbilisi demo, Opus 5, no images):
+> - Anthropic structured outputs reject `minItems`/`maxItems` on arrays and
+>   an object schema with no properties. The brief states the counts and the
+>   compiler slices to them.
+> - The API folds the output schema into the prompt-cache key. A schema per
+>   archetype made every distinct archetype pay a cache write even with
+>   byte-identical cached layers. One schema now serves every section.
+> - Per content section: about 9.5K input tokens, 8.7K of them cached, and
+>   0.3K to 1.3K output, 9 to 20 seconds. The same demo on trunk in markup
+>   mode: about 23K input, 19.7K cached, 1K to 5K output, 12 to 43 seconds.
+> - The compiled markup runs through the whole `SectionUnit::finish()` chain
+>   with zero repairs and zero warnings across the full archetype x item
+>   pattern x card style x background x placement product.
+> - Minimal implementation choices: one uniform item shape with a per-archetype
+>   field subset, no `content/<part>.json` artifact, no replay tool, no CLI
+>   flag, no `meta.json` record. A ledger or chip item pattern renders only in
+>   `equal-card-grid` and `asymmetric-split`; elsewhere the pattern marks the
+>   items and the archetype keeps its native shape.
 
 Replace the block markup that the sections step asks the model to write with a
 small JSON content document per section. A PHP compiler turns that document
