@@ -1,33 +1,43 @@
 {
-  "version": 1,
+  "version": 2,
   "theme": "twentytwentyfive",
   "locale": "en",
+  "site": {
+    "title": "Summit 2026"
+  },
   "brand": {
-    "settings": {
-      "color": {
-        "palette": [
-          {
-            "slug": "base",
-            "color": "#FCFAF6",
-            "name": "Base"
-          },
-          {
-            "slug": "contrast",
-            "color": "#0B2B3C",
-            "name": "Contrast"
-          },
-          {
-            "slug": "accent-1",
-            "color": "#E2725B",
-            "name": "Accent 1"
-          }
-        ]
+    "id": null,
+    "name": "Summit",
+    "logo_url": "",
+    "context": "",
+    "config": {
+      "settings": {
+        "color": {
+          "palette": [
+            {
+              "slug": "base",
+              "color": "#FCFAF6",
+              "name": "Base"
+            },
+            {
+              "slug": "contrast",
+              "color": "#0B2B3C",
+              "name": "Contrast"
+            },
+            {
+              "slug": "accent-1",
+              "color": "#E2725B",
+              "name": "Accent 1"
+            }
+          ]
+        }
       }
     }
   },
   "inventory": [
     {
       "id": "twentytwentyfive/banner-cover-big-heading",
+      "title": "",
       "categories": [
         "banner",
         "about",
@@ -37,6 +47,7 @@
     },
     {
       "id": "twentytwentyfive/contact-info-locations",
+      "title": "",
       "categories": [
         "contact"
       ],
@@ -44,6 +55,7 @@
     },
     {
       "id": "twentytwentyfive/event-3-col",
+      "title": "",
       "categories": [
         "banner"
       ],
@@ -51,6 +63,7 @@
     },
     {
       "id": "twentytwentyfive/event-rsvp",
+      "title": "",
       "categories": [
         "call-to-action"
       ],
@@ -58,6 +71,7 @@
     },
     {
       "id": "twentytwentyfive/event-schedule",
+      "title": "",
       "categories": [
         "about"
       ],
@@ -65,6 +79,7 @@
     },
     {
       "id": "twentytwentyfive/logos",
+      "title": "",
       "categories": [
         "banner"
       ],
@@ -72,6 +87,7 @@
     },
     {
       "id": "twentytwentyfive/media-instagram-grid",
+      "title": "",
       "categories": [
         "media",
         "gallery",
@@ -81,6 +97,7 @@
     },
     {
       "id": "twentytwentyfive/pricing-3-col",
+      "title": "",
       "categories": [
         "call-to-action",
         "banner",
@@ -90,6 +107,7 @@
     },
     {
       "id": "twentytwentyfive/services-3-col",
+      "title": "",
       "categories": [
         "call-to-action",
         "banner",
@@ -99,6 +117,7 @@
     },
     {
       "id": "twentytwentyfive/testimonials-2-col",
+      "title": "",
       "categories": [
         "testimonials"
       ],
@@ -106,6 +125,7 @@
     },
     {
       "id": "twentytwentyfive/text-faqs",
+      "title": "",
       "categories": [
         "text",
         "about"

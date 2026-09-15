@@ -1,6 +1,10 @@
 {
+  "version": 2,
   "theme": "ollie",
   "locale": "en",
+  "site": {
+    "title": "Northwind"
+  },
   "pages": [
     {
       "slug": "home",

@@ -1,6 +1,10 @@
 {
+  "version": 2,
   "theme": "twentytwentyfive",
   "locale": "en",
+  "site": {
+    "title": "Summit 2026"
+  },
   "pages": [
     {
       "slug": "home",

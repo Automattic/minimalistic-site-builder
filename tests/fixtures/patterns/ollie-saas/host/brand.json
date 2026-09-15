@@ -1,53 +1,59 @@
 {
-  "settings": {
-    "color": {
-      "palette": [
-        {
-          "slug": "primary",
-          "name": "Primary",
-          "color": "#0F766E"
-        },
-        {
-          "slug": "primary-accent",
-          "name": "Primary accent",
-          "color": "#CCFBF1"
-        },
-        {
-          "slug": "primary-alt",
-          "name": "Primary alt",
-          "color": "#134E4A"
-        },
-        {
-          "slug": "primary-alt-accent",
-          "name": "Primary alt accent",
-          "color": "#99F6E4"
-        },
-        {
-          "slug": "main",
-          "name": "Main",
-          "color": "#0B1220"
-        },
-        {
-          "slug": "main-accent",
-          "name": "Main accent",
-          "color": "#CBD5E1"
-        },
-        {
-          "slug": "base",
-          "name": "Base",
-          "color": "#FFFFFF"
-        },
-        {
-          "slug": "secondary",
-          "name": "Secondary",
-          "color": "#475569"
-        },
-        {
-          "slug": "tertiary",
-          "name": "Tertiary",
-          "color": "#F1F5F9"
-        }
-      ]
+  "id": null,
+  "name": "Relay",
+  "logo_url": "",
+  "context": "",
+  "config": {
+    "settings": {
+      "color": {
+        "palette": [
+          {
+            "slug": "primary",
+            "name": "Primary",
+            "color": "#0F766E"
+          },
+          {
+            "slug": "primary-accent",
+            "name": "Primary accent",
+            "color": "#CCFBF1"
+          },
+          {
+            "slug": "primary-alt",
+            "name": "Primary alt",
+            "color": "#134E4A"
+          },
+          {
+            "slug": "primary-alt-accent",
+            "name": "Primary alt accent",
+            "color": "#99F6E4"
+          },
+          {
+            "slug": "main",
+            "name": "Main",
+            "color": "#0B1220"
+          },
+          {
+            "slug": "main-accent",
+            "name": "Main accent",
+            "color": "#CBD5E1"
+          },
+          {
+            "slug": "base",
+            "name": "Base",
+            "color": "#FFFFFF"
+          },
+          {
+            "slug": "secondary",
+            "name": "Secondary",
+            "color": "#475569"
+          },
+          {
+            "slug": "tertiary",
+            "name": "Tertiary",
+            "color": "#F1F5F9"
+          }
+        ]
+      }
     }
   }
 }

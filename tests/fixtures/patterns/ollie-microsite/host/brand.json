@@ -1,53 +1,59 @@
 {
-  "settings": {
-    "color": {
-      "palette": [
-        {
-          "slug": "primary",
-          "name": "Primary",
-          "color": "#B45309"
-        },
-        {
-          "slug": "primary-accent",
-          "name": "Primary accent",
-          "color": "#FEF3C7"
-        },
-        {
-          "slug": "primary-alt",
-          "name": "Primary alt",
-          "color": "#78350F"
-        },
-        {
-          "slug": "primary-alt-accent",
-          "name": "Primary alt accent",
-          "color": "#FDE68A"
-        },
-        {
-          "slug": "main",
-          "name": "Main",
-          "color": "#1C1917"
-        },
-        {
-          "slug": "main-accent",
-          "name": "Main accent",
-          "color": "#D6D3D1"
-        },
-        {
-          "slug": "base",
-          "name": "Base",
-          "color": "#FFFDF7"
-        },
-        {
-          "slug": "secondary",
-          "name": "Secondary",
-          "color": "#57534E"
-        },
-        {
-          "slug": "tertiary",
-          "name": "Tertiary",
-          "color": "#F5F0E6"
-        }
-      ]
+  "id": null,
+  "name": "Northwind",
+  "logo_url": "",
+  "context": "",
+  "config": {
+    "settings": {
+      "color": {
+        "palette": [
+          {
+            "slug": "primary",
+            "name": "Primary",
+            "color": "#B45309"
+          },
+          {
+            "slug": "primary-accent",
+            "name": "Primary accent",
+            "color": "#FEF3C7"
+          },
+          {
+            "slug": "primary-alt",
+            "name": "Primary alt",
+            "color": "#78350F"
+          },
+          {
+            "slug": "primary-alt-accent",
+            "name": "Primary alt accent",
+            "color": "#FDE68A"
+          },
+          {
+            "slug": "main",
+            "name": "Main",
+            "color": "#1C1917"
+          },
+          {
+            "slug": "main-accent",
+            "name": "Main accent",
+            "color": "#D6D3D1"
+          },
+          {
+            "slug": "base",
+            "name": "Base",
+            "color": "#FFFDF7"
+          },
+          {
+            "slug": "secondary",
+            "name": "Secondary",
+            "color": "#57534E"
+          },
+          {
+            "slug": "tertiary",
+            "name": "Tertiary",
+            "color": "#F5F0E6"
+          }
+        ]
+      }
     }
   }
 }

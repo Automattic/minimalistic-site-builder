@@ -11,19 +11,14 @@ use Automattic\SiteBuild\StepDeclaration;
  * Step: check the host's inputs and settle them into one artifact.
  *
  * The host decides how a request reaches it; the stages downstream should not
- * have to care. This is the boundary between the two — it reads the three
- * things a host supplies and writes the single shape everything after it
- * consumes, so a change to how requests arrive stops here.
+ * have to care. This is the boundary between the two: it reads the three seeds
+ * a host supplies and writes the single shape everything after it consumes, so
+ * a change to how requests arrive stops here.
  *
- * What it refuses is chosen by what would otherwise fail silently. An absent
- * theme composes a site for nothing in particular; an inventory entry with no
- * markup contributes an empty section that still passes every later check; a
- * Brand carrying keys outside theme.json lands in a global-styles post that
- * WordPress quietly strips. Each of those reports success, which is why each
- * of them stops the build here instead.
- *
- * Optional metadata is not held to that standard: a missing category list or
- * an absent navigation is a site with fewer things in it, not a wrong one.
+ * The rules are `HostRequest`'s, and every problem is reported together. What
+ * this adds is the settling: defaults filled, the Brand's context copied into
+ * the facts, each page marked as composed or supplied so no later stage has to
+ * infer that from which keys happen to be present.
  */
 final class NormalizeInputsStep implements Step
 {
@@ -31,18 +26,11 @@ final class NormalizeInputsStep implements Step
      * Bumped when the normalized shape changes in a way a retained artifact
      * cannot satisfy, so a resumed run rejects stale inputs rather than
      * composing from half of an older contract.
+     *
+     * 2: pages are composed or supplied, the Brand is a record with `config`,
+     * the site has a title.
      */
-    public const INPUTS_VERSION = 1;
-
-    /** theme.json's own top-level keys. A Brand is a partial of one. */
-    private const BRAND_KEYS = ['settings', 'styles'];
-
-    /** The preset lists a Brand may carry, as theme.json lays them out. */
-    private const PRESET_LISTS = [
-        'color' => ['palette', 'gradients', 'duotone'],
-        'typography' => ['fontSizes', 'fontFamilies'],
-        'spacing' => ['spacingSizes'],
-    ];
+    public const INPUTS_VERSION = 2;
 
     /**
      * Refuse normalized inputs this build cannot read.
@@ -91,62 +79,42 @@ final class NormalizeInputsStep implements Step
     public function run(Project $project): void
     {
         $request = $project->readJson(PatternArtifacts::REQUEST);
-        $inventory = $project->readJson(PatternArtifacts::INVENTORY);
+        $patterns = $project->readJson(PatternArtifacts::INVENTORY);
         $brand = $project->readJson(PatternArtifacts::BRAND);
 
-        $problems = [];
-
-        $theme = trim((string) ($request['theme'] ?? ''));
-        if ($theme === '') {
-            $problems[] = 'request names no theme, and content is composed for one';
+        try {
+            HostRequest::validate($request, $patterns, $brand);
+        } catch (\InvalidArgumentException $e) {
+            throw new \RuntimeException($e->getMessage(), 0, $e);
         }
 
-        $patterns = self::patterns($inventory, $problems);
-        if ($patterns === [] && $problems === []) {
-            $problems[] = 'the approved inventory is empty, so there is nothing to compose from';
-        }
+        $unused = [];
+        $inventory = HostRequest::inventory($patterns, $unused);
 
-        foreach (array_keys($brand) as $key) {
-            if (!in_array($key, self::BRAND_KEYS, true)) {
-                $problems[] = sprintf(
-                    'Brand carries "%s", which is not a theme.json key and would be dropped without a word',
-                    $key,
-                );
-            }
-        }
-
-        // A preset without a name is a preset a destination drops. theme.json
-        // requires one, and the save filter a site running Gutenberg applies to
-        // global styles rejects each nameless preset before it persists — the
-        // Brand lands as an empty post and the apply reports success. Observed
-        // on an Atomic site: three colours written, a 52-byte post saved.
-        foreach (self::presets($brand) as $path => $entries) {
-            foreach ($entries as $index => $entry) {
-                foreach (['slug', 'name'] as $field) {
-                    if (!is_array($entry) || trim((string) ($entry[$field] ?? '')) === '') {
-                        $problems[] = sprintf('Brand %s[%d] has no %s, which theme.json requires', $path, $index, $field);
-                    }
-                }
-            }
-        }
-
-        if ($problems !== []) {
-            throw new \RuntimeException(
-                "These inputs cannot produce a site:\n  - " . implode("\n  - ", $problems)
-            );
+        $facts = is_array($request['facts'] ?? null) ? $request['facts'] : [];
+        $context = trim((string) ($brand['context'] ?? ''));
+        if ($context !== '' && trim((string) ($facts['brand_context'] ?? '')) === '') {
+            $facts['brand_context'] = $context;
         }
 
         $project->writeJson(PatternArtifacts::NORMALIZED, [
             'version' => self::INPUTS_VERSION,
-            'theme' => $theme,
-            'locale' => (string) ($request['locale'] ?? 'en'),
-            'brand' => $brand,
-            'inventory' => $patterns,
-            'pages' => $request['pages'] ?? [],
+            'theme' => trim((string) $request['theme']),
+            'locale' => trim((string) ($request['locale'] ?? '')) ?: 'en',
+            'site' => ['title' => trim((string) $request['site']['title'])],
+            'brand' => [
+                'id' => $brand['id'] ?? null,
+                'name' => (string) ($brand['name'] ?? ''),
+                'logo_url' => (string) ($brand['logo_url'] ?? ''),
+                'context' => $context,
+                'config' => is_array($brand['config'] ?? null) ? $brand['config'] : [],
+            ],
+            'inventory' => $inventory,
+            'pages' => array_map([self::class, 'page'], $request['pages'] ?? []),
             'navigation' => $request['navigation'] ?? [],
-            'facts' => $request['facts'] ?? [],
+            'facts' => $facts,
             'capabilities' => [
-                'classes' => self::strings($request['capabilities']['classes'] ?? []),
+                'classes' => HostRequest::strings($request['capabilities']['classes'] ?? []),
                 // Which of the theme's page templates a generated page renders
                 // in. A theme's default page template usually prints the
                 // title, and a front page titled "Home" then opens with the
@@ -158,89 +126,32 @@ final class NormalizeInputsStep implements Step
     }
 
     /**
-     * The inventory, with each entry reduced to what composition reads.
+     * One page, settled: `intent` means composed; `markup` means supplied,
+     * with `slots` null (discover them), a list (only these), or [] (frozen).
      *
-     * An entry missing an id or its markup is reported rather than skipped.
-     * Skipping it would shrink the vocabulary without saying so, and the build
-     * would fail later at whichever section happened to need it — pointing at
-     * the plan, which is not where the problem is.
-     *
-     * @param array<string, mixed> $inventory
-     * @param list<string>         $problems
-     * @return list<array<string, mixed>>
+     * @param array<string, mixed> $page
+     * @return array<string, mixed>
      */
-    private static function patterns(array $inventory, array &$problems): array
+    private static function page(array $page): array
     {
-        $patterns = [];
-        $seen = [];
+        $settled = [
+            'slug' => trim((string) $page['slug']),
+            'title' => trim((string) ($page['title'] ?? '')) ?: ucfirst(trim((string) $page['slug'])),
+        ];
 
-        foreach ($inventory['patterns'] ?? [] as $index => $pattern) {
-            $id = is_array($pattern) ? trim((string) ($pattern['id'] ?? '')) : '';
-            $content = is_array($pattern) ? (string) ($pattern['content'] ?? '') : '';
-
-            if ($id === '') {
-                $problems[] = sprintf('inventory entry %s has no id', (string) $index);
-                continue;
-            }
-            if (trim($content) === '') {
-                $problems[] = sprintf('inventory entry "%s" has no markup', $id);
-                continue;
-            }
-            if (isset($seen[$id])) {
-                $problems[] = sprintf('inventory lists "%s" twice, so which one composes is a coin toss', $id);
-                continue;
-            }
-
-            $seen[$id] = true;
-            $patterns[] = [
-                'id' => $id,
-                'categories' => self::strings($pattern['categories'] ?? []),
-                'content' => $content,
-            ];
+        if (array_key_exists('markup', $page)) {
+            $settled['markup'] = (string) $page['markup'];
+            $settled['slots'] = array_key_exists('slots', $page) ? array_values((array) $page['slots']) : null;
+        } else {
+            $settled['intent'] = trim((string) $page['intent']);
         }
 
-        return $patterns;
+        return $settled;
     }
 
-    /**
-     * @param mixed $value
-     * @return list<string>
-     */
-    private static function strings(mixed $value): array
+    /** Whether a settled page was supplied by the host rather than composed. */
+    public static function isSupplied(array $page): bool
     {
-        if (!is_array($value)) {
-            return [];
-        }
-
-        return array_values(array_filter(array_map(
-            static fn ($item) => is_string($item) ? trim($item) : '',
-            $value,
-        ), static fn (string $item): bool => $item !== ''));
-    }
-
-    /**
-     * Every preset entry the Brand carries, keyed by where it sits.
-     *
-     * A theme writes a preset list flat; a user layer keys it by origin. Both
-     * shapes reach here, and an entry is an entry either way.
-     *
-     * @param array<string, mixed> $brand
-     * @return array<string, list<mixed>>
-     */
-    private static function presets(array $brand): array
-    {
-        $found = [];
-        foreach (self::PRESET_LISTS as $group => $lists) {
-            foreach ($lists as $list) {
-                $value = $brand['settings'][$group][$list] ?? null;
-                if (!is_array($value)) {
-                    continue;
-                }
-                $entries = array_is_list($value) ? $value : array_merge(...array_values(array_filter($value, 'is_array')) ?: [[]]);
-                $found['settings.' . $group . '.' . $list] = array_values($entries);
-            }
-        }
-
-        return $found;
+        return array_key_exists('markup', $page);
     }
 }

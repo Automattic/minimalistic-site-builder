@@ -7,6 +7,22 @@ use Automattic\SiteBuild\Patterns\PatternArtifacts;
 use Automattic\SiteBuild\Project;
 
 /**
+ * A version 2 request with every required field, so a test only names what
+ * it changes.
+ *
+ * @param array<string, mixed> $overrides
+ */
+function normalize_request(array $overrides = []): array
+{
+    return $overrides + [
+        'version' => 2,
+        'theme' => 'twentytwentyfive',
+        'site' => ['title' => 'Summit'],
+        'pages' => [['slug' => 'home', 'title' => 'Home', 'intent' => 'Open the site']],
+    ];
+}
+
+/**
  * @param array<string, mixed> $request
  * @param array<string, mixed> $inventory
  * @param array<string, mixed> $brand
@@ -35,14 +51,13 @@ function normalize_inventory(): array
 
 test('valid inputs settle into the shape the later stages read', function () {
     $project = normalize_project(
-        [
-            'theme' => 'twentytwentyfive',
+        normalize_request([
             'locale' => 'es',
             'navigation' => [['title' => 'Home', 'slug' => 'home']],
             'capabilities' => ['classes' => ['card'], 'page_template' => 'page-no-title'],
-        ],
+        ]),
         normalize_inventory(),
-        ['settings' => ['color' => []]],
+        ['name' => 'Summit', 'config' => ['settings' => ['color' => []]]],
     );
 
     (new NormalizeInputsStep())->run($project);
@@ -55,6 +70,8 @@ test('valid inputs settle into the shape the later stages read', function () {
     assert_eq(array('card'), $inputs['capabilities']['classes']);
     assert_eq('page-no-title', $inputs['capabilities']['page_template']);
     assert_eq(1, count($inputs['navigation']));
+    assert_eq('Summit', $inputs['site']['title']);
+    assert_eq('Summit', $inputs['brand']['name']);
 });
 
 /**
@@ -62,7 +79,7 @@ test('valid inputs settle into the shape the later stages read', function () {
  * against, and every pattern choice downstream would be made against nothing.
  */
 test('a request with no theme is refused', function () {
-    $project = normalize_project(['theme' => ''], normalize_inventory());
+    $project = normalize_project(normalize_request(['theme' => '']), normalize_inventory());
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
 
@@ -70,7 +87,7 @@ test('a request with no theme is refused', function () {
 });
 
 test('an empty inventory is refused rather than composed from', function () {
-    $project = normalize_project(['theme' => 'twentytwentyfive'], ['patterns' => []]);
+    $project = normalize_project(normalize_request(), ['patterns' => []]);
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
 
@@ -86,7 +103,7 @@ test('an inventory entry with no markup is reported by name', function () {
     $inventory = normalize_inventory();
     $inventory['patterns'][] = ['id' => 'theme/empty', 'content' => ''];
 
-    $project = normalize_project(['theme' => 'twentytwentyfive'], $inventory);
+    $project = normalize_project(normalize_request(), $inventory);
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
 
@@ -97,7 +114,7 @@ test('an inventory that lists the same pattern twice is refused', function () {
     $inventory = normalize_inventory();
     $inventory['patterns'][] = $inventory['patterns'][0];
 
-    $project = normalize_project(['theme' => 'twentytwentyfive'], $inventory);
+    $project = normalize_project(normalize_request(), $inventory);
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
 
@@ -111,9 +128,9 @@ test('an inventory that lists the same pattern twice is refused', function () {
  */
 test('a Brand carrying a key theme.json does not have is refused', function () {
     $project = normalize_project(
-        ['theme' => 'twentytwentyfive'],
+        normalize_request(),
         normalize_inventory(),
-        ['settings' => [], 'logo' => 'https://example.com/logo.png'],
+        ['config' => ['settings' => [], 'logo' => 'https://example.com/logo.png']],
     );
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
@@ -125,7 +142,7 @@ test('a Brand carrying a key theme.json does not have is refused', function () {
  * Everything wrong at once, so a host fixes its request in one pass.
  */
 test('every problem is reported together', function () {
-    $project = normalize_project(['theme' => ''], ['patterns' => [['id' => '', 'content' => '']]]);
+    $project = normalize_project(normalize_request(['theme' => '']), ['patterns' => [['id' => '', 'content' => '']]]);
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
 
@@ -141,7 +158,7 @@ test('a pattern with no categories is kept', function () {
     $inventory = normalize_inventory();
     unset($inventory['patterns'][0]['categories']);
 
-    $project = normalize_project(['theme' => 'twentytwentyfive'], $inventory);
+    $project = normalize_project(normalize_request(), $inventory);
 
     (new NormalizeInputsStep())->run($project);
 
@@ -177,9 +194,9 @@ test('inputs from an older contract are refused rather than half-read', function
  */
 test('a Brand preset with no name is refused by name', function () {
     $project = normalize_project(
-        ['theme' => 'twentytwentyfive'],
+        normalize_request(),
         normalize_inventory(),
-        ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]],
+        ['config' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'color' => '#FFF']]]]]],
     );
 
     $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
@@ -189,12 +206,94 @@ test('a Brand preset with no name is refused by name', function () {
 
 test('a Brand whose presets are named is accepted', function () {
     $project = normalize_project(
-        ['theme' => 'twentytwentyfive'],
+        normalize_request(),
         normalize_inventory(),
-        ['settings' => ['color' => ['palette' => [['slug' => 'base', 'name' => 'Base', 'color' => '#FFF']]]]],
+        ['config' => ['settings' => ['color' => ['palette' => [['slug' => 'base', 'name' => 'Base', 'color' => '#FFF']]]]]],
     );
 
     (new NormalizeInputsStep())->run($project);
 
-    assert_eq('Base', $project->readJson(PatternArtifacts::NORMALIZED)['brand']['settings']['color']['palette'][0]['name']);
+    assert_eq('Base', $project->readJson(PatternArtifacts::NORMALIZED)['brand']['config']['settings']['color']['palette'][0]['name']);
+});
+
+/**
+ * The Brand's context is prose the operator wrote about the brand. The model
+ * reads facts, so it travels as one, unless the host already set it.
+ */
+test('the Brand context becomes a fact the model can read', function () {
+    $project = normalize_project(
+        normalize_request(),
+        normalize_inventory(),
+        ['name' => 'Summit', 'context' => 'Warm, direct, never salesy.', 'config' => []],
+    );
+
+    (new NormalizeInputsStep())->run($project);
+
+    assert_eq('Warm, direct, never salesy.', $project->readJson(PatternArtifacts::NORMALIZED)['facts']['brand_context']);
+});
+
+/**
+ * A request from the first contract has no version, its Brand is a bare
+ * theme.json partial, and its pages have no way to be supplied. Reading it
+ * anyway would compose a site with no Brand and call it one.
+ */
+test('a version 1 request is refused by name', function () {
+    $project = normalize_project(
+        ['theme' => 'twentytwentyfive', 'pages' => []],
+        normalize_inventory(),
+        ['settings' => []],
+    );
+
+    $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($project));
+
+    assert_contains('version NULL', $thrown->getMessage());
+    assert_contains('version 2', $thrown->getMessage());
+});
+
+/**
+ * A supplied page arrives as markup and settles with its slots as the host
+ * declared them: absent means discover, a list means those, [] means frozen.
+ */
+test('supplied and composed pages settle so later stages need not guess', function () {
+    $markup = '<!-- wp:paragraph --><p>Approved copy.</p><!-- /wp:paragraph -->';
+    $project = normalize_project(
+        normalize_request(['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'intent' => 'Open the site'],
+            ['slug' => 'about', 'title' => 'About', 'markup' => $markup],
+            ['slug' => 'legal', 'title' => 'Legal', 'markup' => $markup, 'slots' => []],
+        ]]),
+        normalize_inventory(),
+    );
+
+    (new NormalizeInputsStep())->run($project);
+
+    $pages = $project->readJson(PatternArtifacts::NORMALIZED)['pages'];
+    assert_eq(false, NormalizeInputsStep::isSupplied($pages[0]));
+    assert_eq(true, NormalizeInputsStep::isSupplied($pages[1]));
+    assert_eq(true, array_key_exists('slots', $pages[1]) && $pages[1]['slots'] === null);
+    assert_eq([], $pages[2]['slots']);
+});
+
+/**
+ * With every page supplied there is nothing to compose, so an inventory is
+ * not required. With one composed page it is.
+ */
+test('the inventory is optional only when every page is supplied', function () {
+    $markup = '<!-- wp:paragraph --><p>Approved copy.</p><!-- /wp:paragraph -->';
+    $supplied = normalize_project(
+        normalize_request(['pages' => [['slug' => 'home', 'title' => 'Home', 'markup' => $markup]]]),
+        ['patterns' => []],
+    );
+    (new NormalizeInputsStep())->run($supplied);
+    assert_eq([], $supplied->readJson(PatternArtifacts::NORMALIZED)['inventory']);
+
+    $mixed = normalize_project(
+        normalize_request(['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'markup' => $markup],
+            ['slug' => 'blog', 'title' => 'Blog', 'intent' => 'List the posts'],
+        ]]),
+        ['patterns' => []],
+    );
+    $thrown = assert_throws(static fn () => (new NormalizeInputsStep())->run($mixed));
+    assert_contains('inventory is empty', $thrown->getMessage());
 });
