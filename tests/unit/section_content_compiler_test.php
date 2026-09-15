@@ -134,15 +134,31 @@ test('compiled sections satisfy the catalog, item pattern, and card style contra
     assert_eq([], array_slice(array_values(array_unique($failures)), 0, 40), count($failures) . ' contract failures');
 });
 
-test('every schema encodes as objects the structured-output API accepts', function () {
+test('one schema serves every archetype so the batch shares one cache prefix', function () {
+    $json = json_encode(SectionContent::schema(), JSON_THROW_ON_ERROR);
+    assert_true(!str_contains($json, '"properties":[]'), 'no empty property list');
+    assert_true(!str_contains($json, 'maxItems') && !str_contains($json, 'minItems'), 'no array bounds');
     foreach (SectionComposition::ARCHETYPES as $archetype) {
         foreach ([null, ...ItemPattern::ALL] as $itemPattern) {
-            $json = json_encode(SectionContent::schema($archetype, $itemPattern), JSON_THROW_ON_ERROR);
-            assert_true(!str_contains($json, '"properties":[]'), "{$archetype}: no empty property list");
-            assert_true(!str_contains($json, 'maxItems') && !str_contains($json, 'minItems'), "{$archetype}: no array bounds");
+            foreach (SectionContent::itemKeys($archetype, $itemPattern) as $key) {
+                assert_true(in_array($key, SectionContent::ALL_ITEM_KEYS, true), "{$archetype} item key {$key} is in the schema");
+            }
         }
     }
-    assert_true(!isset(SectionContent::schema('cta-panel', null)['properties']['items']), 'an item-less archetype has no items field');
+    $unit = new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')), contentMode: true);
+    $a = $unit->request(content_unit_input('cta-panel', null, 'flush', 'base', 'centered'));
+    $b = $unit->request(content_unit_input('equal-card-grid', 'rule-row', 'flush', 'base', 'centered'));
+    assert_eq($a['json_schema'], $b['json_schema'], 'the schema is byte-identical across archetypes');
+    assert_eq($a['cached_prefixes'], $b['cached_prefixes'], 'the cached layers are byte-identical across archetypes');
+});
+
+test('a closing panel without a planned action falls back to the spec email', function () {
+    $input = content_unit_input('cta-panel', null, 'flush', 'base', 'centered', false);
+    $doc = content_document('cta-panel', null);
+    $doc['link_href'] = '';
+    assert_true(!str_contains(SectionContentCompiler::compile($doc, $input), 'wp:button'), 'no email in the spec, no button');
+    $input['site_spec'] = '{"name":"Tbilisi Tavern","writing_direction":"ltr","email":"table@tbilisi.example"}';
+    assert_contains('<a href="mailto:table@tbilisi.example">Reserve a table</a>', SectionContentCompiler::compile($doc, $input));
 });
 
 test('compiled markup keeps the hooks later steps read', function () {

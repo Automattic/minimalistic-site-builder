@@ -251,7 +251,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         ]);
         $request['cached_prefixes'] = [$siteLayer, $buildLayer, $pageLayer];
         $request['prompt'] = $brief;
-        $request['json_schema'] = ['name' => 'section_content', 'schema' => SectionContent::schema($archetype, $itemPattern)];
+        $request['json_schema'] = ['name' => 'section_content', 'schema' => SectionContent::schema()];
         return $request;
     }
 

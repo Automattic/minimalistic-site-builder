@@ -136,38 +136,56 @@ final class SectionContent
             $lines[] = self::PATTERN_SHAPES[$itemPattern];
         }
         [$min, $max] = self::itemCounts($archetype, $itemPattern);
-        $lines[] = $max === 0 ? 'Leave `items` empty.' : "Write {$min} to {$max} items.";
+        $keys = self::itemKeys($archetype, $itemPattern);
+        $lines[] = $max === 0
+            ? 'Leave `items` empty.'
+            : "Write {$min} to {$max} items. Fill only these item fields: `" . implode('`, `', $keys)
+                . '`; leave the other item fields empty ("" or []).';
         if (isset(self::SECTION_IMAGE[$archetype])) {
             $lines[] = 'The section image is ' . self::SECTION_IMAGE[$archetype]
                 . '. Fill `image_subject` and `image_context`, or leave both empty when the section reads better without a picture.';
         } else {
             $lines[] = 'The section has no section-level image; leave `image_subject` and `image_context` empty.';
         }
-        $lines[] = $hasAction
-            ? 'Fill `action_label` with the visitor-facing words for the planned primary action.'
-            : 'Leave `action_label` empty: this section has no planned button.';
+        if ($hasAction) {
+            $lines[] = 'Fill `action_label` with the visitor-facing words for the planned primary action.';
+        } elseif ($archetype === 'cta-panel') {
+            $lines[] = 'The panel closes on one action: fill `action_label` with its words and `link_href` with the SITE PAGES path or the `mailto:` it leads to. Leave `link_href` empty when no destination exists; the build then uses the spec\'s contact email, or ships no button.';
+        } else {
+            $lines[] = 'Leave `action_label` empty: this section has no planned button.';
+        }
         return implode("\n", $lines);
     }
 
-    /** @return array<string,mixed> */
-    public static function schema(string $archetype, ?string $itemPattern): array
+    /** Every item field any archetype reads, in writing order. */
+    public const ALL_ITEM_KEYS = ['heading', 'text', 'meta', 'list', 'link_label', 'link_href', 'image_subject', 'image_context'];
+
+    /**
+     * The one schema every section request carries.
+     *
+     * The API folds the output schema into the prompt-cache key: two requests
+     * with identical cached prefixes and different schemas each pay a cache
+     * write. One schema for every archetype keeps the site, build, and page
+     * layers shared across the whole batch. The brief names the item fields
+     * the archetype reads; the compiler ignores the rest. Anthropic structured
+     * outputs also reject minItems/maxItems, so the brief states the counts and
+     * the compiler slices to them.
+     *
+     * @return array<string,mixed>
+     */
+    public static function schema(): array
     {
         $string = ['type' => 'string'];
         $itemProperties = [];
-        foreach (self::itemKeys($archetype, $itemPattern) as $key) {
+        foreach (self::ALL_ITEM_KEYS as $key) {
             $itemProperties[$key] = $key === 'list' ? ['type' => 'array', 'items' => $string] : $string;
         }
-        // Anthropic structured outputs reject minItems/maxItems on arrays and
-        // an object with no properties; the brief states the counts, the
-        // compiler slices to them, and an item-less archetype has no `items`.
         $properties = [
             'heading'          => $string,
             'heading_emphasis' => $string,
             'lead'             => $string,
             'paragraphs'       => ['type' => 'array', 'items' => $string],
-        ];
-        if ($itemProperties !== []) {
-            $properties['items'] = [
+            'items'            => [
                 'type'  => 'array',
                 'items' => [
                     'type'                 => 'object',
@@ -175,9 +193,7 @@ final class SectionContent
                     'required'             => array_keys($itemProperties),
                     'additionalProperties' => false,
                 ],
-            ];
-        }
-        $properties += [
+            ],
             'image_subject'    => $string,
             'image_context'    => $string,
             'image_style'      => ['type' => 'string', 'enum' => self::IMAGE_STYLES],

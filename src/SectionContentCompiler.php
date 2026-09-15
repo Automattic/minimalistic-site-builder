@@ -34,6 +34,7 @@ final class SectionContentCompiler
         private readonly ?string $crop,
         private readonly string $direction,
         private readonly bool $highlight,
+        private readonly string $specText,
     ) {}
 
     /**
@@ -71,6 +72,7 @@ final class SectionContentCompiler
                 is_string($input['stated_highlight'] ?? null) ? $input['stated_highlight'] : null,
                 $section,
             ),
+            specText: is_array($spec) ? (string) json_encode($spec, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '',
         );
         return $compiler->root();
     }
@@ -343,9 +345,18 @@ final class SectionContentCompiler
         if ($label === '') {
             return '';
         }
-        $href = $this->href($this->str('link_href')) ?? '/#' . $this->slug;
+        $href = $this->href($this->str('link_href')) ?? $this->specMailto();
+        if ($href === null) {
+            return '';
+        }
         $attrs = $center ? ['layout' => ['type' => 'flex', 'justifyContent' => 'center']] : [];
         return $this->wrap('buttons', $attrs, $this->wrap('button', [], '<a href="' . self::h($href) . '">' . self::h($label) . '</a>'));
+    }
+
+    /** A mailto for the first email the site spec states, or null. */
+    private function specMailto(): ?string
+    {
+        return preg_match('/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/', $this->specText, $m) === 1 ? 'mailto:' . $m[0] : null;
     }
 
     private function faqSplit(): string
