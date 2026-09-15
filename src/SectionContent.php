@@ -157,22 +157,27 @@ final class SectionContent
         foreach (self::itemKeys($archetype, $itemPattern) as $key) {
             $itemProperties[$key] = $key === 'list' ? ['type' => 'array', 'items' => $string] : $string;
         }
-        // Anthropic structured outputs reject minItems/maxItems on arrays;
-        // the brief states the counts and the compiler slices to them.
+        // Anthropic structured outputs reject minItems/maxItems on arrays and
+        // an object with no properties; the brief states the counts, the
+        // compiler slices to them, and an item-less archetype has no `items`.
         $properties = [
             'heading'          => $string,
             'heading_emphasis' => $string,
             'lead'             => $string,
             'paragraphs'       => ['type' => 'array', 'items' => $string],
-            'items'            => [
-                'type'     => 'array',
-                'items'    => [
+        ];
+        if ($itemProperties !== []) {
+            $properties['items'] = [
+                'type'  => 'array',
+                'items' => [
                     'type'                 => 'object',
                     'properties'           => $itemProperties,
                     'required'             => array_keys($itemProperties),
                     'additionalProperties' => false,
                 ],
-            ],
+            ];
+        }
+        $properties += [
             'image_subject'    => $string,
             'image_context'    => $string,
             'image_style'      => ['type' => 'string', 'enum' => self::IMAGE_STYLES],

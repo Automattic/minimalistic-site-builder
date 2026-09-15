@@ -134,6 +134,17 @@ test('compiled sections satisfy the catalog, item pattern, and card style contra
     assert_eq([], array_slice(array_values(array_unique($failures)), 0, 40), count($failures) . ' contract failures');
 });
 
+test('every schema encodes as objects the structured-output API accepts', function () {
+    foreach (SectionComposition::ARCHETYPES as $archetype) {
+        foreach ([null, ...ItemPattern::ALL] as $itemPattern) {
+            $json = json_encode(SectionContent::schema($archetype, $itemPattern), JSON_THROW_ON_ERROR);
+            assert_true(!str_contains($json, '"properties":[]'), "{$archetype}: no empty property list");
+            assert_true(!str_contains($json, 'maxItems') && !str_contains($json, 'minItems'), "{$archetype}: no array bounds");
+        }
+    }
+    assert_true(!isset(SectionContent::schema('cta-panel', null)['properties']['items']), 'an item-less archetype has no items field');
+});
+
 test('compiled markup keeps the hooks later steps read', function () {
     $input = content_unit_input('equal-card-grid', 'card', 'flush', 'tinted', 'centered');
     $markup = SectionContentCompiler::compile(content_document('equal-card-grid', 'card'), $input);
