@@ -11,9 +11,12 @@
  * Usage:
  *   php bin/pattern-build.php --fixtures=tests/fixtures/patterns/conference-hub
  *                             [--slug=name] [--from=stage] [--until=stage]
+ *                             [--responses=<file>] [--record=<file>]
  *
  * Everything under the fixture directory is copied into the project as-is, so
- * a fixture may supply as few or as many stages' outputs as it has.
+ * a fixture may supply as few or as many stages' outputs as it has. With
+ * --responses the model is a recording and nothing leaves the machine; with
+ * --record a live run writes the recording a later --responses can replay.
  */
 
 declare(strict_types=1);
@@ -24,6 +27,8 @@ require_once __DIR__ . '/../src/bootstrap.php';
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Patterns\FixtureLoader;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
+use Automattic\SiteBuild\Patterns\RecordingLlm;
+use Automattic\SiteBuild\Patterns\ReplayLlm;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Project;
@@ -44,12 +49,31 @@ if ($fixtures === null || !is_dir($fixtures)) {
     exit(1);
 }
 
-// A fixture run never reaches a stage that sends a request, but the graph
-// still has to be built, and the planning stage takes its transport in the
-// constructor. Building it here keeps --from=plan-site available for a live
-// run without a second entry point.
+// A recording answers every model call, so a replay never needs a key; a
+// live run resolves its transport exactly as bin/build.php does, and can be
+// recorded on the way.
+$responses = $flags['responses'] ?? null;
+$record = $flags['record'] ?? null;
+if ($responses !== null && $record !== null) {
+    fwrite(STDERR, "--responses and --record are exclusive: one replays a recording, the other makes one\n");
+    exit(1);
+}
+if ($responses !== null) {
+    $recording = is_file($responses) ? json_decode((string) file_get_contents($responses), true) : null;
+    if (!is_array($recording)) {
+        fwrite(STDERR, "--responses: {$responses} is not a JSON recording\n");
+        exit(1);
+    }
+    $llm = new ReplayLlm($recording);
+} else {
+    // The same resolution bin/build.php uses: a coding-agent harness when
+    // one is available, the metered API otherwise, SITE_BUILD_LLM to choose.
+    $llm = resolve_llm();
+}
+$recorder = $record !== null ? new RecordingLlm($llm) : null;
+
 $composition = StepComposition::patterns(
-    make_llm(),
+    $recorder ?? $llm,
     new PromptRenderer(__DIR__ . '/../prompts'),
     step_models(),
 );
@@ -100,6 +124,10 @@ try {
 }
 
 Narrator::write(sprintf("\nran in %.2fs\n", microtime(true) - $started));
+if ($recorder !== null) {
+    file_put_contents($record, json_encode($recorder->recording(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+    Narrator::write("recorded: {$record}\n");
+}
 report($project);
 
 function report(Project $project): void
@@ -110,8 +138,11 @@ function report(Project $project): void
 
     $report = $project->readJson(PatternArtifacts::REPORT);
     Narrator::write(sprintf(
-        "report:   %d page(s), %d image(s), %s\n",
+        "report:   %d page(s) (%d composed, %d supplied%s), %d image(s), %s\n",
         $report['pages'] ?? 0,
+        $report['composed'] ?? 0,
+        $report['supplied'] ?? 0,
+        ($report['frozen'] ?? []) === [] ? '' : ', frozen: ' . implode(' ', $report['frozen']),
         $report['media'] ?? 0,
         ($report['passed'] ?? false) ? 'checks passed' : 'checks FAILED',
     ));
