@@ -144,6 +144,9 @@ final class NormalizeInputsStep implements Step
             $settled['slots'] = array_key_exists('slots', $page) ? array_values((array) $page['slots']) : null;
         } else {
             $settled['intent'] = trim((string) $page['intent']);
+            if (array_key_exists('sections', $page) && is_array($page['sections'])) {
+                $settled['sections'] = array_values($page['sections']);
+            }
         }
 
         return $settled;

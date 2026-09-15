@@ -236,3 +236,81 @@ test('the plan schema asks for nothing the model endpoint refuses', function () 
     }
     assert_contains('minItems', $schema, 'the keywords it does accept still carry their constraint');
 });
+
+/**
+ * A Blueprint that declares its section shape is composing to a recipe: the
+ * plan carries that shape through untouched, and a site whose every page is
+ * declared never spends a planning call at all.
+ */
+test('a page that declares its sections keeps them, and asks the model nothing', function () {
+    $project = plan_project(['header', 'columns']);
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['inventory'] = [
+        ['id' => 'neve/hero', 'title' => 'Hero', 'categories' => ['header'], 'content' => '<!-- wp:group /-->'],
+        ['id' => 'neve/cols', 'title' => 'Columns', 'categories' => ['columns'], 'content' => '<!-- wp:columns /-->'],
+    ];
+    $inputs['pages'] = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'intent' => 'Open the site',
+        'sections' => [
+            ['pattern' => 'neve/hero', 'intent' => 'State the offer'],
+            ['category' => 'columns'],
+        ],
+    ]];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+    $seen = null;
+
+    plan_step(plan_llm(['pages' => []], $seen))->run($project);
+
+    assert_eq(null, $seen, 'every page was declared, so the planning call is not worth making');
+
+    $pages = $project->readJson(PatternArtifacts::PLAN)['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq(true, $pages[0]['front']);
+
+    $sections = $pages[0]['sections'];
+    assert_eq(2, count($sections), 'the declared shape is the shape, neither padded nor trimmed');
+    assert_eq('neve/hero', $sections[0]['pattern'], 'a named pattern is pinned');
+    assert_eq('State the offer', $sections[0]['intent']);
+    assert_eq('columns', $sections[1]['category'], 'a section may name only a kind and let the catalogue answer');
+    assert_true(!isset($sections[1]['pattern']), 'nothing is invented for it here');
+    assert_eq('columns', $sections[1]['intent'], 'an undeclared intent falls back to the kind asked for');
+});
+
+/**
+ * A site that mixes the two: the declared page keeps its recipe, the open page
+ * is the only thing the model is asked about.
+ */
+test('only the pages that left their shape open reach the model', function () {
+    $project = plan_project(['header', 'columns']);
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['inventory'] = [
+        ['id' => 'neve/hero', 'title' => 'Hero', 'categories' => ['header'], 'content' => '<!-- wp:group /-->'],
+        ['id' => 'neve/cols', 'title' => 'Columns', 'categories' => ['columns'], 'content' => '<!-- wp:columns /-->'],
+    ];
+    $inputs['pages'] = [
+        ['slug' => 'home', 'title' => 'Home', 'intent' => 'Open the site',
+         'sections' => [['pattern' => 'neve/hero', 'intent' => 'State the offer']]],
+        ['slug' => 'about', 'title' => 'About', 'intent' => 'Who we are'],
+    ];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+    $seen = null;
+
+    $reply = ['pages' => [[
+        'slug' => 'about',
+        'title' => 'About',
+        'description' => 'Who we are',
+        'sections' => [['category' => 'columns', 'pattern' => 'neve/cols', 'intent' => 'The team', 'reason' => 'trust']],
+    ]]];
+    plan_step(plan_llm($reply, $seen))->run($project);
+
+    assert_true(is_string($seen) && str_contains($seen, 'about'), 'the open page was put to the model');
+    assert_true(is_string($seen) && !str_contains($seen, 'State the offer'), 'the declared page was not');
+
+    $pages = $project->readJson(PatternArtifacts::PLAN)['pages'];
+    assert_eq(['home', 'about'], array_column($pages, 'slug'), 'the request order stands');
+    assert_eq('neve/hero', $pages[0]['sections'][0]['pattern'], 'the declared page kept its recipe');
+    assert_eq('neve/cols', $pages[1]['sections'][0]['pattern'], 'the open page got what the model chose');
+});

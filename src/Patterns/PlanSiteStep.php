@@ -87,13 +87,32 @@ final class PlanSiteStep implements Step
         $inventory = $inputs['inventory'] ?? [];
         $ids = self::ids($inventory);
 
+        // A page that declares its own sections has already been given its
+        // shape; the plan's job there is nothing. Only the pages that left the
+        // shape open are put to the model, and a site where every page is
+        // guided never makes the call at all.
+        $guided = self::guided($composed);
+        $open = array_values(array_filter(
+            $composed,
+            static fn (array $p): bool => !isset($guided[(string) $p['slug']]),
+        ));
+
+        // Only when the host asked for pages and declared every one of them.
+        // A request that names no pages still needs the model to choose them.
+        if ($composed !== [] && $open === []) {
+            $project->writeJson(PatternArtifacts::PLAN, [
+                'pages' => self::order($requested, array_values($guided)),
+            ]);
+            return;
+        }
+
         $prompt = $this->renderer->render('pattern-site-plan.md', [
             'facts' => (string) json_encode($inputs['facts'] ?? [], JSON_PRETTY_PRINT),
             'categories' => implode("\n", array_map(static fn (string $c): string => '- ' . $c, $categories)),
             'patterns' => self::catalogue($inventory),
-            'requested_pages' => $composed === []
+            'requested_pages' => $open === []
                 ? 'None. Choose the pages yourself.'
-                : (string) json_encode($composed, JSON_PRETTY_PRINT),
+                : (string) json_encode($open, JSON_PRETTY_PRINT),
             'notes' => trim((string) ($inputs['facts']['notes'] ?? '')) ?: 'None.',
         ]);
 
@@ -116,9 +135,80 @@ final class PlanSiteStep implements Step
             );
         }
 
+        // A guided page keeps the shape the host declared, whatever the model
+        // said about it.
+        foreach ($pages as $index => $page) {
+            $slug = (string) $page['slug'];
+            if (isset($guided[$slug])) {
+                $pages[$index]['sections'] = $guided[$slug]['sections'];
+            }
+        }
+        foreach ($guided as $slug => $page) {
+            if (!in_array($slug, array_column($pages, 'slug'), true)) {
+                $pages[] = $page;
+            }
+        }
+
         $project->writeJson(PatternArtifacts::PLAN, [
             'pages' => $requested === [] ? $pages : self::order($requested, $pages),
         ]);
+    }
+
+    /**
+     * The composed pages whose sections the host declared, keyed by slug.
+     *
+     * A declared section names a category, a pattern, or both. Composition
+     * resolves a named pattern directly and falls back to the category, so a
+     * Blueprint can pin an exact arrangement or ask for a kind of section and
+     * let the theme's catalogue answer.
+     *
+     * @param list<array<string, mixed>> $composed
+     * @return array<string, array<string, mixed>>
+     */
+    private static function guided(array $composed): array
+    {
+        $pages = [];
+
+        foreach ($composed as $page) {
+            $declared = $page['sections'] ?? null;
+            if (!is_array($declared) || $declared === []) {
+                continue;
+            }
+
+            $sections = [];
+            foreach ($declared as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $entry = [
+                    'category' => strtolower(trim((string) ($section['category'] ?? ''))),
+                    'intent' => trim((string) ($section['intent'] ?? '')),
+                    'reason' => 'the Blueprint asked for this section here',
+                ];
+                $pattern = trim((string) ($section['pattern'] ?? ''));
+                if ($pattern !== '') {
+                    $entry['pattern'] = $pattern;
+                }
+                if ($entry['intent'] === '') {
+                    $entry['intent'] = $entry['category'] !== '' ? $entry['category'] : $pattern;
+                }
+                $sections[] = $entry;
+            }
+
+            if ($sections === []) {
+                continue;
+            }
+
+            $slug = (string) $page['slug'];
+            $pages[$slug] = [
+                'slug' => $slug,
+                'title' => (string) ($page['title'] ?? ucfirst($slug)),
+                'description' => trim((string) ($page['intent'] ?? '')),
+                'sections' => $sections,
+            ];
+        }
+
+        return $pages;
     }
 
     /**

@@ -142,6 +142,28 @@ final class HostRequest
         }
 
         if ($hasIntent) {
+            // A composed page may also declare the shape it wants: an ordered
+            // list of sections, each naming a category, a pattern, or both.
+            // Declaring nothing leaves the whole shape to the plan.
+            if (array_key_exists('sections', $page)) {
+                $sections = $page['sections'];
+                if (!is_array($sections) || !array_is_list($sections) || $sections === []) {
+                    $problems[] = sprintf('%s: sections must be a non-empty list; omit the key to let the plan choose', $name);
+                    return true;
+                }
+                foreach ($sections as $position => $section) {
+                    if (!is_array($section)) {
+                        $problems[] = sprintf('%s section %s must be an object', $name, $position);
+                        continue;
+                    }
+                    $category = trim((string) ($section['category'] ?? ''));
+                    $pattern = trim((string) ($section['pattern'] ?? ''));
+                    if ($category === '' && $pattern === '') {
+                        $problems[] = sprintf('%s section %s must name a category, a pattern, or both', $name, $position);
+                    }
+                }
+            }
+
             return true;
         }
 
