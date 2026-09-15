@@ -267,7 +267,9 @@ final class PlanSiteStep implements Step
                             'sections' => [
                                 'type' => 'array',
                                 'minItems' => 1,
-                                'maxItems' => 8,
+                                // No `maxItems`: the structured-output endpoint
+                                // refuses it and fails the whole request, so the
+                                // upper bound is asked for in the prompt instead.
                                 'items' => [
                                     'type' => 'object',
                                     'required' => ['category', 'intent', 'reason'],

@@ -219,3 +219,20 @@ test('a composed page the plan left out stops the build', function () {
     assert_contains('left out', $thrown->getMessage());
     assert_contains('pricing', $thrown->getMessage());
 });
+
+/**
+ * A live Magazine build failed with "For 'array' type, property 'maxItems' is
+ * not supported": the structured-output endpoint takes a subset of JSON Schema
+ * and refuses the whole request over one keyword outside it. The upper bound on
+ * sections is asked for in the prompt, which is why the schema can do without.
+ */
+test('the plan schema asks for nothing the model endpoint refuses', function () {
+    $method = new ReflectionMethod(PlanSiteStep::class, 'schema');
+    $method->setAccessible(true);
+    $schema = (string) json_encode($method->invoke(null, ['hero', 'footer']));
+
+    foreach (['maxItems', 'uniqueItems', 'minimum', 'maximum', 'multipleOf', 'minProperties', 'maxProperties'] as $refused) {
+        assert_true(!str_contains($schema, $refused), "the endpoint refuses {$refused} and fails the whole request");
+    }
+    assert_contains('minItems', $schema, 'the keywords it does accept still carry their constraint');
+});
