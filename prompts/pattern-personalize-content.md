@@ -26,6 +26,10 @@ Each slot is one place on the page. Write one piece of copy for each.
   burgers".
 - `max_words` is a hard limit. Count before you answer. A button that was two
   words is two words wide on the page, and a sentence there breaks the layout.
+- `instruction`, when present, is what the page's author asked for in that
+  slot. Follow it over anything the example suggests.
+- `field`, when present, says what kind of value the slot holds: `text` is
+  copy, `alt` describes an image, `citation` names who said a quote.
 
 {{slots}}
 </slots>
@@ -51,7 +55,7 @@ a field is a reply that gets dropped.
 	Write in the site's own vocabulary. A conference has "Sessions", a
 	consultancy has "Engagements".
 	Headings and buttons carry no final period.
-	Write in {{locale}}.
+	Write every value in {{language}}, headings and button labels included.
 </instructions>
 
 <notes_from_the_owner>
