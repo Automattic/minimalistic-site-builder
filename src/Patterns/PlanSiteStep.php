@@ -27,6 +27,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * Big Sky asks for this shape through a forced tool call and this asks through
  * a JSON schema. The instructions carry over; the rendered request does not,
  * and the two have not been compared.
+ *
+ * A page the host supplied as markup is not the model's to plan. It is carried
+ * through in the requested order with no sections, so compose writes it as it
+ * is; when every page is supplied the model is never asked.
  */
 final class PlanSiteStep implements Step
 {
@@ -63,6 +67,16 @@ final class PlanSiteStep implements Step
         $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
         NormalizeInputsStep::assertVersion($inputs);
 
+        $requested = $inputs['pages'] ?? [];
+        $composed = array_values(array_filter($requested, static fn (array $p): bool => !NormalizeInputsStep::isSupplied($p)));
+
+        // Every page arrived as markup: there is nothing to plan and no
+        // reason to spend a model call finding that out.
+        if ($requested !== [] && $composed === []) {
+            $project->writeJson(PatternArtifacts::PLAN, ['pages' => self::order($requested, [])]);
+            return;
+        }
+
         $categories = self::categories($inputs['inventory'] ?? []);
         if ($categories === []) {
             throw new \RuntimeException(
@@ -70,14 +84,12 @@ final class PlanSiteStep implements Step
             );
         }
 
-        $requested = $inputs['pages'] ?? [];
-
         $prompt = $this->renderer->render('pattern-site-plan.md', [
             'facts' => (string) json_encode($inputs['facts'] ?? [], JSON_PRETTY_PRINT),
             'categories' => implode("\n", array_map(static fn (string $c): string => '- ' . $c, $categories)),
-            'requested_pages' => $requested === []
+            'requested_pages' => $composed === []
                 ? 'None. Choose the pages yourself.'
-                : (string) json_encode($requested, JSON_PRETTY_PRINT),
+                : (string) json_encode($composed, JSON_PRETTY_PRINT),
             'notes' => trim((string) ($inputs['facts']['notes'] ?? '')) ?: 'None.',
         ]);
 
@@ -100,7 +112,59 @@ final class PlanSiteStep implements Step
             );
         }
 
-        $project->writeJson(PatternArtifacts::PLAN, ['pages' => $pages]);
+        $project->writeJson(PatternArtifacts::PLAN, [
+            'pages' => $requested === [] ? $pages : self::order($requested, $pages),
+        ]);
+    }
+
+    /**
+     * The plan in the order the host asked for, supplied pages included.
+     *
+     * The model was shown only the composed pages, so its answer is matched
+     * back by slug. A composed page it left out is a hole in the site, and a
+     * page it invented is not one the host asked for; the first stops the
+     * build, the second is dropped.
+     *
+     * @param list<array<string, mixed>> $requested Settled pages, in order.
+     * @param list<array<string, mixed>> $answered  What the model returned.
+     * @return list<array<string, mixed>>
+     */
+    private static function order(array $requested, array $answered): array
+    {
+        $bySlug = [];
+        foreach ($answered as $page) {
+            $bySlug[(string) $page['slug']] = $page;
+        }
+
+        $pages = [];
+        $missing = [];
+        foreach ($requested as $order => $page) {
+            $slug = (string) $page['slug'];
+            $planned = $bySlug[$slug] ?? null;
+
+            if (!NormalizeInputsStep::isSupplied($page) && $planned === null) {
+                $missing[] = $slug;
+                continue;
+            }
+
+            $pages[] = [
+                'slug' => $slug,
+                'title' => (string) $page['title'],
+                'front' => $order === 0,
+                'menu_order' => $order * 10,
+                'description' => (string) ($planned['description'] ?? ''),
+                'sections' => $planned['sections'] ?? [],
+                'supplied' => NormalizeInputsStep::isSupplied($page),
+            ];
+        }
+
+        if ($missing !== []) {
+            throw new \RuntimeException(
+                'The plan left out pages the host asked for: ' . implode(', ', $missing)
+            );
+        }
+
+        return $pages;
     }
 
     /**

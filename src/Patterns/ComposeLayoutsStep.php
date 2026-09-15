@@ -50,9 +50,7 @@ final class ComposeLayoutsStep implements Step
         $plan = $project->readJson(PatternArtifacts::PLAN);
 
         $inventory = self::byId($inputs['inventory'] ?? []);
-        if ($inventory === []) {
-            throw new \RuntimeException('No inventory was supplied, so there is nothing to compose from.');
-        }
+        $supplied = self::suppliedMarkup($inputs['pages'] ?? []);
 
         $layouts = [];
         $provenance = [];
@@ -60,6 +58,27 @@ final class ComposeLayoutsStep implements Step
 
         foreach ($plan['pages'] ?? [] as $page) {
             $slug = (string) ($page['slug'] ?? '');
+
+            // A supplied page is the host's markup as it is. It is written as
+            // one section with no pattern behind it, so every later stage reads
+            // it the way it reads a composed page, and its provenance says a
+            // Blueprint wrote it rather than the inventory.
+            if (!empty($page['supplied'])) {
+                if (!isset($supplied[$slug])) {
+                    throw new \RuntimeException(sprintf('The plan marks "%s" as supplied but the request holds no markup for it.', $slug));
+                }
+                $layouts[] = [
+                    'slug' => $slug,
+                    'provenance' => 'blueprint',
+                    'sections' => [['pattern' => null, 'content' => $supplied[$slug]]],
+                ];
+                continue;
+            }
+
+            if ($inventory === []) {
+                throw new \RuntimeException('No inventory was supplied, so there is nothing to compose from.');
+            }
+
             $sections = [];
 
             foreach ($page['sections'] ?? [] as $index => $section) {
@@ -87,7 +106,7 @@ final class ComposeLayoutsStep implements Step
                 ];
             }
 
-            $layouts[] = ['slug' => $slug, 'sections' => $sections];
+            $layouts[] = ['slug' => $slug, 'provenance' => 'composed', 'sections' => $sections];
         }
 
         // Fail closed, and name every gap rather than the first. A planner
@@ -151,6 +170,24 @@ final class ComposeLayoutsStep implements Step
         sort($matches);
 
         return $matches[0];
+    }
+
+    /**
+     * The markup of every supplied page, by slug.
+     *
+     * @param list<array<string, mixed>> $pages
+     * @return array<string, string>
+     */
+    private static function suppliedMarkup(array $pages): array
+    {
+        $markup = [];
+        foreach ($pages as $page) {
+            if (NormalizeInputsStep::isSupplied($page)) {
+                $markup[(string) $page['slug']] = (string) $page['markup'];
+            }
+        }
+
+        return $markup;
     }
 
     /**

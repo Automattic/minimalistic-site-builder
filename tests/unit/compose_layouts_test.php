@@ -163,3 +163,41 @@ test('provenance records the page, intent and pattern of every section', functio
     assert_eq('Hero', $record['intent']);
     assert_eq('theme/hero', $record['pattern']);
 });
+
+/**
+ * A supplied page is the host's markup, written as one section behind no
+ * pattern. Its provenance says a Blueprint wrote it, and it is never held
+ * against the inventory. A composed page beside it still composes.
+ */
+test('a supplied page is laid out as its own markup with blueprint provenance', function () {
+    $markup = '<!-- wp:paragraph --><p>Approved legal copy.</p><!-- /wp:paragraph -->';
+    $project = compose_project(
+        [['id' => 'theme/hero', 'categories' => ['hero'], 'content' => '<!-- wp:group /-->']],
+        [['slug' => 'legal', 'title' => 'Legal', 'front' => true, 'menu_order' => 0, 'sections' => [], 'supplied' => true]],
+    );
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['pages'] = [['slug' => 'legal', 'title' => 'Legal', 'markup' => $markup, 'slots' => []]];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+
+    (new ComposeLayoutsStep())->run($project);
+
+    $layout = $project->readJson(PatternArtifacts::LAYOUTS)['pages'][0];
+    assert_eq('blueprint', $layout['provenance']);
+    assert_eq($markup, $layout['sections'][0]['content']);
+    assert_eq(null, $layout['sections'][0]['pattern']);
+    assert_eq([], $project->readJson(PatternArtifacts::PROVENANCE)['sections']);
+});
+
+test('a site of supplied pages composes with no inventory at all', function () {
+    $project = compose_project(
+        [],
+        [['slug' => 'legal', 'title' => 'Legal', 'front' => true, 'menu_order' => 0, 'sections' => [], 'supplied' => true]],
+    );
+    $inputs = $project->readJson(PatternArtifacts::NORMALIZED);
+    $inputs['pages'] = [['slug' => 'legal', 'title' => 'Legal', 'markup' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->', 'slots' => null]];
+    $project->writeJson(PatternArtifacts::NORMALIZED, $inputs);
+
+    (new ComposeLayoutsStep())->run($project);
+
+    assert_eq('blueprint', $project->readJson(PatternArtifacts::LAYOUTS)['pages'][0]['provenance']);
+});
