@@ -185,8 +185,10 @@ test('compiled markup drops unsafe links and scripts', function () {
     $doc = content_document('feature-row-hairlines', null);
     $doc['paragraphs'] = ['Call <a href="https://evil.example/">us</a> or <a href="/menu/">see the menu</a> <script>x()</script>'];
     $doc['link_href'] = 'javascript:alert(1)';
+    $doc['lead'] = 'amber glass<br/>380 × 150 mm';
     $markup = SectionContentCompiler::compile($doc, $input);
 
+    assert_contains('amber glass<br>380 × 150 mm', $markup, 'line breaks survive as br');
     assert_true(!str_contains($markup, 'evil.example'), 'external link dropped');
     assert_contains('Call us or <a href="/menu/">see the menu</a>', $markup);
     assert_true(!str_contains($markup, '<script'), 'script escaped');

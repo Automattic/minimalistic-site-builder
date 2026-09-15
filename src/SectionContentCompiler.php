@@ -840,7 +840,8 @@ final class SectionContentCompiler
     /** Escape text while keeping em, strong, and safe links. */
     private function inline(string $text): string
     {
-        $parts = preg_split('~(<(?:/?(?:em|strong)|span class="emph"|/span|a href="[^"]*"|/a)>)~', $text, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$text];
+        $text = preg_replace('~<br\s*/?>~i', '<br>', $text) ?? $text;
+        $parts = preg_split('~(<(?:/?(?:em|strong)|br|span class="emph"|/span|a href="[^"]*"|/a)>)~', $text, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$text];
         $out = '';
         $open = false;
         $dropped = false;
