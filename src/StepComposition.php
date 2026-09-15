@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Patterns\ComposeLayoutsStep;
 use Automattic\SiteBuild\Patterns\ExportBundleStep;
+use Automattic\SiteBuild\Patterns\GenerateMediaStep;
 use Automattic\SiteBuild\Patterns\NormalizeInputsStep;
 use Automattic\SiteBuild\Patterns\PlanSiteStep;
 use Automattic\SiteBuild\Patterns\PatternArtifacts;
@@ -128,14 +129,21 @@ final class StepComposition
      * caller who runs past the extracted prefix is told which stage is missing
      * rather than handed an empty bundle.
      */
-    public static function patterns(Llm $llm, PromptRenderer $renderer, array $models = []): self
-    {
+    public static function patterns(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        ?ImageClient $images = null,
+    ): self {
         return new self(
             [
                 new NormalizeInputsStep(),
                 new PlanSiteStep($llm, $renderer, $models['plan-site'] ?? null),
                 new ComposeLayoutsStep(),
                 new PersonalizeContentStep($llm, $renderer, $models['personalize-content'] ?? null),
+                // Without a transport this makes nothing and says so, which is
+                // what a fixture run needs: offline, and the same every time.
+                new GenerateMediaStep($images),
                 new ResolveMediaStep(),
                 new ExportBundleStep(),
             ],

@@ -112,6 +112,9 @@ final class NormalizeInputsStep implements Step
             'inventory' => $inventory,
             'pages' => array_map([self::class, 'page'], $request['pages'] ?? []),
             'navigation' => $request['navigation'] ?? [],
+            'image_generation' => is_array($request['image_generation'] ?? null)
+                ? $request['image_generation']
+                : ['enabled' => true, 'scope' => 'composed'],
             'facts' => $facts,
             'capabilities' => [
                 'classes' => HostRequest::strings($request['capabilities']['classes'] ?? []),

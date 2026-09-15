@@ -11,12 +11,16 @@
  * Usage:
  *   php bin/pattern-build.php --fixtures=tests/fixtures/patterns/conference-hub
  *                             [--slug=name] [--from=stage] [--until=stage]
- *                             [--responses=<file>] [--record=<file>]
+ *                             [--responses=<file>] [--record=<file>] [--images]
  *
  * Everything under the fixture directory is copied into the project as-is, so
  * a fixture may supply as few or as many stages' outputs as it has. With
  * --responses the model is a recording and nothing leaves the machine; with
  * --record a live run writes the recording a later --responses can replay.
+ *
+ * --images makes the photographs too, replacing the theme's own. It needs an
+ * image transport and it spends real money, so it is off by default and is
+ * refused outright on a replay, which has to stay offline.
  */
 
 declare(strict_types=1);
@@ -72,10 +76,21 @@ if ($responses !== null) {
 }
 $recorder = $record !== null ? new RecordingLlm($llm) : null;
 
+// Pictures cost money and a replay must stay offline, so the transport is only
+// built for a live run, and only when --images asks for it.
+$images = null;
+if (isset($flags['images']) && $flags['images'] !== 'no' && $responses !== null) {
+    throw new RuntimeException('--images cannot be combined with offline --responses replay.');
+}
+if (isset($flags['images']) && $flags['images'] !== 'no' && $responses === null) {
+    $images = make_image_client();
+}
+
 $composition = StepComposition::patterns(
     $recorder ?? $llm,
     new PromptRenderer(__DIR__ . '/../prompts'),
     step_models(),
+    $images,
 );
 $pipeline = new Pipeline($composition->steps(), $composition->seeds());
 

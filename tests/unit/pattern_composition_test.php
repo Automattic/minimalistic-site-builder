@@ -12,6 +12,7 @@ const PATTERN_STAGES = [
     'plan-site',
     'compose-layouts',
     'personalize-content',
+    'generate-media',
     'resolve-media',
     'export-bundle',
 ];

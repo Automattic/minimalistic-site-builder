@@ -75,7 +75,7 @@ final class ResolveMediaStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [PatternArtifacts::NORMALIZED, PatternArtifacts::PAGES],
-            writes: [PatternArtifacts::MEDIA],
+            writes: [PatternArtifacts::MEDIA, 'warnings.json'],
             concurrent: false,
         );
     }
@@ -93,7 +93,9 @@ final class ResolveMediaStep implements Step
             throw new \RuntimeException('No page was written, so there is no media to account for.');
         }
 
+        $records = $project->exists(GenerateMediaStep::MANIFEST) ? $project->readJson(GenerateMediaStep::MANIFEST) : [];
         $imports = [];
+        $generated = [];
         $unknown = [];
         $links = [];
         $avatars = [];
@@ -105,6 +107,7 @@ final class ResolveMediaStep implements Step
                 match (self::classify($source, $theme)) {
                     'theme' => null,
                     'import' => $imports[$source]['pages'][] = $slug,
+                    'generated' => $generated[$source]['pages'][] = $slug,
                     default => $unknown[] = $where,
                 };
             }
@@ -135,7 +138,7 @@ final class ResolveMediaStep implements Step
         // does not exist yet.
         $project->writeJson(PatternArtifacts::MEDIA, [
             'version' => self::MEDIA_VERSION,
-            'images' => self::images($imports, $avatars, $facts),
+            'images' => array_map(static fn (array $entry): array => isset($records[$entry['source']]) ? array_merge($entry, $records[$entry['source']]) : $entry, self::images($imports, $generated, $avatars, $facts)),
         ]);
 
         $project->replaceWarnings($this->id(), self::warnings($links, $avatars, $facts));
@@ -145,11 +148,12 @@ final class ResolveMediaStep implements Step
      * What the host has to import, each named once however many pages use it.
      *
      * @param array<string, array{pages: list<string>}> $imports
+     * @param array<string, array{pages: list<string>}> $generated
      * @param list<string>                              $avatars
      * @param array<string, mixed>                      $facts
      * @return list<array<string, mixed>>
      */
-    private static function images(array $imports, array $avatars, array $facts): array
+    private static function images(array $imports, array $generated, array $avatars, array $facts): array
     {
         $images = [];
 
@@ -158,6 +162,17 @@ final class ResolveMediaStep implements Step
                 'source' => $source,
                 'pages' => array_values(array_unique($found['pages'])),
                 'role' => 'content',
+            ];
+        }
+
+        // Made by this build and already sitting in the bundle. `file` says so:
+        // the host reads it from beside the manifest instead of fetching it.
+        foreach ($generated as $source => $found) {
+            $images[] = [
+                'source' => $source,
+                'file' => $source,
+                'pages' => array_values(array_unique($found['pages'])),
+                'role' => 'generated',
             ];
         }
 
@@ -229,6 +244,13 @@ final class ResolveMediaStep implements Step
      */
     private static function classify(string $source, string $theme): string
     {
+        // A picture `generate-media` made and wrote into the bundle. It is an
+        // import like any other, except the host reads it from the bundle
+        // rather than fetching it.
+        if (preg_match('~^media/[a-f0-9]{24}\.jpg$~D', $source) === 1) {
+            return 'generated';
+        }
+
         if ($theme !== '' && str_contains($source, '/themes/' . $theme . '/')) {
             return 'theme';
         }
@@ -252,7 +274,7 @@ final class ResolveMediaStep implements Step
 
         preg_match_all('/\ssrc="([^"]+)"/i', $markup, $matches);
         foreach ($matches[1] as $source) {
-            $sources[] = $source;
+            $sources[] = html_entity_decode($source, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         }
 
         $document = BlockMarkup::parse($markup);
@@ -261,7 +283,8 @@ final class ResolveMediaStep implements Step
                 continue;
             }
 
-            $url = trim((string) ($document->attrs($index)['url'] ?? ''));
+            $field = BlockText::coreName($document->name($index)) === 'core/media-text' ? 'mediaUrl' : 'url';
+            $url = trim((string) ($document->attrs($index)[$field] ?? ''));
             if ($url !== '') {
                 $sources[] = $url;
             }
