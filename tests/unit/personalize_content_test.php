@@ -468,7 +468,8 @@ test('a frozen page is written untouched with no model call', function () {
     assert_eq(personalize_supplied_markup(), $page['content']);
     assert_eq(true, $page['frozen']);
     assert_eq(0, count($prompts));
-    assert_contains('contact: frozen by the host', (string) json_encode($project->readJson('warnings.json')));
+    $warnings = $project->exists('warnings.json') ? (string) json_encode($project->readJson('warnings.json')) : '';
+    assert_eq(false, str_contains($warnings, 'contact'));
 });
 
 /**

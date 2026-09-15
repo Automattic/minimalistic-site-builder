@@ -169,7 +169,7 @@ final class PersonalizeContentStep implements Step
             return [
                 'slots' => 0,
                 'frozen' => true,
-                'warnings' => [sprintf('%s: frozen by the host, so nothing on it was written', $slug)],
+                'warnings' => [],
             ];
         }
 
